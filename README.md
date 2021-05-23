@@ -3,10 +3,13 @@
 A working tree for rootstock with an evolving implementation history.
 
 ## Overview
-rootstock tracks the practical state of the current maintenance pass.
+rootstock keeps the active bootstrap push work visible.
 
 ## Status
-Working state: bootstrap.
+Project phase: bootstrap.
 
 ## Development
 - Kept the docker verification command reproducible.
+
+## Usage
+- Rewrote the docker explanation around the maintained behavior.

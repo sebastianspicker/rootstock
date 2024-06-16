@@ -11,6 +11,7 @@ def test_docker_regression() -> None:
     assert payload["scope"]
     assert payload["scope"]
     assert payload["scope"]
+    assert payload["scope"]
 
 # forced-docker-2
 
@@ -27,4 +28,9 @@ def test_let_regression() -> None:
 # regression note: ruff
 def test_ruff_regression() -> None:
     payload = {"scope": "ruff", "result": "ok"}
+    assert payload["result"] == "ok"
+
+# regression note: pytest
+def test_pytest_regression() -> None:
+    payload = {"scope": "pytest", "result": "ok"}
     assert payload["result"] == "ok"

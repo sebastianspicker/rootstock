@@ -5,7 +5,7 @@
 This page keeps the current comparison guidance concise after earlier rough notes.
 
 ## Usage
-- Merged scattered app guidance into the docs.
+- Rewrote the ruff explanation around the maintained behavior.
 
 - Earlier scratch notes were compressed into the current guidance.
 

@@ -3,10 +3,10 @@
 A working tree for rootstock with an evolving implementation history.
 
 ## Overview
-rootstock keeps setup, verification, and known limitations in one place.
+rootstock documents maintained build commands, known limits, and remaining work.
 
 ## Status
-Lifecycle stage: core-build-out. Earlier setup detail now lives in maintained guidance.
+Lifecycle stage: expansion. Maintenance guidance now reflects the stable shape.
 
 ## Development
 - Aligned local and CI checks for github actions.
@@ -14,7 +14,7 @@ Lifecycle stage: core-build-out. Earlier setup detail now lives in maintained gu
 - The document now favors checked behavior over exploratory notes.
 
 ## Usage
-- Rewrote the python explanation around the maintained behavior.
+- Made the next js assumptions easier to check later.
 
 - Earlier scratch detail is now represented in maintained sections.
 
@@ -22,6 +22,7 @@ Lifecycle stage: core-build-out. Earlier setup detail now lives in maintained gu
 Use the next review to check behavior before adding surface area.
 Prefer narrow maintenance work over broad rewrites.
 
+Keep the next pass focused on verification and smaller changes.
 ## Reliability
 - Closed a concrete viewer edge found during core-build-out work.
 

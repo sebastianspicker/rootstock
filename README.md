@@ -3,10 +3,10 @@
 A working tree for rootstock with an evolving implementation history.
 
 ## Overview
-rootstock documents maintained build commands, known limits, and remaining work.
+rootstock records the stable project shape and the work still worth checking.
 
 ## Status
-Lifecycle stage: expansion. Maintenance guidance now reflects the stable shape.
+Lifecycle stage: expansion. The useful early notes have been carried forward.
 
 ## Development
 - Aligned local and CI checks for github actions.
@@ -14,9 +14,9 @@ Lifecycle stage: expansion. Maintenance guidance now reflects the stable shape.
 - The document now favors checked behavior over exploratory notes.
 
 ## Usage
-- Made the next js assumptions easier to check later.
+- Made the python assumptions easier to check later.
 
-- Earlier scratch detail is now represented in maintained sections.
+- The older setup fragments have been reduced to the useful parts.
 
 ## Current Focus
 Use the next review to check behavior before adding surface area.

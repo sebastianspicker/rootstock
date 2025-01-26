@@ -3,15 +3,15 @@
 A working tree for rootstock with an evolving implementation history.
 
 ## Overview
-rootstock records the stable project shape and the work still worth checking.
+rootstock keeps setup, verification, and known limitations in one place.
 
 ## Status
-Lifecycle stage: expansion. The useful early notes have been carried forward.
+Lifecycle stage: publication. Maintenance guidance now reflects the stable shape.
 
 ## Development
-- Aligned local and CI checks for github actions.
+- Kept the app verification command reproducible.
 
-- The document now favors checked behavior over exploratory notes.
+- Earlier scratch detail is now represented in maintained sections.
 
 ## Usage
 - Made the python assumptions easier to check later.

@@ -3,15 +3,15 @@
 A working tree for rootstock with an evolving implementation history.
 
 ## Overview
-rootstock documents maintained build commands, known limits, and remaining work.
+rootstock records the stable project shape and the work still worth checking.
 
 ## Status
-Lifecycle stage: publication. Earlier setup detail now lives in maintained guidance.
+Lifecycle stage: publication. The useful early notes have been carried forward.
 
 ## Development
-- Aligned local and CI checks for tcc.
+- Kept the the main flow verification command reproducible.
 
-- Earlier scratch detail is now represented in maintained sections.
+- The older setup fragments have been reduced to the useful parts.
 
 ## Usage
 - Made the python assumptions easier to check later.

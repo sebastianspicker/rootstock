@@ -11,7 +11,7 @@ This page keeps the current bug_report guidance concise after earlier rough note
 Early notes are still uneven and may be folded into clearer sections later.
 
 ## Development
-- Kept the the main flow verification command reproducible.
+- Reduced surprise in the the main flow release checks.
 
 - Earlier scratch notes were compressed into the current guidance.
 

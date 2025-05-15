@@ -19,3 +19,8 @@ Some setup details still depend on the current local workflow and may change aga
 - Turned the first scoring sketch into something runnable.
 
 - Earlier scratch notes were compressed into the current guidance.
+
+## Reliability
+- Tightened build where the earlier behavior was brittle.
+
+- Earlier scratch notes were compressed into the current guidance.

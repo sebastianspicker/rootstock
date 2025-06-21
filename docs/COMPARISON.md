@@ -5,7 +5,7 @@
 This page keeps the current comparison guidance concise after earlier rough notes.
 
 ## Usage
-- Made the build assumptions easier to check later.
+- Made the the main flow assumptions easier to check later.
 
 - Earlier scratch notes were compressed into the current guidance.
 

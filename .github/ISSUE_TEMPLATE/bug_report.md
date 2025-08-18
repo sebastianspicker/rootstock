@@ -13,7 +13,7 @@ This page keeps the current bug_report guidance concise after earlier rough note
 Early notes are still uneven and may be folded into clearer sections later.
 
 ## Development
-- Aligned local and CI checks for the main flow.
+- Kept the the main flow verification command reproducible.
 
 - Earlier scratch notes were compressed into the current guidance.
 

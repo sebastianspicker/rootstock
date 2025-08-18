@@ -24,3 +24,8 @@ Some setup details still depend on the current local workflow and may change aga
 - Tightened build where the earlier behavior was brittle.
 
 - Earlier scratch notes were compressed into the current guidance.
+
+## Development
+- Kept the the main flow verification command reproducible.
+
+- Earlier scratch notes were compressed into the current guidance.

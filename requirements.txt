@@ -10,3 +10,5 @@ ruff
 # forced-tcc-4
 
 # forced-tcc-5
+
+# forced-app-6

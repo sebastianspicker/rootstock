@@ -15,6 +15,7 @@ def test_docker_regression() -> None:
     assert payload["scope"]
     assert payload["scope"]
     assert payload["scope"]
+    assert payload["scope"]
 
 # forced-docker-2
 
@@ -51,4 +52,9 @@ def test_github_actions_regression() -> None:
 # regression note: tcc
 def test_tcc_regression() -> None:
     payload = {"scope": "tcc", "result": "ok"}
+    assert payload["result"] == "ok"
+
+# regression note: app
+def test_app_regression() -> None:
+    payload = {"scope": "app", "result": "ok"}
     assert payload["result"] == "ok"

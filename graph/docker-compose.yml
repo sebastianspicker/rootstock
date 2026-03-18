@@ -12,6 +12,7 @@ services:
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
+      - ./browser:/import/rootstock:ro   # Browser guide, GraSS, saved queries
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
       interval: 10s

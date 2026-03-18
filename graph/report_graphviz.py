@@ -22,12 +22,13 @@ Edge styles:
 from __future__ import annotations
 
 import argparse
-import re
 import subprocess
 import sys
 from pathlib import Path
 
 from neo4j import GraphDatabase
+
+from utils import sanitize_id, truncate
 
 
 # ── Color / Style Tables ──────────────────────────────────────────────────────
@@ -49,51 +50,57 @@ INFERRED_RELS = {"CAN_INJECT_INTO", "CHILD_INHERITS_TCC", "CAN_SEND_APPLE_EVENT"
 MAX_LABEL_LEN = 35
 
 
-def _safe_dot_id(text: str) -> str:
-    """Convert arbitrary text to a safe DOT identifier."""
-    return re.sub(r"[^a-zA-Z0-9_]", "_", str(text))
-
-
-def _truncate(text: str, max_len: int = MAX_LABEL_LEN) -> str:
-    return text if len(text) <= max_len else text[:max_len - 1] + "…"
-
-
 # ── Neo4j Fetch ───────────────────────────────────────────────────────────────
 
-def fetch_graph_data(driver) -> tuple[list[dict], list[dict]]:
+DEFAULT_NODE_LIMIT = 500
+DEFAULT_EDGE_LIMIT = 2000
+
+
+def fetch_graph_data(
+    driver,
+    node_limit: int = DEFAULT_NODE_LIMIT,
+    edge_limit: int = DEFAULT_EDGE_LIMIT,
+) -> tuple[list[dict], list[dict]]:
     """
     Fetch nodes and relationships from Neo4j.
 
     Returns:
         (nodes, edges) — each a list of property dicts.
     """
+    label_filter = " OR ".join(f"n:{label}" for label in NODE_COLORS)
+    edge_label_a = " OR ".join(f"a:{label}" for label in NODE_COLORS)
+    edge_label_b = " OR ".join(f"b:{label}" for label in NODE_COLORS)
+
     with driver.session() as session:
-        node_result = session.run("""
+        node_result = session.run(f"""
             MATCH (n)
-            WHERE n:Application OR n:TCC_Permission OR n:Entitlement
-               OR n:XPC_Service OR n:LaunchItem OR n:MDM_Profile
-               OR n:User OR n:Keychain_Item
+            WHERE {label_filter}
             RETURN elementId(n) AS id,
                    labels(n)[0]  AS label,
                    coalesce(n.name, n.display_name, n.label, n.identifier, '?') AS display,
                    n.bundle_id   AS bundle_id
-            LIMIT 500
-        """)
+            LIMIT $limit
+        """, {"limit": node_limit})
         nodes = [dict(r) for r in node_result]
 
-        edge_result = session.run("""
+        edge_result = session.run(f"""
             MATCH (a)-[r]->(b)
-            WHERE (a:Application OR a:TCC_Permission OR a:Entitlement OR a:LaunchItem
-                   OR a:XPC_Service OR a:MDM_Profile OR a:User OR a:Keychain_Item)
-              AND (b:Application OR b:TCC_Permission OR b:Entitlement OR b:LaunchItem
-                   OR b:XPC_Service OR b:MDM_Profile OR b:User OR b:Keychain_Item)
+            WHERE ({edge_label_a})
+              AND ({edge_label_b})
             RETURN elementId(a) AS src_id,
                    elementId(b) AS dst_id,
                    type(r) AS rel_type,
                    coalesce(r.inferred, false) AS inferred
-            LIMIT 2000
-        """)
+            LIMIT $limit
+        """, {"limit": edge_limit})
         edges = [dict(r) for r in edge_result]
+
+    if len(nodes) == node_limit:
+        print(f"Warning: node limit reached ({node_limit}). Graph may be truncated. "
+              f"Use --node-limit to increase.", file=sys.stderr)
+    if len(edges) == edge_limit:
+        print(f"Warning: edge limit reached ({edge_limit}). Graph may be truncated. "
+              f"Use --edge-limit to increase.", file=sys.stderr)
 
     return nodes, edges
 
@@ -130,7 +137,7 @@ def generate_dot(nodes: list[dict], edges: list[dict]) -> str:
         bundle = node.get("bundle_id") or ""
 
         # Build unique dot id
-        base_id = _safe_dot_id(bundle if bundle else display)
+        base_id = sanitize_id(bundle if bundle else display)
         dot_id = base_id
         counter = 0
         while dot_id in seen_dot_ids:
@@ -140,7 +147,7 @@ def generate_dot(nodes: list[dict], edges: list[dict]) -> str:
         id_map[raw_id] = dot_id
 
         color = NODE_COLORS.get(node_type, "white")
-        label = _truncate(display)
+        label = truncate(display, MAX_LABEL_LEN)
         shape = "box" if node_type == "Application" else "ellipse"
         lines.append(
             f'  {dot_id} [label="{label}" fillcolor="{color}" shape={shape}]'
@@ -204,6 +211,14 @@ def main() -> None:
         choices=["png", "svg"],
         help="Auto-render to image using `dot` command (requires Graphviz)",
     )
+    parser.add_argument(
+        "--node-limit", type=int, default=DEFAULT_NODE_LIMIT,
+        help=f"Max nodes to fetch (default: {DEFAULT_NODE_LIMIT})",
+    )
+    parser.add_argument(
+        "--edge-limit", type=int, default=DEFAULT_EDGE_LIMIT,
+        help=f"Max edges to fetch (default: {DEFAULT_EDGE_LIMIT})",
+    )
     args = parser.parse_args()
 
     driver = GraphDatabase.driver(args.neo4j, auth=(args.username, args.password))
@@ -214,7 +229,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f"Fetching graph data from {args.neo4j}…", file=sys.stderr)
-    nodes, edges = fetch_graph_data(driver)
+    nodes, edges = fetch_graph_data(driver, args.node_limit, args.edge_limit)
     driver.close()
 
     print(f"  {len(nodes)} nodes, {len(edges)} edges", file=sys.stderr)

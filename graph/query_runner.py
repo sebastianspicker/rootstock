@@ -31,6 +31,8 @@ from typing import Any
 from neo4j import GraphDatabase
 from tabulate import tabulate
 
+from utils import first_cypher_statement, list_or_str, run_query
+
 
 # ── Query Discovery ───────────────────────────────────────────────────────────
 
@@ -48,9 +50,9 @@ def _parse_header(cypher: str) -> dict[str, str]:
     for line in cypher.splitlines():
         line = line.strip()
         if not line.startswith("//"):
-            # Stop at first non-comment, non-empty line
-            if line and not line.startswith("//"):
+            if line:  # non-empty, non-comment → stop parsing header
                 break
+            continue  # blank line → skip
         m = _HEADER_RE.match(line)
         if m:
             key = m.group("key").lower().replace(" ", "_")
@@ -58,25 +60,37 @@ def _parse_header(cypher: str) -> dict[str, str]:
     return meta
 
 
+def _read_header_only(path: Path) -> str:
+    """Read just the comment header of a .cypher file (stops at first Cypher line)."""
+    lines = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("//") or not stripped:
+            lines.append(line)
+        else:
+            break
+    return "\n".join(lines)
+
+
 def discover_queries() -> list[dict]:
     """
     Scan QUERIES_DIR for all .cypher files and return a sorted list of
-    query descriptors (id, filename, metadata).
+    query descriptors (id, filename, metadata). Cypher bodies are lazy-loaded
+    on first access via load_cypher().
     """
     queries: list[dict] = []
     for path in sorted(QUERIES_DIR.glob("*.cypher")):
-        # Skip schema/seed files in subdirs
         if path.parent.name != "queries":
             continue
         stem = path.stem  # e.g., "01-injectable-fda-apps"
         qid = stem.split("-")[0]  # e.g., "01"
-        cypher = path.read_text(encoding="utf-8")
-        meta = _parse_header(cypher)
+        header = _read_header_only(path)
+        meta = _parse_header(header)
         queries.append({
             "id": qid,
             "filename": path.name,
             "path": path,
-            "cypher": cypher,
+            "cypher": None,  # lazy-loaded by load_cypher()
             "name": meta.get("name", stem),
             "purpose": meta.get("purpose", ""),
             "category": meta.get("category", "Unknown"),
@@ -84,6 +98,13 @@ def discover_queries() -> list[dict]:
             "parameters": meta.get("parameters", "none"),
         })
     return queries
+
+
+def load_cypher(query: dict) -> str:
+    """Load and cache the full Cypher body for a query descriptor."""
+    if query["cypher"] is None:
+        query["cypher"] = query["path"].read_text(encoding="utf-8")
+    return query["cypher"]
 
 
 def find_query(queries: list[dict], query_id: str) -> dict | None:
@@ -96,19 +117,6 @@ def find_query(queries: list[dict], query_id: str) -> dict | None:
 
 
 # ── Query Execution ───────────────────────────────────────────────────────────
-
-def _first_cypher_statement(cypher: str) -> str:
-    """Extract the first executable Cypher statement from a file."""
-    for stmt in cypher.split(";"):
-        stripped = stmt.strip()
-        non_comment = "\n".join(
-            line for line in stripped.splitlines()
-            if not line.strip().startswith("//")
-        ).strip()
-        if non_comment:
-            return stripped
-    return cypher.strip()
-
 
 def _parse_params(param_args: list[str]) -> dict[str, Any]:
     """
@@ -132,27 +140,14 @@ def _parse_params(param_args: list[str]) -> dict[str, Any]:
     return params
 
 
-def run_query(session, cypher: str, params: dict | None = None) -> list[dict]:
-    """Execute a Cypher statement and return rows as list of dicts."""
-    result = session.run(cypher, params or {})
-    return [dict(r) for r in result]
-
-
 # ── Output Formatters ─────────────────────────────────────────────────────────
-
-def _list_or_str(value: Any) -> str:
-    if isinstance(value, list):
-        return ", ".join(str(v) for v in value)
-    if value is None:
-        return ""
-    return str(value)
 
 
 def format_table(rows: list[dict]) -> str:
     if not rows:
         return "(no results)"
     headers = list(rows[0].keys())
-    table_rows = [[_list_or_str(row.get(h)) for h in headers] for row in rows]
+    table_rows = [[list_or_str(row.get(h), "") for h in headers] for row in rows]
     return tabulate(table_rows, headers=headers, tablefmt="simple")
 
 
@@ -173,7 +168,7 @@ def format_csv(rows: list[dict]) -> str:
     writer = csv.DictWriter(buf, fieldnames=headers, extrasaction="ignore")
     writer.writeheader()
     for row in rows:
-        writer.writerow({k: _list_or_str(v) for k, v in row.items()})
+        writer.writerow({k: list_or_str(v, "") for k, v in row.items()})
     return buf.getvalue()
 
 
@@ -186,7 +181,6 @@ FORMATTERS = {
 
 # ── List Command ──────────────────────────────────────────────────────────────
 
-_SEVERITY_ORDER = {"Critical": 0, "High": 1, "Informational": 2, "Unknown": 3}
 _CATEGORY_COLOURS = {
     "Red Team":  "\033[91m",  # red
     "Blue Team": "\033[94m",  # blue
@@ -258,7 +252,7 @@ def cmd_run(
                 print(f"    {q['purpose']}")
             print(f"{'─' * 60}")
 
-            stmt = _first_cypher_statement(q["cypher"])
+            stmt = first_cypher_statement(load_cypher(q))
             try:
                 rows = run_query(session, stmt, params)
                 if rows:

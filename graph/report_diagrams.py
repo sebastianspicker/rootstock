@@ -7,21 +7,7 @@ and return formatted diagram strings suitable for embedding in Markdown.
 
 from __future__ import annotations
 
-import re
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def sanitize_mermaid_id(text: str) -> str:
-    """Convert arbitrary strings to safe Mermaid node IDs (alphanumeric + underscore)."""
-    if not text:
-        return "node"
-    return re.sub(r"[^a-zA-Z0-9_]", "_", text)
-
-
-def _truncate(text: str, max_len: int = 30) -> str:
-    """Truncate long labels for diagram readability."""
-    return text if len(text) <= max_len else text[:max_len - 1] + "…"
+from utils import sanitize_id as sanitize_mermaid_id, truncate as _truncate
 
 
 # ── TCC Node Detection ────────────────────────────────────────────────────────

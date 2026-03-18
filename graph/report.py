@@ -25,21 +25,13 @@ from neo4j import GraphDatabase
 from tabulate import tabulate
 
 from report_diagrams import mermaid_attack_paths_block, mermaid_tcc_pie
+from utils import first_cypher_statement, list_or_str, run_query
 
 
 # ── No-findings Placeholder ───────────────────────────────────────────────────
 
 def format_no_findings() -> str:
     return "_No findings in this category._"
-
-
-# ── Value Coercion ────────────────────────────────────────────────────────────
-
-def _list_or_str(value) -> str:
-    """Convert list values from Neo4j to a comma-separated string."""
-    if isinstance(value, list):
-        return ", ".join(str(v) for v in value)
-    return str(value) if value is not None else "—"
 
 
 # ── Section Formatters ────────────────────────────────────────────────────────
@@ -51,7 +43,7 @@ def format_injectable_fda_table(rows: list[dict]) -> str:
 
     table_rows = []
     for r in rows:
-        methods = _list_or_str(r.get("injection_methods", []))
+        methods = list_or_str(r.get("injection_methods", []))
         table_rows.append([
             r.get("app_name", "?"),
             r.get("team_id") or "—",
@@ -65,7 +57,7 @@ def format_injectable_fda_table(rows: list[dict]) -> str:
     risk_lines = []
     for r in rows:
         app = r.get("app_name", "?")
-        methods = _list_or_str(r.get("injection_methods", []))
+        methods = list_or_str(r.get("injection_methods", []))
         risk_lines.append(
             f"- **{app}**: Attacker can inject via `{methods}` to inherit Full Disk Access."
         )
@@ -80,7 +72,7 @@ def format_electron_table(rows: list[dict]) -> str:
 
     table_rows = []
     for r in rows:
-        perms = _list_or_str(r.get("inherited_permissions", []))
+        perms = list_or_str(r.get("inherited_permissions", []))
         table_rows.append([
             r.get("app_name", "?"),
             r.get("bundle_id", "?"),
@@ -135,7 +127,7 @@ def format_private_entitlement_table(rows: list[dict]) -> str:
 
     table_rows = []
     for r in rows:
-        ents = _list_or_str(r.get("private_entitlements", []))
+        ents = list_or_str(r.get("private_entitlements", []))
         injectable = "Yes" if r.get("is_injectable") else "No"
         table_rows.append([
             r.get("app_name", "?"),
@@ -187,32 +179,10 @@ QUERY_FILES = [
 
 def _load_query(queries_dir: Path, filename: str) -> str | None:
     """Load a .cypher file, returning None if not found."""
-    path = queries_dir / filename
-    if not path.exists():
+    try:
+        return (queries_dir / filename).read_text(encoding="utf-8")
+    except FileNotFoundError:
         return None
-    return path.read_text(encoding="utf-8")
-
-
-def _first_cypher_statement(cypher: str) -> str:
-    """
-    Extract the first Cypher statement from a multi-statement file.
-    Statements are delimited by semicolons. Comment-only content is skipped.
-    """
-    for stmt in cypher.split(";"):
-        stripped = stmt.strip()
-        # Skip if the statement is only comments
-        non_comment = "\n".join(
-            line for line in stripped.splitlines() if not line.strip().startswith("//")
-        ).strip()
-        if non_comment:
-            return stripped
-    return cypher.strip()
-
-
-def run_query(session, cypher: str, params: dict | None = None) -> list[dict]:
-    """Run a single Cypher statement, return list of record dicts."""
-    result = session.run(cypher, params or {})
-    return [dict(r) for r in result]
 
 
 def run_all_queries(driver, queries_dir: Path) -> dict[str, list[dict] | str]:
@@ -230,8 +200,8 @@ def run_all_queries(driver, queries_dir: Path) -> dict[str, list[dict] | str]:
                 continue
 
             try:
-                stmt = _first_cypher_statement(cypher)
-                rows = run_query(session, stmt)
+                stmt = first_cypher_statement(cypher)
+                rows = run_query(session, stmt)  # from utils
                 results[filename] = rows
                 print(f"  ✓ {filename}: {len(rows)} rows", file=sys.stderr)
             except Exception as e:
@@ -349,13 +319,13 @@ def assemble_report(
     top_paths: list[str] = []
     for row in injectable_rows[:2]:
         app = row.get("app_name", "?")
-        methods = _list_or_str(row.get("injection_methods", []))
+        methods = list_or_str(row.get("injection_methods", []))
         top_paths.append(
             f"{app} has Full Disk Access and is injectable via `{methods}`."
         )
     for row in electron_rows[:1]:
         app = row.get("app_name", "?")
-        perms = _list_or_str(row.get("inherited_permissions", []))
+        perms = list_or_str(row.get("inherited_permissions", []))
         top_paths.append(
             f"{app} (Electron) inherits TCC permissions ({perms}) via ELECTRON_RUN_AS_NODE abuse."
         )
@@ -512,7 +482,7 @@ def assemble_report(
                     if k not in seen_keys:
                         all_keys.append(k)
                         seen_keys.add(k)
-            table_rows = [[_list_or_str(row.get(h)) for h in all_keys] for row in result]
+            table_rows = [[list_or_str(row.get(h)) for h in all_keys] for row in result]
             sections.append(tabulate(table_rows, headers=all_keys, tablefmt="github"))
 
         sections.append("")

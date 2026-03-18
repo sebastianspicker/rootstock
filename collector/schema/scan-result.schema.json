@@ -13,6 +13,10 @@
     "elevation",
     "applications",
     "tcc_grants",
+    "xpc_services",
+    "keychain_acls",
+    "mdm_profiles",
+    "launch_items",
     "errors"
   ],
   "additionalProperties": false,
@@ -70,6 +74,34 @@
       "description": "TCC permission grants from user and system TCC databases.",
       "items": {
         "$ref": "#/$defs/TCCGrant"
+      }
+    },
+    "xpc_services": {
+      "type": "array",
+      "description": "Discovered XPC services from LaunchDaemon and LaunchAgent plists.",
+      "items": {
+        "$ref": "#/$defs/XPCService"
+      }
+    },
+    "keychain_acls": {
+      "type": "array",
+      "description": "Keychain item metadata and ACL trusted-application lists (no secret values).",
+      "items": {
+        "$ref": "#/$defs/KeychainItem"
+      }
+    },
+    "mdm_profiles": {
+      "type": "array",
+      "description": "Installed MDM configuration profiles and their TCC policy payloads.",
+      "items": {
+        "$ref": "#/$defs/MDMProfile"
+      }
+    },
+    "launch_items": {
+      "type": "array",
+      "description": "Persistence mechanisms: LaunchDaemons, LaunchAgents, login items, cron jobs.",
+      "items": {
+        "$ref": "#/$defs/LaunchItem"
       }
     },
     "errors": {
@@ -243,6 +275,176 @@
         "last_modified": {
           "type": "integer",
           "description": "Unix timestamp of when the grant was last modified."
+        }
+      }
+    },
+    "XPCService": {
+      "type": "object",
+      "description": "A launchd-managed XPC service discovered from a LaunchDaemon or LaunchAgent plist.",
+      "required": ["label", "path", "type", "run_at_load", "keep_alive", "mach_services", "entitlements"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Launchd service label (e.g., com.apple.logd).",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the LaunchDaemon/LaunchAgent plist file.",
+          "minLength": 1
+        },
+        "program": {
+          "type": ["string", "null"],
+          "description": "Resolved binary path from Program or ProgramArguments[0]."
+        },
+        "type": {
+          "type": "string",
+          "description": "Whether this is a daemon or agent.",
+          "enum": ["daemon", "agent"]
+        },
+        "user": {
+          "type": ["string", "null"],
+          "description": "UserName from plist (null = current user for agents)."
+        },
+        "run_at_load": {
+          "type": "boolean",
+          "description": "Whether launchd starts the service automatically."
+        },
+        "keep_alive": {
+          "type": "boolean",
+          "description": "Whether launchd restarts the service after exit."
+        },
+        "mach_services": {
+          "type": "array",
+          "description": "Mach service names registered by this service.",
+          "items": { "type": "string" }
+        },
+        "entitlements": {
+          "type": "array",
+          "description": "Entitlement keys present in the service binary.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "KeychainItem": {
+      "type": "object",
+      "description": "Keychain item metadata and ACL. No secret values are included.",
+      "required": ["label", "kind", "trusted_apps"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Human-readable label from the item metadata.",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "description": "Class of keychain item.",
+          "enum": ["generic_password", "internet_password", "certificate", "key"]
+        },
+        "service": {
+          "type": ["string", "null"],
+          "description": "Service name (generic password) or server hostname (internet password)."
+        },
+        "access_group": {
+          "type": ["string", "null"],
+          "description": "Keychain access group (e.g., TEAMID.com.example.app)."
+        },
+        "trusted_apps": {
+          "type": "array",
+          "description": "Bundle IDs or paths of apps trusted to read this item without prompting.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "MDMProfile": {
+      "type": "object",
+      "description": "An installed MDM configuration profile.",
+      "required": ["identifier", "display_name", "tcc_policies"],
+      "additionalProperties": false,
+      "properties": {
+        "identifier": {
+          "type": "string",
+          "description": "Unique profile identifier (reverse-DNS).",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string",
+          "description": "Human-readable profile name.",
+          "minLength": 1
+        },
+        "organization": {
+          "type": ["string", "null"],
+          "description": "Organization that issued the profile."
+        },
+        "install_date": {
+          "type": ["string", "null"],
+          "description": "Profile installation date string."
+        },
+        "tcc_policies": {
+          "type": "array",
+          "description": "TCC permission policies declared in this profile.",
+          "items": {
+            "$ref": "#/$defs/TCCPolicy"
+          }
+        }
+      }
+    },
+    "TCCPolicy": {
+      "type": "object",
+      "description": "A TCC permission grant or denial enforced via MDM profile.",
+      "required": ["service", "client_bundle_id", "allowed"],
+      "additionalProperties": false,
+      "properties": {
+        "service": {
+          "type": "string",
+          "description": "TCC service name as used in the profile.",
+          "minLength": 1
+        },
+        "client_bundle_id": {
+          "type": "string",
+          "description": "Bundle identifier of the target application.",
+          "minLength": 1
+        },
+        "allowed": {
+          "type": "boolean",
+          "description": "Whether this policy grants (true) or denies (false) access."
+        }
+      }
+    },
+    "LaunchItem": {
+      "type": "object",
+      "description": "A persistence mechanism: launchd job, login item, cron job, or login hook.",
+      "required": ["label", "path", "type", "run_at_load"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "Label or identifier for this persistence item.",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "description": "Path to the plist, crontab, or hook configuration file.",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "description": "How this item achieves persistence.",
+          "enum": ["daemon", "agent", "login_item", "cron", "login_hook"]
+        },
+        "program": {
+          "type": ["string", "null"],
+          "description": "Binary or script that is executed."
+        },
+        "run_at_load": {
+          "type": "boolean",
+          "description": "Whether the item starts automatically at boot or login."
+        },
+        "user": {
+          "type": ["string", "null"],
+          "description": "User account this item runs as (null = inherits from context)."
         }
       }
     },

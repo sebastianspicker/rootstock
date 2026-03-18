@@ -20,6 +20,10 @@ let package = Package(
                 "Entitlements",
                 "CodeSigning",
                 "Export",
+                "XPCServices",
+                "Persistence",
+                "Keychain",
+                "MDM",
             ]
         ),
         .target(
@@ -45,6 +49,23 @@ let package = Package(
             name: "Export",
             dependencies: ["Models"]
         ),
+        .target(
+            name: "XPCServices",
+            dependencies: ["Models"]
+        ),
+        .target(
+            name: "Persistence",
+            dependencies: ["Models"]
+        ),
+        .target(
+            name: "Keychain",
+            dependencies: ["Models"],
+            linkerSettings: [.linkedFramework("Security")]
+        ),
+        .target(
+            name: "MDM",
+            dependencies: ["Models"]
+        ),
         .testTarget(
             name: "TCCTests",
             dependencies: ["TCC", "Models"],
@@ -59,6 +80,24 @@ let package = Package(
             name: "CodeSigningTests",
             dependencies: ["CodeSigning", "Models"],
             linkerSettings: [.linkedFramework("Security")]
+        ),
+        .testTarget(
+            name: "XPCTests",
+            dependencies: ["XPCServices", "Models"],
+            linkerSettings: [.linkedFramework("Security")]
+        ),
+        .testTarget(
+            name: "PersistenceTests",
+            dependencies: ["Persistence", "Models"]
+        ),
+        .testTarget(
+            name: "KeychainTests",
+            dependencies: ["Keychain", "Models"],
+            linkerSettings: [.linkedFramework("Security")]
+        ),
+        .testTarget(
+            name: "MDMTests",
+            dependencies: ["MDM", "Models"]
         ),
     ]
 )

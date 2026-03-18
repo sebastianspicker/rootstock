@@ -26,6 +26,10 @@ public struct ScanResult: Codable, Sendable {
     public let elevation: ElevationInfo
     public let applications: [Application]
     public let tccGrants: [TCCGrant]
+    public let xpcServices: [XPCService]
+    public let keychainAcls: [KeychainItem]
+    public let mdmProfiles: [MDMProfile]
+    public let launchItems: [LaunchItem]
     public let errors: [CollectionError]
 
     public init(
@@ -37,6 +41,10 @@ public struct ScanResult: Codable, Sendable {
         elevation: ElevationInfo,
         applications: [Application],
         tccGrants: [TCCGrant],
+        xpcServices: [XPCService],
+        keychainAcls: [KeychainItem],
+        mdmProfiles: [MDMProfile],
+        launchItems: [LaunchItem],
         errors: [CollectionError]
     ) {
         self.scanId = scanId
@@ -47,6 +55,10 @@ public struct ScanResult: Codable, Sendable {
         self.elevation = elevation
         self.applications = applications
         self.tccGrants = tccGrants
+        self.xpcServices = xpcServices
+        self.keychainAcls = keychainAcls
+        self.mdmProfiles = mdmProfiles
+        self.launchItems = launchItems
         self.errors = errors
     }
 
@@ -59,6 +71,10 @@ public struct ScanResult: Codable, Sendable {
         case elevation
         case applications
         case tccGrants = "tcc_grants"
+        case xpcServices = "xpc_services"
+        case keychainAcls = "keychain_acls"
+        case mdmProfiles = "mdm_profiles"
+        case launchItems = "launch_items"
         case errors
     }
 }

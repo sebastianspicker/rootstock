@@ -67,6 +67,49 @@ class TCCGrantData(BaseModel):
         return labels.get(self.auth_reason, f"unknown_{self.auth_reason}")
 
 
+class TCCPolicyData(BaseModel):
+    service: str = Field(min_length=1)
+    client_bundle_id: str = Field(min_length=1)
+    allowed: bool
+
+
+class MDMProfileData(BaseModel):
+    identifier: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    organization: str | None = None
+    install_date: str | None = None
+    tcc_policies: list[TCCPolicyData] = Field(default_factory=list)
+
+
+class KeychainItemData(BaseModel):
+    label: str = Field(min_length=1)
+    kind: Literal["generic_password", "internet_password", "certificate", "key"]
+    service: str | None = None
+    access_group: str | None = None
+    trusted_apps: list[str] = Field(default_factory=list)
+
+
+class LaunchItemData(BaseModel):
+    label: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    type: Literal["daemon", "agent", "login_item", "cron", "login_hook"]
+    program: str | None = None
+    run_at_load: bool = False
+    user: str | None = None
+
+
+class XPCServiceData(BaseModel):
+    label: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    program: str | None = None
+    type: Literal["daemon", "agent"]
+    user: str | None = None
+    run_at_load: bool = False
+    keep_alive: bool = False
+    mach_services: list[str] = Field(default_factory=list)
+    entitlements: list[str] = Field(default_factory=list)
+
+
 class CollectionErrorData(BaseModel):
     source: str = Field(min_length=1)
     message: str = Field(min_length=1)
@@ -82,6 +125,10 @@ class ScanResult(BaseModel):
     elevation: ElevationInfo
     applications: list[ApplicationData] = Field(default_factory=list)
     tcc_grants: list[TCCGrantData] = Field(default_factory=list)
+    xpc_services: list[XPCServiceData] = Field(default_factory=list)
+    keychain_acls: list[KeychainItemData] = Field(default_factory=list)
+    mdm_profiles: list[MDMProfileData] = Field(default_factory=list)
+    launch_items: list[LaunchItemData] = Field(default_factory=list)
     errors: list[CollectionErrorData] = Field(default_factory=list)
 
     @model_validator(mode="after")

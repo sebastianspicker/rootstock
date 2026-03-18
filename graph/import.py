@@ -35,6 +35,10 @@ from import_nodes import (
     import_tcc_grants,
     import_entitlements,
     import_signed_by_team,
+    import_xpc_services,
+    import_keychain_items,
+    import_mdm_profiles,
+    import_launch_items,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -58,18 +62,17 @@ def load_scan(path: Path) -> ScanResult | None:
 
 def query_stats(session) -> dict:
     """Query post-import node and relationship counts for reporting."""
-    result = session.run(
-        """
-        MATCH (a:Application) WITH count(a) AS apps
-        OPTIONAL MATCH ()-[tcc:HAS_TCC_GRANT]->() WITH apps, count(tcc) AS tcc_rels
-        OPTIONAL MATCH ()-[ent:HAS_ENTITLEMENT]->() WITH apps, tcc_rels, count(ent) AS ent_rels
-        OPTIONAL MATCH ()-[team:SIGNED_BY_SAME_TEAM]->() WITH apps, tcc_rels, ent_rels, count(team) AS team_rels
-        OPTIONAL MATCH (e:Entitlement) WITH apps, tcc_rels, ent_rels, team_rels, count(e) AS entitlements
-        RETURN apps, tcc_rels, ent_rels, team_rels, entitlements
-        """
-    )
-    row = result.single()
-    return dict(row)
+    counts = {}
+    for label in ["Application", "Entitlement", "TCC_Permission", "XPC_Service",
+                   "LaunchItem", "Keychain_Item", "MDM_Profile", "User"]:
+        row = session.run(f"MATCH (n:{label}) RETURN count(n) AS n").single()
+        counts[label] = row["n"]
+    for rel_type in ["HAS_TCC_GRANT", "HAS_ENTITLEMENT", "SIGNED_BY_SAME_TEAM",
+                     "COMMUNICATES_WITH", "PERSISTS_VIA", "RUNS_AS",
+                     "CAN_READ_KEYCHAIN", "CONFIGURES"]:
+        row = session.run(f"MATCH ()-[r:{rel_type}]->() RETURN count(r) AS n").single()
+        counts[rel_type] = row["n"]
+    return counts
 
 
 def query_security_summary(session) -> dict:
@@ -122,6 +125,10 @@ def main() -> int:
     print(f"  hostname: {scan.hostname}")
     print(f"  apps:     {len(scan.applications)}")
     print(f"  grants:   {len(scan.tcc_grants)}")
+    print(f"  xpc:      {len(scan.xpc_services)}")
+    print(f"  keychain: {len(scan.keychain_acls)}")
+    print(f"  mdm:      {len(scan.mdm_profiles)}")
+    print(f"  items:    {len(scan.launch_items)}")
     print(f"  errors:   {len(scan.errors)}")
 
     print(f"\nConnecting to Neo4j at {args.uri}...")
@@ -149,15 +156,30 @@ def main() -> int:
         n_team_rels = import_signed_by_team(session)
         print(f"  Team edges:    {n_team_rels}")
 
+        n_xpc, n_comm = import_xpc_services(session, scan.xpc_services)
+        print(f"  XPC services:  {n_xpc} nodes, {n_comm} COMMUNICATES_WITH edges")
+
+        n_kc, n_kc_edges = import_keychain_items(session, scan.keychain_acls)
+        print(f"  Keychain ACLs: {n_kc} nodes, {n_kc_edges} CAN_READ_KEYCHAIN edges")
+
+        n_mdm, n_cfg = import_mdm_profiles(session, scan.mdm_profiles)
+        print(f"  MDM profiles:  {n_mdm} nodes, {n_cfg} CONFIGURES edges")
+
+        n_items, n_persists, n_runs = import_launch_items(session, scan.launch_items)
+        print(f"  Launch items:  {n_items} nodes, {n_persists} PERSISTS_VIA, {n_runs} RUNS_AS edges")
+
         stats = query_stats(session)
         security = query_security_summary(session)
 
     driver.close()
 
-    total_rels = stats["tcc_rels"] + stats["ent_rels"] + stats["team_rels"]
+    total_rels = sum(v for k, v in stats.items() if k.isupper() and "_" in k)
+    total_nodes = sum(v for k, v in stats.items() if not (k.isupper() and "_" in k))
+    print(f"\nGraph totals: {total_nodes} nodes, {total_rels} relationships")
     print(
-        f"\nImported {n_apps} applications, {grants_linked} TCC grants, "
-        f"{n_ents} entitlements, {total_rels} relationships"
+        f"  Nodes:  {stats['Application']} apps, {stats['Entitlement']} entitlements, "
+        f"{stats['XPC_Service']} XPC, {stats['LaunchItem']} launch items, "
+        f"{stats['Keychain_Item']} keychain, {stats['MDM_Profile']} MDM"
     )
     print(
         f"Applications with FDA: {security['fda_apps']}  |  "

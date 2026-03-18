@@ -167,5 +167,105 @@
       "last_modified": 1710748800
     }
   ],
+  "mdm_profiles": [
+    {
+      "identifier": "com.example.tcc.profile",
+      "display_name": "Privacy Policy Profile",
+      "organization": "Example Corp",
+      "install_date": "2026-03-01 00:00:00 +0000",
+      "tcc_policies": [
+        {
+          "service": "SystemPolicyAllFiles",
+          "client_bundle_id": "com.googlecode.iterm2",
+          "allowed": true
+        },
+        {
+          "service": "Microphone",
+          "client_bundle_id": "com.tinyspeck.slackmacgap",
+          "allowed": true
+        }
+      ]
+    },
+    {
+      "identifier": "com.example.basic.profile",
+      "display_name": "Basic MDM Profile",
+      "organization": null,
+      "install_date": null,
+      "tcc_policies": []
+    }
+  ],
+  "keychain_acls": [
+    {
+      "label": "iTerm2 Credential",
+      "kind": "generic_password",
+      "service": "com.googlecode.iterm2.SecureInput",
+      "access_group": "H7V7XYVQ7D.com.googlecode.iterm2",
+      "trusted_apps": ["com.googlecode.iterm2"]
+    },
+    {
+      "label": "Slack Token",
+      "kind": "internet_password",
+      "service": "slack.com",
+      "access_group": null,
+      "trusted_apps": ["com.tinyspeck.slackmacgap", "com.apple.Terminal"]
+    },
+    {
+      "label": "Developer Certificate",
+      "kind": "certificate",
+      "service": null,
+      "access_group": "com.apple.security",
+      "trusted_apps": []
+    }
+  ],
+  "launch_items": [
+    {
+      "label": "com.example.daemon",
+      "path": "/Library/LaunchDaemons/com.example.daemon.plist",
+      "type": "daemon",
+      "program": "/usr/libexec/exampled",
+      "run_at_load": true,
+      "user": "root"
+    },
+    {
+      "label": "com.example.agent",
+      "path": "/Library/LaunchAgents/com.example.agent.plist",
+      "type": "agent",
+      "program": "/usr/bin/exampleagent",
+      "run_at_load": false,
+      "user": null
+    },
+    {
+      "label": "cron.root.1",
+      "path": "/etc/crontab",
+      "type": "cron",
+      "program": "/usr/sbin/atrun",
+      "run_at_load": false,
+      "user": "root"
+    }
+  ],
+  "xpc_services": [
+    {
+      "label": "com.example.testdaemon",
+      "path": "/Library/LaunchDaemons/com.example.testdaemon.plist",
+      "program": "/usr/libexec/testdaemond",
+      "type": "daemon",
+      "user": "_testdaemon",
+      "run_at_load": true,
+      "keep_alive": true,
+      "mach_services": ["com.example.testdaemon.xpc"],
+      "entitlements": ["com.apple.private.tcc.allow"]
+    },
+    {
+      "label": "com.example.testagent",
+      "path": "/Library/LaunchAgents/com.example.testagent.plist",
+      "program": "/usr/bin/testagentd",
+      "type": "agent",
+      "user": null,
+      "run_at_load": false,
+      "keep_alive": false,
+      "mach_services": [],
+      "entitlements": []
+    }
+  ],
   "errors": []
 }

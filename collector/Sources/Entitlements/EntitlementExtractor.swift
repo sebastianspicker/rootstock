@@ -5,11 +5,13 @@ import Security
 ///
 /// Primary method: Security.framework `SecCodeCopySigningInformation`
 /// Fallback: `codesign -d --entitlements :- <path>` CLI output parsed as plist
-struct EntitlementExtractor {
+public struct EntitlementExtractor {
+
+    public init() { }
 
     /// Returns the entitlements dictionary for the executable at the given URL.
     /// Returns an empty dictionary if the executable has no entitlements or if extraction fails.
-    func extract(from executableURL: URL) -> [String: Any] {
+    public func extract(from executableURL: URL) -> [String: Any] {
         return extractWithSecurityFramework(url: executableURL)
             ?? extractWithCodesignCLI(path: executableURL.path)
             ?? [:]

@@ -99,5 +99,9 @@ let package = Package(
             name: "MDMTests",
             dependencies: ["MDM", "Models"]
         ),
+        .testTarget(
+            name: "ExportTests",
+            dependencies: ["Export", "Models"]
+        ),
     ]
 )

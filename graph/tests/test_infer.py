@@ -18,11 +18,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from constants import ATTACKER_BUNDLE_ID, ALLOW_DYLD_ENTITLEMENT  # noqa: E402
+
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "rootstock")
-
-from constants import ATTACKER_BUNDLE_ID, ALLOW_DYLD_ENTITLEMENT
 
 TEST_SCAN_ID = "test-infer-00000000-0000-0000-0000-000000000002"
 

@@ -336,10 +336,10 @@ class TestImportIntegration:
         )
         row = result.single()
         assert row is not None
-        l = row["l"]
-        assert l["type"] == "daemon"
-        assert l["run_at_load"] is True
-        assert l["user"] == "root"
+        launch_item = row["l"]
+        assert launch_item["type"] == "daemon"
+        assert launch_item["run_at_load"] is True
+        assert launch_item["user"] == "root"
 
     def test_launch_item_runs_as_edge(self, neo4j_session, scan_result):
         from import_nodes import import_launch_items

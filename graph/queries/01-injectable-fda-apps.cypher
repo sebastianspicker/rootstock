@@ -1,7 +1,9 @@
 // Name: Injectable Full Disk Access Apps
 // Purpose: Find apps with Full Disk Access that can be injected with attacker code
-// Attack: Inject dylib into FDA app → inherit Full Disk Access → read/modify TCC.db
+// Category: Red Team
 // Severity: Critical
+// Parameters: none
+// Attack: Inject dylib into FDA app → inherit Full Disk Access → read/modify TCC.db
 // Prerequisites: import.py + infer.py must have run
 
 MATCH (app:Application)-[:HAS_TCC_GRANT {allowed: true}]->

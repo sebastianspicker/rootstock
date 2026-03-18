@@ -1,5 +1,8 @@
-// 08-persistence-audit.cypher
-// Persistence Audit: High-Risk Third-Party Persistence Mechanisms
+// Name: Persistence Audit — High-Risk Third-Party Persistence
+// Purpose: Find third-party LaunchDaemons/Agents running as root or linked to injectable apps
+// Category: Blue Team
+// Severity: High
+// Parameters: none
 //
 // Finds third-party LaunchDaemons and LaunchAgents that:
 //   1. Run as root (RUNS_AS root User node, or daemon with no user = root by default)

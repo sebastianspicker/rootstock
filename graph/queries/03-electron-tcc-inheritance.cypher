@@ -1,7 +1,9 @@
 // Name: Electron App TCC Permission Inheritance
 // Purpose: Map which Electron apps pass TCC permissions to child processes
-// Attack: ELECTRON_RUN_AS_NODE env var spawns Node.js child that inherits parent's TCC grants
+// Category: Red Team
 // Severity: High
+// Parameters: none
+// Attack: ELECTRON_RUN_AS_NODE env var spawns Node.js child that inherits parent's TCC grants
 // Prerequisites: import.py must have run
 
 MATCH (app:Application {is_electron: true})-[:HAS_TCC_GRANT {allowed: true}]->(perm:TCC_Permission)

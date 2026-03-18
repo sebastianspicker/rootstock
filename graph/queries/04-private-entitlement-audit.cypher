@@ -1,8 +1,10 @@
 // Name: Private Apple Entitlement Audit
 // Purpose: Find third-party apps with private Apple entitlements (high-value targets)
+// Category: Red Team
+// Severity: High
+// Parameters: none
 // Attack: Private entitlements grant elevated privileges not available to normal apps.
 //         If the app is also injectable, an attacker inherits those privileges.
-// Severity: High
 // Prerequisites: import.py must have run
 
 MATCH (app:Application {is_system: false})-[:HAS_ENTITLEMENT]->(ent:Entitlement {is_private: true})

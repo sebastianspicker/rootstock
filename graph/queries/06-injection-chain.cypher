@@ -1,8 +1,10 @@
 // Name: Multi-hop Injection Chain
 // Purpose: Find chains of injectable apps leading to high-value TCC permissions
+// Category: Red Team
+// Severity: Critical
+// Parameters: none
 // Attack: Attacker → inject App1 → App1 has TCC → escalate to critical permission
 //         Or: Attacker → inject App1 → App1 can inject App2 (deeper chain)
-// Severity: Critical
 // Prerequisites: import.py + infer.py must have run
 
 MATCH path = (attacker:Application {bundle_id: 'attacker.payload'})

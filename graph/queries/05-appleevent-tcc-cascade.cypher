@@ -1,8 +1,10 @@
 // Name: Apple Event TCC Permission Cascade
 // Purpose: Find apps that gain TCC access transitively via Apple Event automation
+// Category: Red Team
+// Severity: High
+// Parameters: none
 // Attack: App A automates App B (via CAN_SEND_APPLE_EVENT) → App A can invoke App B's
 //         privileged capabilities, effectively gaining App B's TCC permissions.
-// Severity: High
 // Prerequisites: import.py + infer.py must have run
 
 MATCH (source:Application)-[:CAN_SEND_APPLE_EVENT]->(target:Application)

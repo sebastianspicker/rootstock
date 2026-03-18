@@ -1,7 +1,9 @@
 // Name: TCC Grant Overview (Blue Team)
 // Purpose: Summary of all TCC grants — useful for security audits and baseline establishment
-// Use case: Enumerate the full TCC attack surface; identify anomalies and over-privileged apps
+// Category: Blue Team
 // Severity: Informational
+// Parameters: none
+// Use case: Enumerate the full TCC attack surface; identify anomalies and over-privileged apps
 // Prerequisites: import.py must have run
 
 // ── Section 1: Grants per permission type ─────────────────────────────────

@@ -1,5 +1,8 @@
-// 10-mdm-managed-tcc.cypher
-// MDM-Managed TCC Permissions
+// Name: MDM-Managed TCC Permissions
+// Purpose: Find TCC grants silently enforced via MDM profiles (user-irrevocable)
+// Category: Blue Team
+// Severity: Informational
+// Parameters: none
 //
 // Finds TCC permissions that are silently enforced via MDM configuration profiles.
 // MDM grants cannot be revoked by the user and take precedence over manual settings.

@@ -1,7 +1,9 @@
 // Name: Shortest Attack Path to Full Disk Access
 // Purpose: From the attacker_payload node, find the shortest chain to Full Disk Access
-// Attack: Multi-hop privilege escalation through injection + TCC inheritance
+// Category: Red Team
 // Severity: Critical
+// Parameters: none
+// Attack: Multi-hop privilege escalation through injection + TCC inheritance
 // Prerequisites: import.py + infer.py must have run
 // Note: shortestPath traverses any relationship type. Adjust [*..N] for depth limit.
 

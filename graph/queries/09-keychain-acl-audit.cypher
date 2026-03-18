@@ -1,5 +1,8 @@
-// 09-keychain-acl-audit.cypher
-// Keychain ACL Audit: Applications with direct Keychain read access
+// Name: Keychain ACL Audit
+// Purpose: Find apps with direct Keychain read access via ACL trusted-app list
+// Category: Blue Team
+// Severity: High
+// Parameters: none
 //
 // Finds Application nodes that are explicitly listed in a Keychain item's
 // ACL trusted-application list — meaning the app can read that credential

@@ -1,0 +1,171 @@
+{
+  "scan_id": "12345678-1234-1234-1234-123456789abc",
+  "timestamp": "2026-03-18T10:00:00Z",
+  "hostname": "test-mac",
+  "macos_version": "macOS 14.5",
+  "collector_version": "0.1.0",
+  "elevation": {
+    "is_root": false,
+    "has_fda": false
+  },
+  "applications": [
+    {
+      "name": "iTerm2",
+      "bundle_id": "com.googlecode.iterm2",
+      "path": "/Applications/iTerm.app",
+      "version": "3.5.0",
+      "team_id": "H7V7XYVQ7D",
+      "hardened_runtime": false,
+      "library_validation": false,
+      "is_electron": false,
+      "is_system": false,
+      "signed": true,
+      "entitlements": [
+        {
+          "name": "com.apple.security.cs.allow-dyld-environment-variables",
+          "is_private": false,
+          "category": "injection",
+          "is_security_critical": true
+        },
+        {
+          "name": "com.apple.security.cs.disable-library-validation",
+          "is_private": false,
+          "category": "injection",
+          "is_security_critical": true
+        },
+        {
+          "name": "com.apple.security.app-sandbox",
+          "is_private": false,
+          "category": "sandbox",
+          "is_security_critical": false
+        }
+      ],
+      "injection_methods": ["dyld_insert_via_entitlement", "missing_library_validation"]
+    },
+    {
+      "name": "Slack",
+      "bundle_id": "com.tinyspeck.slackmacgap",
+      "path": "/Applications/Slack.app",
+      "version": "4.38.125",
+      "team_id": "BQR82RBBHL",
+      "hardened_runtime": false,
+      "library_validation": false,
+      "is_electron": true,
+      "is_system": false,
+      "signed": true,
+      "entitlements": [
+        {
+          "name": "com.apple.security.network.client",
+          "is_private": false,
+          "category": "network",
+          "is_security_critical": false
+        },
+        {
+          "name": "com.apple.security.cs.allow-dyld-environment-variables",
+          "is_private": false,
+          "category": "injection",
+          "is_security_critical": true
+        },
+        {
+          "name": "com.apple.security.device.audio-input",
+          "is_private": false,
+          "category": "tcc",
+          "is_security_critical": false
+        },
+        {
+          "name": "com.apple.private.tcc.allow",
+          "is_private": true,
+          "category": "tcc",
+          "is_security_critical": true
+        }
+      ],
+      "injection_methods": ["dyld_insert_via_entitlement", "missing_library_validation", "electron_env_var"]
+    },
+    {
+      "name": "Terminal",
+      "bundle_id": "com.apple.Terminal",
+      "path": "/System/Applications/Utilities/Terminal.app",
+      "version": "2.14",
+      "team_id": null,
+      "hardened_runtime": false,
+      "library_validation": true,
+      "is_electron": false,
+      "is_system": true,
+      "signed": true,
+      "entitlements": [
+        {
+          "name": "com.apple.security.app-sandbox",
+          "is_private": false,
+          "category": "sandbox",
+          "is_security_critical": false
+        },
+        {
+          "name": "com.apple.private.tcc.allow",
+          "is_private": true,
+          "category": "tcc",
+          "is_security_critical": true
+        },
+        {
+          "name": "com.apple.rootless.storage.Terminal",
+          "is_private": true,
+          "category": "privilege",
+          "is_security_critical": true
+        }
+      ],
+      "injection_methods": []
+    }
+  ],
+  "tcc_grants": [
+    {
+      "service": "kTCCServiceMicrophone",
+      "display_name": "Microphone",
+      "client": "com.tinyspeck.slackmacgap",
+      "client_type": 0,
+      "auth_value": 2,
+      "auth_reason": 1,
+      "scope": "user",
+      "last_modified": 1710748800
+    },
+    {
+      "service": "kTCCServiceCamera",
+      "display_name": "Camera",
+      "client": "com.tinyspeck.slackmacgap",
+      "client_type": 0,
+      "auth_value": 2,
+      "auth_reason": 1,
+      "scope": "user",
+      "last_modified": 1710748800
+    },
+    {
+      "service": "kTCCServiceAccessibility",
+      "display_name": "Accessibility",
+      "client": "com.googlecode.iterm2",
+      "client_type": 0,
+      "auth_value": 2,
+      "auth_reason": 2,
+      "scope": "user",
+      "last_modified": 1710748800
+    },
+    {
+      "service": "kTCCServiceSystemPolicyAllFiles",
+      "display_name": "Full Disk Access",
+      "client": "com.googlecode.iterm2",
+      "client_type": 0,
+      "auth_value": 2,
+      "auth_reason": 2,
+      "scope": "user",
+      "last_modified": 1710748800
+    },
+    {
+      "service": "kTCCServiceScreenCapture",
+      "display_name": "Screen Recording",
+      "client": "com.tinyspeck.slackmacgap",
+      "client_type": 0,
+      "auth_value": 0,
+      "auth_reason": 1,
+      "scope": "user",
+      "last_modified": 1710748800
+    }
+  ],
+  "errors": []
+}

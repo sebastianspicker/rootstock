@@ -105,13 +105,24 @@ On a typical Mac with ~180 apps:
 | Entitlements extracted | 3,841 |
 | Release binary size | ~2 MB |
 
+## macOS Compatibility
+
+| macOS Version | Collector | User TCC.db | System TCC.db | Notes |
+|---|---|---|---|---|
+| 14 Sonoma | ✅ Full | ✅ Normal read | ✅ Requires FDA | Primary development target |
+| 15 Sequoia | ✅ Full | ⚠️ Requires FDA | ✅ Requires FDA | Kernel-enforced; grant FDA or use sudo |
+| 26 Tahoe | ✅ Full | ⚠️ Requires FDA | ✅ Requires FDA | Year-based versioning (2025 release) — tested on 26.3 |
+| < 14 | ❌ | ❌ | ❌ | Not supported |
+
+> **Apple switched to year-based macOS versioning in 2025.** macOS 26 ("Tahoe") was formerly planned as "macOS 16". `ProcessInfo.majorVersion` returns 26 on Tahoe.
+
 ## Notes on TCC Collection
 
 macOS 15+ requires Full Disk Access to read TCC databases. Without FDA:
 - User TCC.db: blocked at kernel level (`SQLITE_AUTH`)
 - System TCC.db: blocked at kernel level
 
-Run with `sudo` or grant FDA to the binary to collect TCC grants. See `docs/exec-plans/tech-debt-tracker.md` TD-004 for details.
+Run with `sudo` or grant FDA to the binary to collect TCC grants. See `docs/research/tcc-version-diffs.md` for full details and `docs/exec-plans/tech-debt-tracker.md` TD-004 for the tech-debt entry.
 
 ## Project Structure
 

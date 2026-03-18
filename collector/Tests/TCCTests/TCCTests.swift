@@ -159,6 +159,113 @@ final class TCCTests: XCTestCase {
         XCTAssertEqual(result.errors.first?.recoverable, true)
     }
 
+    // MARK: - TCCSchemaAdapter / MacOSVersion tests
+
+    func testSchemaAdapterFactoryReturnsAdapterForValidDB() throws {
+        let path = NSTemporaryDirectory() + "tcc-schema-\(UUID().uuidString).db"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        makeFixtureDB(at: path)
+
+        let db = try SQLiteDatabase(path: path)
+        let result = TCCSchemaAdapterFactory.make(for: .sonoma, db: db)
+        XCTAssertNotNil(result, "Expected adapter for valid Sonoma-schema DB")
+    }
+
+    func testSchemaAdapterFactoryReturnsNilForMalformedDB() throws {
+        let path = NSTemporaryDirectory() + "tcc-malformed-\(UUID().uuidString).db"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var raw: OpaquePointer?
+        sqlite3_open_v2(path, &raw, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
+        runSQL("CREATE TABLE access (service TEXT, client TEXT)", on: raw)
+        sqlite3_close(raw)
+
+        let db = try SQLiteDatabase(path: path)
+        let result = TCCSchemaAdapterFactory.make(for: .sonoma, db: db)
+        XCTAssertNil(result, "Expected nil for DB missing required columns")
+    }
+
+    func testColumnNamesDetectionViaPRAGMA() throws {
+        let path = NSTemporaryDirectory() + "tcc-pragma-\(UUID().uuidString).db"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        makeFixtureDB(at: path)
+
+        let db = try SQLiteDatabase(path: path)
+        let columns = db.columnNames(table: "access")
+        for col in ["service", "client", "client_type", "auth_value", "auth_reason", "last_modified"] {
+            XCTAssertTrue(columns.contains(col), "Expected column '\(col)'")
+        }
+        XCTAssertTrue(columns.contains("csreq"), "Expected optional column 'csreq'")
+    }
+
+    func testMalformedDBProducesGracefulErrorViaDataSource() async throws {
+        let path = NSTemporaryDirectory() + "tcc-bad-\(UUID().uuidString).db"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var raw: OpaquePointer?
+        sqlite3_open_v2(path, &raw, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
+        runSQL("CREATE TABLE access (service TEXT, wrong_col INTEGER)", on: raw)
+        sqlite3_close(raw)
+
+        let source = TCCDataSource(userDBPath: path, systemDBPath: nil, macOSVersion: .sonoma)
+        let result = await source.collect()
+        XCTAssertTrue(result.nodes.isEmpty)
+        XCTAssertFalse(result.errors.isEmpty)
+        XCTAssertEqual(result.errors.first?.recoverable, true)
+    }
+
+    func testMacOSVersionFromMajorVersion() {
+        XCTAssertEqual(MacOSVersion.from(majorVersion: 14), .sonoma)
+        XCTAssertEqual(MacOSVersion.from(majorVersion: 15), .sequoia)
+        XCTAssertEqual(MacOSVersion.from(majorVersion: 26), .tahoe)
+        if case .unknown(let major, _) = MacOSVersion.from(majorVersion: 99) {
+            XCTAssertEqual(major, 99)
+        } else {
+            XCTFail("Expected .unknown for majorVersion 99")
+        }
+    }
+
+    func testMacOSVersionComparable() {
+        XCTAssertLessThan(MacOSVersion.sonoma, .sequoia)
+        XCTAssertLessThan(MacOSVersion.sequoia, .tahoe)
+        XCTAssertGreaterThan(MacOSVersion.tahoe, .sonoma)
+    }
+
+    func testMacOSVersionDisplayStrings() {
+        XCTAssertEqual(MacOSVersion.sonoma.displayString,  "macOS 14 Sonoma")
+        XCTAssertEqual(MacOSVersion.sequoia.displayString, "macOS 15 Sequoia")
+        XCTAssertEqual(MacOSVersion.tahoe.displayString,   "macOS 26 Tahoe")
+    }
+
+    func testMacOSVersionDetectReturnsValidValue() {
+        let version = MacOSVersion.detect()
+        XCTAssertFalse(version.displayString.isEmpty)
+        // On the test machine (macOS 26.3 Tahoe), detect() must return .tahoe
+        XCTAssertEqual(version, .tahoe, "Expected .tahoe on this test machine (macOS 26.3)")
+    }
+
+    func testSequoiaErrorMessageContainsGuidance() async {
+        let source = TCCDataSource(
+            userDBPath: "/nonexistent/TCC.db",
+            systemDBPath: nil,
+            macOSVersion: .sequoia
+        )
+        let result = await source.collect()
+        XCTAssertFalse(result.errors.isEmpty)
+        let msg = result.errors.first?.message ?? ""
+        XCTAssertTrue(msg.contains("Full Disk Access"), "Expected FDA guidance in Sequoia error: \(msg)")
+    }
+
+    func testTahoeErrorMessageContainsGuidance() async {
+        let source = TCCDataSource(
+            userDBPath: "/nonexistent/TCC.db",
+            systemDBPath: nil,
+            macOSVersion: .tahoe
+        )
+        let result = await source.collect()
+        XCTAssertFalse(result.errors.isEmpty)
+        let msg = result.errors.first?.message ?? ""
+        XCTAssertTrue(msg.contains("Full Disk Access"), "Expected FDA guidance in Tahoe error: \(msg)")
+    }
+
     // MARK: - TCCServiceRegistry tests
 
     func testKnownServiceDisplayNames() {
@@ -190,5 +297,44 @@ final class TCCTests: XCTestCase {
     func testUnknownServiceFallsBackToRawIdentifier() {
         let unknown = "kTCCServiceUnknownFutureService"
         XCTAssertEqual(TCCServiceRegistry.displayName(for: unknown), unknown)
+    }
+
+    func testMacOS15ServicesAreKnown() {
+        // Services added in macOS 15 Sequoia
+        XCTAssertEqual(
+            TCCServiceRegistry.displayName(for: "kTCCServiceGameCenterFriends"),
+            "Game Center Friends"
+        )
+        XCTAssertEqual(
+            TCCServiceRegistry.displayName(for: "kTCCServiceWebBrowserPublicKeyCredential"),
+            "Web Browser Credentials"
+        )
+    }
+
+    func testMacOS14ServiceIsKnown() {
+        XCTAssertEqual(
+            TCCServiceRegistry.displayName(for: "kTCCServiceSystemPolicySysAdminFiles"),
+            "System Admin Files"
+        )
+    }
+
+    func testIsKnownAPI() {
+        XCTAssertTrue(TCCServiceRegistry.isKnown("kTCCServiceSystemPolicyAllFiles"))
+        XCTAssertFalse(TCCServiceRegistry.isKnown("kTCCServiceNonExistent"))
+    }
+
+    func testMinimumVersionForSequoiaServices() {
+        XCTAssertEqual(TCCServiceRegistry.minimumMajorVersion(for: "kTCCServiceGameCenterFriends"), 15)
+        XCTAssertEqual(TCCServiceRegistry.minimumMajorVersion(for: "kTCCServiceWebBrowserPublicKeyCredential"), 15)
+    }
+
+    func testMinimumVersionForSonomaService() {
+        XCTAssertEqual(TCCServiceRegistry.minimumMajorVersion(for: "kTCCServiceSystemPolicySysAdminFiles"), 14)
+    }
+
+    func testMinimumVersionForOlderServiceIsNil() {
+        // Services that predate our versioning table return nil
+        XCTAssertNil(TCCServiceRegistry.minimumMajorVersion(for: "kTCCServiceSystemPolicyAllFiles"))
+        XCTAssertNil(TCCServiceRegistry.minimumMajorVersion(for: "kTCCServiceCamera"))
     }
 }

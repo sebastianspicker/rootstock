@@ -32,6 +32,15 @@ final class SQLiteDatabase {
         sqlite3_close(db)
     }
 
+    /// Return the column names of a table using PRAGMA table_info.
+    /// Returns an empty set if the table doesn't exist or the DB can't be queried.
+    func columnNames(table: String) -> Set<String> {
+        // PRAGMA arguments cannot be parameterised; table name is caller-controlled.
+        // Only called internally with the hardcoded literal "access".
+        let rows = query("PRAGMA table_info(\(table))")
+        return Set(rows.compactMap { $0["name"] as? String })
+    }
+
     /// Execute a SELECT query and return rows as dictionaries.
     /// Returns an empty array on any error to avoid crashing the scan.
     func query(_ sql: String) -> [[String: Any]] {

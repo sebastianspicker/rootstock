@@ -1,0 +1,272 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rootstock/collector/scan-result.schema.json",
+  "title": "RootstockScanResult",
+  "description": "Output schema for the Rootstock macOS security collector.",
+  "type": "object",
+  "required": [
+    "scan_id",
+    "timestamp",
+    "hostname",
+    "macos_version",
+    "collector_version",
+    "elevation",
+    "applications",
+    "tcc_grants",
+    "errors"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "scan_id": {
+      "type": "string",
+      "description": "UUID identifying this scan run.",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp when the scan was initiated.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$"
+    },
+    "hostname": {
+      "type": "string",
+      "description": "Hostname of the scanned machine.",
+      "minLength": 1
+    },
+    "macos_version": {
+      "type": "string",
+      "description": "macOS operating system version string.",
+      "minLength": 1
+    },
+    "collector_version": {
+      "type": "string",
+      "description": "Version of the rootstock-collector binary.",
+      "minLength": 1
+    },
+    "elevation": {
+      "type": "object",
+      "description": "Privilege context under which the collector ran.",
+      "required": ["is_root", "has_fda"],
+      "additionalProperties": false,
+      "properties": {
+        "is_root": {
+          "type": "boolean",
+          "description": "True if the collector ran as root (uid 0)."
+        },
+        "has_fda": {
+          "type": "boolean",
+          "description": "True if Full Disk Access was available (system TCC.db readable)."
+        }
+      }
+    },
+    "applications": {
+      "type": "array",
+      "description": "Discovered .app bundles with entitlement and code signing metadata.",
+      "items": {
+        "$ref": "#/$defs/Application"
+      }
+    },
+    "tcc_grants": {
+      "type": "array",
+      "description": "TCC permission grants from user and system TCC databases.",
+      "items": {
+        "$ref": "#/$defs/TCCGrant"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "description": "Non-fatal collection errors encountered during the scan.",
+      "items": {
+        "$ref": "#/$defs/CollectionError"
+      }
+    }
+  },
+  "$defs": {
+    "Application": {
+      "type": "object",
+      "description": "A discovered macOS .app bundle.",
+      "required": [
+        "name",
+        "bundle_id",
+        "path",
+        "hardened_runtime",
+        "library_validation",
+        "is_electron",
+        "is_system",
+        "signed",
+        "entitlements",
+        "injection_methods"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "CFBundleName or display name.",
+          "minLength": 1
+        },
+        "bundle_id": {
+          "type": "string",
+          "description": "CFBundleIdentifier.",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path to the .app bundle.",
+          "minLength": 1
+        },
+        "version": {
+          "type": ["string", "null"],
+          "description": "CFBundleShortVersionString, or null if not present."
+        },
+        "team_id": {
+          "type": ["string", "null"],
+          "description": "Apple Developer team identifier from the code signature, or null for platform/unsigned binaries."
+        },
+        "hardened_runtime": {
+          "type": "boolean",
+          "description": "True if the CS_RUNTIME (0x10000) code signing flag is set."
+        },
+        "library_validation": {
+          "type": "boolean",
+          "description": "True if effective library validation is in force (CS_REQUIRE_LV flag or hardened runtime without disable-library-validation entitlement)."
+        },
+        "is_electron": {
+          "type": "boolean",
+          "description": "True if the app bundles the Electron Framework."
+        },
+        "is_system": {
+          "type": "boolean",
+          "description": "True if the app is located under /System/."
+        },
+        "signed": {
+          "type": "boolean",
+          "description": "True if the binary has a code signature with a signing identifier."
+        },
+        "entitlements": {
+          "type": "array",
+          "description": "Code-signing entitlements extracted from the binary.",
+          "items": {
+            "$ref": "#/$defs/EntitlementInfo"
+          }
+        },
+        "injection_methods": {
+          "type": "array",
+          "description": "Injection techniques applicable to this app based on its security posture.",
+          "items": {
+            "$ref": "#/$defs/InjectionMethod"
+          }
+        }
+      }
+    },
+    "EntitlementInfo": {
+      "type": "object",
+      "description": "A single code-signing entitlement.",
+      "required": ["name", "is_private", "category", "is_security_critical"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Entitlement key (e.g., com.apple.security.app-sandbox).",
+          "minLength": 1
+        },
+        "is_private": {
+          "type": "boolean",
+          "description": "True if the key contains 'com.apple.private.'."
+        },
+        "category": {
+          "type": "string",
+          "description": "Security category of the entitlement.",
+          "enum": ["tcc", "injection", "privilege", "sandbox", "keychain", "network", "other"]
+        },
+        "is_security_critical": {
+          "type": "boolean",
+          "description": "True for entitlements that materially weaken security boundaries."
+        }
+      }
+    },
+    "InjectionMethod": {
+      "type": "string",
+      "description": "A method by which code could be injected into this app's process.",
+      "enum": [
+        "dyld_insert",
+        "dyld_insert_via_entitlement",
+        "missing_library_validation",
+        "electron_env_var"
+      ]
+    },
+    "TCCGrant": {
+      "type": "object",
+      "description": "A TCC permission grant from the macOS privacy database.",
+      "required": [
+        "service",
+        "display_name",
+        "client",
+        "client_type",
+        "auth_value",
+        "auth_reason",
+        "scope",
+        "last_modified"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "service": {
+          "type": "string",
+          "description": "TCC service identifier (e.g., kTCCServiceMicrophone).",
+          "minLength": 1
+        },
+        "display_name": {
+          "type": "string",
+          "description": "Human-readable service name.",
+          "minLength": 1
+        },
+        "client": {
+          "type": "string",
+          "description": "Bundle ID or binary path of the client requesting the permission.",
+          "minLength": 1
+        },
+        "client_type": {
+          "type": "integer",
+          "description": "TCC client type: 0 = bundle, 1 = absolute path."
+        },
+        "auth_value": {
+          "type": "integer",
+          "description": "TCC authorization value: 0 = deny, 2 = allow, 3 = limited."
+        },
+        "auth_reason": {
+          "type": "integer",
+          "description": "TCC authorization reason code."
+        },
+        "scope": {
+          "type": "string",
+          "description": "Database scope: 'user' or 'system'.",
+          "enum": ["user", "system"]
+        },
+        "last_modified": {
+          "type": "integer",
+          "description": "Unix timestamp of when the grant was last modified."
+        }
+      }
+    },
+    "CollectionError": {
+      "type": "object",
+      "description": "A non-fatal error encountered during data collection.",
+      "required": ["source", "message", "recoverable"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Name of the module that produced the error.",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable error description.",
+          "minLength": 1
+        },
+        "recoverable": {
+          "type": "boolean",
+          "description": "True if collection continued despite this error."
+        }
+      }
+    }
+  }
+}

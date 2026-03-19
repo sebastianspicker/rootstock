@@ -1,8 +1,12 @@
 # rootstock
 
+[![Build](https://github.com/[org]/rootstock/actions/workflows/test.yml/badge.svg)](https://github.com/[org]/rootstock/actions)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![macOS 14+](https://img.shields.io/badge/macOS-14%2B-brightgreen)](https://support.apple.com/macos)
+
 Attack path discovery for macOS that maps TCC grants, entitlements, Keychain ACLs, and XPC trust relationships as an exploitable graph.
 
-> **Status:** Phase 1 Complete — Collector PoC. Scans macOS apps, extracts entitlements and code signing metadata, and outputs structured JSON for graph ingestion.
+> **Status:** Phase 5 Complete — Collector + Graph Pipeline + Hardening. Scans macOS apps, extracts entitlements and code signing metadata, imports into Neo4j, and discovers attack paths via pre-built Cypher queries.
 
 ## What is Rootstock?
 
@@ -96,14 +100,27 @@ python3 scripts/validate-scan.py scan.json
 
 ## Performance
 
-On a typical Mac with ~180 apps:
+Benchmarked on macOS 26.3 Tahoe (arm64), 184 apps, release build:
 
 | Metric | Value |
 |--------|-------|
-| Total scan time | ~0.7 seconds |
+| Total scan time | 5.6 seconds (average of 3 runs) |
 | Apps scanned | 184 |
 | Entitlements extracted | 3,841 |
-| Release binary size | ~2 MB |
+| XPC services enumerated | 440 |
+| Keychain items | 234 |
+| Peak memory | ~45 MB |
+| JSON output size | ~1 MB |
+
+Per-module timing (via `--verbose`):
+
+```
+[TCC]          0.00s   [Entitlements] 0.15s   [CodeSigning]  0.21s
+[XPC]          4.83s   [Persistence]  0.01s   [Keychain]     0.06s
+[MDM]          0.02s   Total: 5.28s
+```
+
+See `docs/benchmarks/baseline.md` for full benchmark methodology and results.
 
 ## macOS Compatibility
 
@@ -127,19 +144,53 @@ Run with `sudo` or grant FDA to the binary to collect TCC grants. See `docs/rese
 ## Project Structure
 
 ```
-collector/              Swift CLI collector
+collector/                 Swift CLI collector
 ├── Sources/
-│   ├── Models/         Shared data models
-│   ├── TCC/            TCC database parser
-│   ├── Entitlements/   App discovery + entitlement extraction
-│   ├── CodeSigning/    Code signing analysis + injection assessment
-│   ├── Export/         JSON serialization
-│   └── RootstockCLI/   CLI entry point + scan orchestration
-├── Tests/              Unit + integration tests
-└── schema/             JSON Schema for output validation
+│   ├── Models/            Shared data models + MacOSVersion detection
+│   ├── TCC/               TCC database parser (version-aware schema adapters)
+│   ├── Entitlements/      App discovery + entitlement extraction (parallelized)
+│   ├── CodeSigning/       Code signing analysis + injection assessment
+│   ├── XPCServices/       XPC service enumeration
+│   ├── Keychain/          Keychain ACL metadata reader
+│   ├── Persistence/       LaunchDaemons/Agents/crontab scanner
+│   ├── MDM/               MDM configuration profile parser
+│   ├── Export/            JSON serialization
+│   └── RootstockCLI/      CLI entry point + scan orchestration
+├── Tests/                 Unit tests (100 tests across 8 modules)
+└── schema/                JSON Schema for output validation
+
+graph/                     Neo4j import + Cypher queries
+├── import.py              JSON → Neo4j graph importer (UNWIND-batched)
+├── infer.py               Relationship inference engine
+├── report.py              Markdown report generator
+├── queries/               23 pre-built Cypher queries (4 severity levels)
+└── tests/                 87 Python tests
 
 scripts/
-└── validate-scan.py    Output validation script
+├── validate-scan.py       Output validation script
+└── benchmark.sh           Performance benchmark runner
 
-graph/                  (Phase 2) Neo4j import + Cypher queries
+docs/
+├── THREAT_MODEL.md        Assumptions, limitations, ethical framework
+├── benchmarks/            Performance measurements
+├── research/              macOS security research notes
+└── paper/                 Academic paper skeleton + references
+```
+
+## Threat Model
+
+Rootstock is a passive, read-only analysis tool. It does not extract secrets, make network
+calls, or execute attacks. See [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) for the full
+threat model, including assumptions, limitations, BloodHound comparison, and ethical framework.
+
+## Citing Rootstock
+
+```bibtex
+@software{rootstock2026,
+  title   = {Rootstock: Graph-Based Attack Path Discovery for macOS Security Boundaries},
+  author  = {[Author Names]},
+  year    = {2026},
+  url     = {https://github.com/[org]/rootstock},
+  note    = {Open-source research tool, [University Name]}
+}
 ```

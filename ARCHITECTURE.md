@@ -263,3 +263,79 @@ These relationships don't exist in the raw collector JSON but are derived:
 ```
 
 See `docs/design-docs/collector-output-schema.md` for the full JSON Schema definition.
+
+---
+
+## Real-World Example
+
+A scan on a typical developer Mac (macOS 26.3 Tahoe, arm64) produces the following graph:
+
+### Scan Statistics
+
+| Metric | Value |
+|---|---|
+| Applications discovered | 184 |
+| Signed applications | 180 (98%) |
+| Hardened runtime enabled | 123 (67%) |
+| Electron apps | 10 (5%) |
+| Entitlements extracted | 3,841 |
+| XPC services enumerated | 440 |
+| Keychain items (metadata) | 234 |
+| Launch items (daemons/agents) | 440 |
+| MDM profiles | 1 |
+| Injectable applications | 89 (48%) |
+| TCC grants | 0 (no FDA — see Note) |
+| JSON output size | ~1 MB |
+| Scan time | 5.3 seconds |
+| Peak memory | ~45 MB |
+
+> **Note:** TCC grants require Full Disk Access on macOS 15+. Without FDA, the TCC module
+> returns zero grants. With FDA or root, a typical Mac shows 10–50 TCC grants.
+
+### Graph Size (Estimated with TCC)
+
+A typical graph produced from a 184-app scan with TCC grants would contain:
+
+- **~190 Application nodes** (one per discovered app)
+- **~20 TCC_Permission nodes** (unique services like FDA, Camera, Microphone)
+- **~200 Entitlement nodes** (unique entitlement names from 3,841 app→entitlement pairs)
+- **~440 XPC_Service nodes**
+- **~234 Keychain_Item nodes**
+- **~440 LaunchItem nodes**
+- **~3,841 HAS_ENTITLEMENT edges** (app → entitlement)
+- **~30–100 CAN_INJECT_INTO edges** (inferred from missing hardened runtime / library validation)
+- **~10 CHILD_INHERITS_TCC edges** (Electron apps with TCC grants)
+- **~50 COMMUNICATES_WITH edges** (apps referencing XPC mach services via entitlements)
+
+### Example Attack Path
+
+```
+(Slack.app)
+  -[:HAS_ENTITLEMENT]-> (com.apple.security.cs.allow-dyld-environment-variables)
+  # Slack is Electron-based, has allow-dyld entitlement
+
+(Attacker)
+  -[:CAN_INJECT_INTO {method: "dyld_insert"}]-> (Slack.app)
+  # Slack lacks library validation, allowing DYLD_INSERT_LIBRARIES injection
+
+(Slack.app)
+  -[:HAS_TCC_GRANT {allowed: true}]-> (Microphone)
+  # If Slack has microphone access, an injected dylib inherits it
+```
+
+This three-hop path shows how a DYLD injection into Slack could inherit its TCC microphone
+grant — a real attack pattern that Rootstock surfaces automatically.
+
+---
+
+## Design Decisions
+
+| Decision | Rationale | Reference |
+|---|---|---|
+| Swift for collector | Single static binary, no runtime deps, direct access to Security.framework and macOS APIs | `docs/design-docs/` |
+| DataSource protocol | Graceful degradation (each module fails independently), testability, extensibility | §Component: Collector |
+| JSON intermediate format | Portable, human-readable, version-controllable; decouples collection from analysis | §Design Principle |
+| PRAGMA-based schema detection | Forward-compatible with future macOS TCC changes; avoids hardcoded column assumptions | `docs/research/tcc-version-diffs.md` |
+| MERGE (not CREATE) in Neo4j | Idempotent re-imports; safe to re-scan and re-import without duplicates | §Component: Graph Import |
+| Inferred relationships | Cross-boundary attack paths (injection, inheritance) can't be read from a single data source — they emerge from correlating multiple sources | §Inferred Relationships |
+| Bounded parallelism (max 8) | Prevents overwhelming Security.framework with concurrent code signing queries | `collector/Sources/Entitlements/EntitlementDataSource.swift` |

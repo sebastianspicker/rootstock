@@ -96,11 +96,7 @@ struct AppDiscovery {
         let contentsURL = resolvedURL.appendingPathComponent("Contents")
         let plistURL = contentsURL.appendingPathComponent("Info.plist")
 
-        guard fileManager.fileExists(atPath: plistURL.path) else {
-            // Bundle has no Info.plist — not a valid .app bundle; skip silently.
-            return nil
-        }
-
+        // Operate directly; try? handles missing/unreadable plist without TOCTOU race.
         guard let plistData = try? Data(contentsOf: plistURL),
               let plist = try? PropertyListSerialization.propertyList(
                   from: plistData, options: [], format: nil

@@ -31,14 +31,16 @@ public struct EntitlementDataSource: DataSource {
         var applications: [Application] = []
         applications.reserveCapacity(discovered.count)
 
+        // Capture value types once for Sendable closure capture.
+        let ext = extractor
+        let cls = classifier
+
         await withTaskGroup(of: Application.self) { group in
             var iterator = discovered.makeIterator()
             var inFlight = 0
 
             // Seed initial tasks up to the concurrency limit
             while inFlight < Self.maxConcurrency, let app = iterator.next() {
-                let ext = extractor   // capture value type for Sendable
-                let cls = classifier
                 group.addTask { Self.processApp(app, extractor: ext, classifier: cls) }
                 inFlight += 1
             }
@@ -48,8 +50,6 @@ public struct EntitlementDataSource: DataSource {
                 applications.append(result)
                 inFlight -= 1
                 if let next = iterator.next() {
-                    let ext = extractor
-                    let cls = classifier
                     group.addTask { Self.processApp(next, extractor: ext, classifier: cls) }
                     inFlight += 1
                 }

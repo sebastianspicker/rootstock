@@ -10,55 +10,21 @@ Usage:
 
 from __future__ import annotations
 
-import os
-import sys
-from pathlib import Path
-
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
-from constants import ATTACKER_BUNDLE_ID, ALLOW_DYLD_ENTITLEMENT  # noqa: E402
-
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "rootstock")
+from conftest import cleanup_test_nodes
+from constants import ATTACKER_BUNDLE_ID, ALLOW_DYLD_ENTITLEMENT
 
 TEST_SCAN_ID = "test-infer-00000000-0000-0000-0000-000000000002"
 
 
 @pytest.fixture(scope="module")
-def session():
-    """Yield a Neo4j session, skip if Neo4j is unavailable."""
-    try:
-        from neo4j import GraphDatabase
-        from neo4j.exceptions import ServiceUnavailable, AuthError
-    except ImportError:
-        pytest.skip("neo4j driver not installed")
-
-    try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        driver.verify_connectivity()
-    except (ServiceUnavailable, ConnectionRefusedError):
-        pytest.skip(f"Neo4j not available at {NEO4J_URI}")
-    except AuthError:
-        pytest.skip("Neo4j auth failed")
-
-    with driver.session() as s:
+def session(neo4j_driver):
+    """Module-scoped Neo4j session with cleanup."""
+    with neo4j_driver.session() as s:
         yield s
-
-    # Cleanup test nodes (including attacker.payload which is shared)
-    with driver.session() as s:
-        s.run(
-            """
-            MATCH (n) WHERE n.scan_id = $scan_id
-            DETACH DELETE n
-            """,
-            scan_id=TEST_SCAN_ID,
-        )
-        # Remove attacker node if it was created only for tests
-        # (leave it if it also exists from real scan data)
-    driver.close()
+    with neo4j_driver.session() as s:
+        cleanup_test_nodes(s, TEST_SCAN_ID)
 
 
 def _seed_graph(session) -> None:

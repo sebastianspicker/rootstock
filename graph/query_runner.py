@@ -28,7 +28,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from neo4j import GraphDatabase
 from tabulate import tabulate
 
 from utils import first_cypher_statement, list_or_str, run_query
@@ -297,9 +296,8 @@ examples:
 """,
     )
 
-    parser.add_argument("--neo4j",    default="bolt://localhost:7687", help="Neo4j bolt URI")
-    parser.add_argument("--username", default="neo4j",                 help="Neo4j username")
-    parser.add_argument("--password", default="rootstock",             help="Neo4j password")
+    from neo4j_connection import add_neo4j_args
+    add_neo4j_args(parser)
     parser.add_argument("--list",     action="store_true",             help="List all queries with metadata")
     parser.add_argument("--run",      metavar="ID|all",                help="Run a query by ID or 'all'")
     parser.add_argument("--param",    metavar="key=value", action="append", default=[],
@@ -324,12 +322,8 @@ examples:
             sys.exit(0)
 
     if args.run:
-        driver = GraphDatabase.driver(args.neo4j, auth=(args.username, args.password))
-        try:
-            driver.verify_connectivity()
-        except Exception as e:
-            print(f"Cannot connect to Neo4j at {args.neo4j}: {e}", file=sys.stderr)
-            sys.exit(1)
+        from neo4j_connection import connect
+        driver = connect(args.uri, args.username, args.password)
 
         params = _parse_params(args.param)
         exit_code = cmd_run(driver, queries, args.run, params, args.format)

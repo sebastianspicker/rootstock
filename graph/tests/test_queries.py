@@ -14,21 +14,15 @@ Usage:
 
 from __future__ import annotations
 
-import os
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from conftest import cleanup_test_nodes
 
 QUERIES_DIR = Path(__file__).parent.parent / "queries"
 EXPECTED_QUERY_COUNT = 23
-
-NEO4J_URI      = os.environ.get("NEO4J_URI",      "bolt://localhost:7687")
-NEO4J_USER     = os.environ.get("NEO4J_USER",     "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "rootstock")
 
 _HEADER_RE = re.compile(
     r"^//\s*(?P<key>Name|Purpose|Category|Severity|Parameters):\s*(?P<value>.+)$",
@@ -40,7 +34,7 @@ _VALID_SEVERITIES = {"Critical", "High", "Informational"}
 TEST_SCAN_ID = "test-queries-00000000-0000-0000-0000-000000000003"
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────────────
 
 def _parse_header(path: Path) -> dict[str, str]:
     meta: dict[str, str] = {}
@@ -74,32 +68,12 @@ def _first_statement(cypher: str) -> str:
 # ── Neo4j fixture ─────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
-def neo4j_session():
-    """Yield a Neo4j session; skip module if Neo4j is unavailable."""
-    try:
-        from neo4j import GraphDatabase
-        from neo4j.exceptions import ServiceUnavailable, AuthError
-    except ImportError:
-        pytest.skip("neo4j driver not installed")
-
-    try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        driver.verify_connectivity()
-    except (ServiceUnavailable, ConnectionRefusedError):
-        pytest.skip(f"Neo4j not available at {NEO4J_URI}")
-    except AuthError:
-        pytest.skip("Neo4j auth failed")
-
-    with driver.session() as session:
+def neo4j_session(neo4j_driver):
+    """Module-scoped Neo4j session with cleanup."""
+    with neo4j_driver.session() as session:
         yield session
-
-    # Cleanup
-    with driver.session() as session:
-        session.run(
-            "MATCH (n) WHERE n.scan_id = $scan_id DETACH DELETE n",
-            scan_id=TEST_SCAN_ID,
-        )
-    driver.close()
+    with neo4j_driver.session() as session:
+        cleanup_test_nodes(session, TEST_SCAN_ID)
 
 
 def _seed_minimal_graph(session) -> None:

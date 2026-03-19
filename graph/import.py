@@ -17,8 +17,8 @@ import sys
 from pathlib import Path
 
 try:
-    from neo4j import GraphDatabase
-    from neo4j.exceptions import ServiceUnavailable, AuthError
+    from neo4j import GraphDatabase  # noqa: F401 — used by import_nodes
+    from neo4j.exceptions import ServiceUnavailable, AuthError  # noqa: F401
 except ImportError:
     print("ERROR: neo4j driver not installed. Run: pip3 install -r graph/requirements.txt", file=sys.stderr)
     sys.exit(1)
@@ -29,6 +29,7 @@ except ImportError:
     print("ERROR: pydantic not installed. Run: pip3 install -r graph/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
+from neo4j_connection import add_neo4j_args, connect_from_args
 from models import ScanResult
 from import_nodes import (
     import_applications,
@@ -102,9 +103,7 @@ def query_security_summary(session) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Import a Rootstock scan JSON into Neo4j")
     parser.add_argument("--input", required=True, help="Path to scan JSON file")
-    parser.add_argument("--neo4j", default="bolt://localhost:7687", dest="uri")
-    parser.add_argument("--user", default="neo4j")
-    parser.add_argument("--password", default="rootstock")
+    add_neo4j_args(parser)
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
 
@@ -131,16 +130,7 @@ def main() -> int:
     print(f"  items:    {len(scan.launch_items)}")
     print(f"  errors:   {len(scan.errors)}")
 
-    print(f"\nConnecting to Neo4j at {args.uri}...")
-    try:
-        driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
-        driver.verify_connectivity()
-    except ServiceUnavailable:
-        print(f"ERROR: Cannot connect to Neo4j at {args.uri}", file=sys.stderr)
-        return 1
-    except AuthError:
-        print("ERROR: Authentication failed. Check --user / --password.", file=sys.stderr)
-        return 1
+    driver = connect_from_args(args)
 
     print("Importing...")
     with driver.session() as session:

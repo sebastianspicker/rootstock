@@ -21,7 +21,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from neo4j import GraphDatabase
 from tabulate import tabulate
 
 from report_diagrams import mermaid_attack_paths_block, mermaid_tcc_pie
@@ -546,9 +545,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Rootstock Security Assessment Report Generator"
     )
-    parser.add_argument("--neo4j", default="bolt://localhost:7687", help="Neo4j bolt URI")
-    parser.add_argument("--username", default="neo4j", help="Neo4j username")
-    parser.add_argument("--password", default="rootstock", help="Neo4j password")
+    from neo4j_connection import add_neo4j_args
+    add_neo4j_args(parser)
     parser.add_argument("--output", required=True, help="Output report file path")
     parser.add_argument(
         "--format",
@@ -569,14 +567,8 @@ def main() -> None:
         sys.exit(1)
 
     # Connect to Neo4j
-    print(f"Connecting to Neo4j at {args.neo4j}…", file=sys.stderr)
-    driver = GraphDatabase.driver(args.neo4j, auth=(args.username, args.password))
-    try:
-        driver.verify_connectivity()
-    except Exception as e:
-        print(f"Cannot connect to Neo4j: {e}", file=sys.stderr)
-        sys.exit(1)
-    print("  Connected.", file=sys.stderr)
+    from neo4j_connection import connect
+    driver = connect(args.uri, args.username, args.password)
 
     # Gather metadata
     if args.scan_json:

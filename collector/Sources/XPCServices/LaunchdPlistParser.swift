@@ -3,20 +3,22 @@ import Foundation
 /// Parses launchd plist files (XML and binary) from LaunchDaemon/LaunchAgent directories.
 ///
 /// PropertyListSerialization handles both XML and binary plist formats transparently.
-struct LaunchdPlistParser {
+public struct LaunchdPlistParser {
 
-    struct ParsedEntry {
-        let label: String
-        let plistPath: String
-        let program: String?
-        let user: String?
-        let runAtLoad: Bool
-        let keepAlive: Bool
-        let machServices: [String]
+    public struct ParsedEntry {
+        public let label: String
+        public let plistPath: String
+        public let program: String?
+        public let user: String?
+        public let runAtLoad: Bool
+        public let keepAlive: Bool
+        public let machServices: [String]
     }
 
+    public init() {}
+
     /// Parse a single plist file. Returns nil if the file is missing, unreadable, or malformed.
-    func parse(at path: String) -> ParsedEntry? {
+    public func parse(at path: String) -> ParsedEntry? {
         guard let data = FileManager.default.contents(atPath: path) else { return nil }
 
         var format = PropertyListSerialization.PropertyListFormat.xml
@@ -57,7 +59,7 @@ struct LaunchdPlistParser {
 
     /// Parse all plists in a directory. Missing directories are silently skipped.
     /// Returns (entries, errorMessages) — never throws.
-    func parseDirectory(at dirPath: String) -> (entries: [ParsedEntry], errors: [String]) {
+    public func parseDirectory(at dirPath: String) -> (entries: [ParsedEntry], errors: [String]) {
         let fm = FileManager.default
 
         guard fm.fileExists(atPath: dirPath) else {

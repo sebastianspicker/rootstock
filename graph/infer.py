@@ -17,12 +17,13 @@ import argparse
 import sys
 
 try:
-    from neo4j import GraphDatabase
-    from neo4j.exceptions import ServiceUnavailable, AuthError
+    from neo4j import GraphDatabase  # noqa: F401
+    from neo4j.exceptions import ServiceUnavailable, AuthError  # noqa: F401
 except ImportError:
     print("ERROR: neo4j driver not installed. Run: pip3 install -r graph/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
+from neo4j_connection import add_neo4j_args, connect_from_args
 import infer_injection
 import infer_electron
 import infer_automation
@@ -30,21 +31,10 @@ import infer_automation
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run Rootstock graph inference")
-    parser.add_argument("--neo4j", default="bolt://localhost:7687", dest="uri")
-    parser.add_argument("--user", default="neo4j")
-    parser.add_argument("--password", default="rootstock")
+    add_neo4j_args(parser)
     args = parser.parse_args()
 
-    print(f"Connecting to Neo4j at {args.uri}...")
-    try:
-        driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
-        driver.verify_connectivity()
-    except ServiceUnavailable:
-        print(f"ERROR: Cannot connect to Neo4j at {args.uri}", file=sys.stderr)
-        return 1
-    except AuthError:
-        print("ERROR: Authentication failed.", file=sys.stderr)
-        return 1
+    driver = connect_from_args(args)
 
     print("Running inference...")
     with driver.session() as session:

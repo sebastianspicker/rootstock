@@ -12,55 +12,23 @@ Usage:
 from __future__ import annotations
 
 import json
-import os
-import sys
 from pathlib import Path
 
 import pytest
 
-# Ensure graph/ is on the path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+from conftest import cleanup_test_nodes
 
 FIXTURE_PATH = Path(__file__).parent / "fixture_minimal.json"
-NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
-NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
-NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "rootstock")
-
-# Unique scan_id prefix for test isolation
 TEST_SCAN_ID = "test-00000000-0000-0000-0000-000000000001"
 
 
 @pytest.fixture(scope="module")
-def neo4j_session():
-    """Provide a Neo4j session, skipping the module if Neo4j is unavailable."""
-    try:
-        from neo4j import GraphDatabase
-        from neo4j.exceptions import ServiceUnavailable, AuthError
-    except ImportError:
-        pytest.skip("neo4j driver not installed")
-
-    try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        driver.verify_connectivity()
-    except (ServiceUnavailable, ConnectionRefusedError):
-        pytest.skip(f"Neo4j not available at {NEO4J_URI}")
-    except AuthError:
-        pytest.skip("Neo4j auth failed — check NEO4J_USER / NEO4J_PASSWORD")
-
-    with driver.session() as session:
+def neo4j_session(neo4j_driver):
+    """Module-scoped Neo4j session with cleanup."""
+    with neo4j_driver.session() as session:
         yield session
-
-    # Cleanup: remove all test nodes (Applications by scan_id, others by label/identifier)
-    with driver.session() as session:
-        session.run(
-            "MATCH (a:Application {scan_id: $scan_id}) DETACH DELETE a",
-            scan_id=TEST_SCAN_ID,
-        )
-        # Remove Phase 3 nodes created during tests (not tagged with scan_id)
-        for label in ["Entitlement", "TCC_Permission", "XPC_Service",
-                       "LaunchItem", "Keychain_Item", "MDM_Profile", "User"]:
-            session.run(f"MATCH (n:{label}) DETACH DELETE n")
-    driver.close()
+    with neo4j_driver.session() as session:
+        cleanup_test_nodes(session, TEST_SCAN_ID)
 
 
 @pytest.fixture(scope="module")

@@ -1,5 +1,6 @@
 import Foundation
 import Models
+import XPCServices
 
 /// Enumerates all persistence mechanisms on the system.
 ///
@@ -14,6 +15,7 @@ public struct PersistenceDataSource: DataSource {
     public let requiresElevation = false
 
     private let cronParser = CronParser()
+    private let plistParser = LaunchdPlistParser()
 
     private static let daemonDirs = [
         "/System/Library/LaunchDaemons",
@@ -63,67 +65,13 @@ public struct PersistenceDataSource: DataSource {
         return DataSourceResult(nodes: items, errors: errors)
     }
 
-    // MARK: - Launchd plist parsing (minimal, persistence-focused)
+    // MARK: - Launchd plist parsing (delegates to shared LaunchdPlistParser)
 
-    private struct PlistEntry {
-        let label: String
-        let plistPath: String
-        let program: String?
-        let user: String?
-        let runAtLoad: Bool
+    private func parseLaunchdDirectory(at dirPath: String) -> ([LaunchdPlistParser.ParsedEntry], [String]) {
+        plistParser.parseDirectory(at: dirPath)
     }
 
-    private func parseLaunchdDirectory(at dirPath: String) -> ([PlistEntry], [String]) {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: dirPath) else { return ([], []) }
-        guard let filenames = try? fm.contentsOfDirectory(atPath: dirPath) else {
-            return ([], ["Cannot read directory: \(dirPath)"])
-        }
-
-        var entries: [PlistEntry] = []
-        var errors: [String] = []
-
-        for filename in filenames where filename.hasSuffix(".plist") {
-            let fullPath = (dirPath as NSString).appendingPathComponent(filename)
-            if let entry = parsePlist(at: fullPath) {
-                entries.append(entry)
-            } else {
-                errors.append("Skipped unparseable plist: \(fullPath)")
-            }
-        }
-
-        return (entries, errors)
-    }
-
-    private func parsePlist(at path: String) -> PlistEntry? {
-        guard let data = FileManager.default.contents(atPath: path) else { return nil }
-
-        var format = PropertyListSerialization.PropertyListFormat.xml
-        guard let plist = try? PropertyListSerialization.propertyList(
-            from: data, options: [], format: &format
-        ) as? [String: Any] else { return nil }
-
-        guard let label = plist["Label"] as? String, !label.isEmpty else { return nil }
-
-        let program: String?
-        if let prog = plist["Program"] as? String {
-            program = prog
-        } else if let args = plist["ProgramArguments"] as? [String], let first = args.first {
-            program = first
-        } else {
-            program = nil
-        }
-
-        return PlistEntry(
-            label: label,
-            plistPath: path,
-            program: program,
-            user: plist["UserName"] as? String,
-            runAtLoad: plist["RunAtLoad"] as? Bool ?? false
-        )
-    }
-
-    private func launchItemFrom(_ entry: PlistEntry, type: LaunchItem.ItemType) -> LaunchItem {
+    private func launchItemFrom(_ entry: LaunchdPlistParser.ParsedEntry, type: LaunchItem.ItemType) -> LaunchItem {
         LaunchItem(
             label: entry.label,
             path: entry.plistPath,

@@ -55,7 +55,7 @@ let package = Package(
         ),
         .target(
             name: "Persistence",
-            dependencies: ["Models"]
+            dependencies: ["Models", "XPCServices"]
         ),
         .target(
             name: "Keychain",

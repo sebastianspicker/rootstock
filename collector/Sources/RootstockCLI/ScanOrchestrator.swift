@@ -38,78 +38,85 @@ struct ScanOrchestrator {
     }
 
     func run(config: ModuleConfig) async -> ScanResult {
-        var tccGrants: [TCCGrant] = []
         var applications: [Application] = []
-        var xpcServices: [XPCService] = []
-        var keychainAcls: [KeychainItem] = []
-        var mdmProfiles: [MDMProfile] = []
-        var launchItems: [LaunchItem] = []
         var allErrors: [CollectionError] = []
-
-        let total = [config.tcc, config.entitlements, config.codeSigning, config.xpc, config.persistence, config.keychain, config.mdm].filter { $0 }.count
-        var step = 1
         let scanStart = Date()
 
-        if config.tcc {
-            err("[\(step)/\(total)] Collecting TCC grants...")
-            let (result, elapsed) = await timed { await TCCDataSource().collect() }
-            tccGrants = result.nodes.compactMap { $0 as? TCCGrant }
-            allErrors.append(contentsOf: result.errors)
-            if verbose { err("  [TCC]          completed in \(format(elapsed))  (\(tccGrants.count) grants, \(result.errors.count) errors)") }
-            step += 1
-        }
+        // Phase 1: Launch independent modules concurrently.
+        // TCC, XPC, Persistence, Keychain, and MDM have no data dependencies.
+        err("Collecting data sources...")
 
+        async let tccTask = config.tcc
+            ? timed { await TCCDataSource().collect() }
+            : nil
+        async let xpcTask = config.xpc
+            ? timed { await XPCDataSource().collect() }
+            : nil
+        async let persistenceTask = config.persistence
+            ? timed { await PersistenceDataSource().collect() }
+            : nil
+        async let keychainTask = config.keychain
+            ? timed { await KeychainDataSource().collect() }
+            : nil
+        async let mdmTask = config.mdm
+            ? timed { await MDMDataSource().collect() }
+            : nil
+
+        // Phase 2: Entitlements → CodeSigning (sequential dependency).
+        var entElapsed = 0.0
+        var csElapsed = 0.0
         if config.entitlements {
-            err("[\(step)/\(total)] Scanning entitlements...")
             let (result, elapsed) = await timed { await EntitlementDataSource().collect() }
             applications = result.nodes.compactMap { $0 as? Application }
             allErrors.append(contentsOf: result.errors)
-            if verbose { err("  [Entitlements] completed in \(format(elapsed))  (\(applications.count) apps, \(result.errors.count) errors)") }
-            step += 1
+            entElapsed = elapsed
         }
-
         if config.codeSigning {
-            err("[\(step)/\(total)] Analyzing code signatures...")
             let (csErrors, elapsed) = await timed { CodeSigningDataSource().enrich(applications: &applications) }
             allErrors.append(contentsOf: csErrors)
-            if verbose { err("  [CodeSigning]  completed in \(format(elapsed))  (\(applications.count) apps, \(csErrors.count) errors)") }
-            step += 1
+            csElapsed = elapsed
         }
 
-        if config.xpc {
-            err("[\(step)/\(total)] Enumerating XPC services...")
-            let (result, elapsed) = await timed { await XPCDataSource().collect() }
+        // Phase 3: Await concurrent results.
+        var tccGrants: [TCCGrant] = []
+        if let (result, elapsed) = await tccTask {
+            tccGrants = result.nodes.compactMap { $0 as? TCCGrant }
+            allErrors.append(contentsOf: result.errors)
+            if verbose { err("  [TCC]          completed in \(format(elapsed))  (\(tccGrants.count) grants, \(result.errors.count) errors)") }
+        }
+        if verbose && config.entitlements {
+            err("  [Entitlements] completed in \(format(entElapsed))  (\(applications.count) apps)")
+        }
+        if verbose && config.codeSigning {
+            err("  [CodeSigning]  completed in \(format(csElapsed))  (\(applications.count) apps)")
+        }
+
+        var xpcServices: [XPCService] = []
+        if let (result, elapsed) = await xpcTask {
             xpcServices = result.nodes.compactMap { $0 as? XPCService }
             allErrors.append(contentsOf: result.errors)
             if verbose { err("  [XPC]          completed in \(format(elapsed))  (\(xpcServices.count) services, \(result.errors.count) errors)") }
-            step += 1
         }
 
-        if config.persistence {
-            err("[\(step)/\(total)] Scanning persistence mechanisms...")
-            let (result, elapsed) = await timed { await PersistenceDataSource().collect() }
+        var launchItems: [LaunchItem] = []
+        if let (result, elapsed) = await persistenceTask {
             launchItems = result.nodes.compactMap { $0 as? LaunchItem }
             allErrors.append(contentsOf: result.errors)
             if verbose { err("  [Persistence]  completed in \(format(elapsed))  (\(launchItems.count) items, \(result.errors.count) errors)") }
-            step += 1
         }
 
-        if config.keychain {
-            err("[\(step)/\(total)] Reading Keychain ACL metadata...")
-            let (result, elapsed) = await timed { await KeychainDataSource().collect() }
+        var keychainAcls: [KeychainItem] = []
+        if let (result, elapsed) = await keychainTask {
             keychainAcls = result.nodes.compactMap { $0 as? KeychainItem }
             allErrors.append(contentsOf: result.errors)
             if verbose { err("  [Keychain]     completed in \(format(elapsed))  (\(keychainAcls.count) items, \(result.errors.count) errors)") }
-            step += 1
         }
 
-        if config.mdm {
-            err("[\(step)/\(total)] Scanning MDM configuration profiles...")
-            let (result, elapsed) = await timed { await MDMDataSource().collect() }
+        var mdmProfiles: [MDMProfile] = []
+        if let (result, elapsed) = await mdmTask {
             mdmProfiles = result.nodes.compactMap { $0 as? MDMProfile }
             allErrors.append(contentsOf: result.errors)
             if verbose { err("  [MDM]          completed in \(format(elapsed))  (\(mdmProfiles.count) profiles, \(result.errors.count) errors)") }
-            step += 1
         }
 
         if verbose {

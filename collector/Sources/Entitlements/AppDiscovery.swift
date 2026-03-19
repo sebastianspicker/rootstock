@@ -90,8 +90,16 @@ struct AppDiscovery {
     }
 
     private func makeDiscoveredApp(at url: URL) -> DiscoveredApp? {
-        let contentsURL = url.appendingPathComponent("Contents")
+        // Resolve symlinks (e.g. Homebrew Cask apps) before reading any file content.
+        let resolvedURL = url.resolvingSymlinksInPath()
+
+        let contentsURL = resolvedURL.appendingPathComponent("Contents")
         let plistURL = contentsURL.appendingPathComponent("Info.plist")
+
+        guard fileManager.fileExists(atPath: plistURL.path) else {
+            // Bundle has no Info.plist — not a valid .app bundle; skip silently.
+            return nil
+        }
 
         guard let plistData = try? Data(contentsOf: plistURL),
               let plist = try? PropertyListSerialization.propertyList(
@@ -99,12 +107,18 @@ struct AppDiscovery {
               ) as? [String: Any]
         else { return nil }
 
-        guard let bundleId = plist["CFBundleIdentifier"] as? String,
-              !bundleId.isEmpty else { return nil }
+        // Use path-based fallback bundle ID when CFBundleIdentifier is absent or empty.
+        let bundleId: String
+        if let id = plist["CFBundleIdentifier"] as? String, !id.isEmpty {
+            bundleId = id
+        } else {
+            // Derive a stable pseudo-ID from the bundle path so the app is still indexed.
+            bundleId = "path.\(resolvedURL.deletingPathExtension().lastPathComponent)"
+        }
 
         let name = (plist["CFBundleName"] as? String)
             ?? (plist["CFBundleDisplayName"] as? String)
-            ?? url.deletingPathExtension().lastPathComponent
+            ?? resolvedURL.deletingPathExtension().lastPathComponent
 
         let version = plist["CFBundleShortVersionString"] as? String
         let execName = plist["CFBundleExecutable"] as? String ?? name
@@ -113,14 +127,15 @@ struct AppDiscovery {
         guard fileManager.fileExists(atPath: execURL.path) else { return nil }
 
         let isElectron = detectElectron(contentsURL: contentsURL)
-        let isSystem = url.path.hasPrefix("/System/") || url.path.hasPrefix("/usr/")
+        // Use the original (pre-symlink) path for reporting; resolved path for file I/O.
+        let isSystem = resolvedURL.path.hasPrefix("/System/") || resolvedURL.path.hasPrefix("/usr/")
 
         return DiscoveredApp(
             name: name,
             bundleId: bundleId,
-            path: url.path,
+            path: url.path,                 // original path (symlink or direct)
             version: version,
-            executablePath: execURL.path,
+            executablePath: execURL.path,   // resolved path for codesign / Security.framework
             isElectron: isElectron,
             isSystem: isSystem
         )

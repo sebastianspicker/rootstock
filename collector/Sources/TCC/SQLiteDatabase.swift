@@ -19,7 +19,17 @@ final class SQLiteDatabase {
     private var db: OpaquePointer?
 
     init(path: String) throws {
-        let rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil)
+        var rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil)
+
+        // SQLITE_BUSY / SQLITE_LOCKED means tccd is holding an exclusive lock.
+        // Retry once after 500 ms — tccd writes are brief checkpoints.
+        if rc == SQLITE_BUSY || rc == SQLITE_LOCKED {
+            sqlite3_close(db)
+            db = nil
+            Thread.sleep(forTimeInterval: 0.5)
+            rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil)
+        }
+
         guard rc == SQLITE_OK else {
             let msg = db.flatMap { String(validatingUTF8: sqlite3_errmsg($0)) } ?? "unknown error"
             sqlite3_close(db)

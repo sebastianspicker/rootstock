@@ -48,67 +48,73 @@ struct ScanOrchestrator {
 
         let total = [config.tcc, config.entitlements, config.codeSigning, config.xpc, config.persistence, config.keychain, config.mdm].filter { $0 }.count
         var step = 1
+        let scanStart = Date()
 
         if config.tcc {
             err("[\(step)/\(total)] Collecting TCC grants...")
-            let result = await TCCDataSource().collect()
+            let (result, elapsed) = await timed { await TCCDataSource().collect() }
             tccGrants = result.nodes.compactMap { $0 as? TCCGrant }
             allErrors.append(contentsOf: result.errors)
-            if verbose { err("  → \(tccGrants.count) grant(s), \(result.errors.count) error(s)") }
+            if verbose { err("  [TCC]          completed in \(format(elapsed))  (\(tccGrants.count) grants, \(result.errors.count) errors)") }
             step += 1
         }
 
         if config.entitlements {
             err("[\(step)/\(total)] Scanning entitlements...")
-            let result = await EntitlementDataSource().collect()
+            let (result, elapsed) = await timed { await EntitlementDataSource().collect() }
             applications = result.nodes.compactMap { $0 as? Application }
             allErrors.append(contentsOf: result.errors)
-            if verbose { err("  → \(applications.count) app(s), \(result.errors.count) error(s)") }
+            if verbose { err("  [Entitlements] completed in \(format(elapsed))  (\(applications.count) apps, \(result.errors.count) errors)") }
             step += 1
         }
 
         if config.codeSigning {
             err("[\(step)/\(total)] Analyzing code signatures...")
-            let csErrors = CodeSigningDataSource().enrich(applications: &applications)
+            let (csErrors, elapsed) = await timed { CodeSigningDataSource().enrich(applications: &applications) }
             allErrors.append(contentsOf: csErrors)
-            if verbose { err("  → enriched \(applications.count) app(s), \(csErrors.count) error(s)") }
+            if verbose { err("  [CodeSigning]  completed in \(format(elapsed))  (\(applications.count) apps, \(csErrors.count) errors)") }
             step += 1
         }
 
         if config.xpc {
             err("[\(step)/\(total)] Enumerating XPC services...")
-            let result = await XPCDataSource().collect()
+            let (result, elapsed) = await timed { await XPCDataSource().collect() }
             xpcServices = result.nodes.compactMap { $0 as? XPCService }
             allErrors.append(contentsOf: result.errors)
-            if verbose { err("  → \(xpcServices.count) service(s), \(result.errors.count) error(s)") }
+            if verbose { err("  [XPC]          completed in \(format(elapsed))  (\(xpcServices.count) services, \(result.errors.count) errors)") }
             step += 1
         }
 
         if config.persistence {
             err("[\(step)/\(total)] Scanning persistence mechanisms...")
-            let result = await PersistenceDataSource().collect()
+            let (result, elapsed) = await timed { await PersistenceDataSource().collect() }
             launchItems = result.nodes.compactMap { $0 as? LaunchItem }
             allErrors.append(contentsOf: result.errors)
-            if verbose { err("  → \(launchItems.count) item(s), \(result.errors.count) error(s)") }
+            if verbose { err("  [Persistence]  completed in \(format(elapsed))  (\(launchItems.count) items, \(result.errors.count) errors)") }
             step += 1
         }
 
         if config.keychain {
             err("[\(step)/\(total)] Reading Keychain ACL metadata...")
-            let result = await KeychainDataSource().collect()
+            let (result, elapsed) = await timed { await KeychainDataSource().collect() }
             keychainAcls = result.nodes.compactMap { $0 as? KeychainItem }
             allErrors.append(contentsOf: result.errors)
-            if verbose { err("  → \(keychainAcls.count) item(s), \(result.errors.count) error(s)") }
+            if verbose { err("  [Keychain]     completed in \(format(elapsed))  (\(keychainAcls.count) items, \(result.errors.count) errors)") }
             step += 1
         }
 
         if config.mdm {
             err("[\(step)/\(total)] Scanning MDM configuration profiles...")
-            let result = await MDMDataSource().collect()
+            let (result, elapsed) = await timed { await MDMDataSource().collect() }
             mdmProfiles = result.nodes.compactMap { $0 as? MDMProfile }
             allErrors.append(contentsOf: result.errors)
-            if verbose { err("  → \(mdmProfiles.count) profile(s), \(result.errors.count) error(s)") }
+            if verbose { err("  [MDM]          completed in \(format(elapsed))  (\(mdmProfiles.count) profiles, \(result.errors.count) errors)") }
             step += 1
+        }
+
+        if verbose {
+            let totalElapsed = Date().timeIntervalSince(scanStart)
+            err("  Total: \(format(totalElapsed))")
         }
 
         return ScanResult(
@@ -134,6 +140,18 @@ struct ScanOrchestrator {
     private func detectFDA() -> Bool {
         let systemTCC = "/Library/Application Support/com.apple.TCC/TCC.db"
         return FileManager.default.isReadableFile(atPath: systemTCC)
+    }
+
+    /// Runs `block`, returning the result and wall-clock elapsed time in seconds.
+    private func timed<T>(_ block: () async -> T) async -> (T, Double) {
+        let start = Date()
+        let result = await block()
+        return (result, Date().timeIntervalSince(start))
+    }
+
+    /// Formats elapsed seconds as "X.XXs".
+    private func format(_ seconds: Double) -> String {
+        String(format: "%.2fs", seconds)
     }
 
     /// Write a line to stderr.

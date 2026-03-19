@@ -14,6 +14,8 @@
 | TD-005 | collector/CodeSigning | Platform binaries (Apple system apps with no developer team) have `team_id` omitted from JSON entirely rather than serialized as `null`. Swift's `JSONEncoder` omits nil optionals by default. Consumers must use `app.get("team_id")` not `app["team_id"]`. Fix: use a custom encoder or encode as explicit null. | Phase 1.4 | Low |
 | TD-006 | collector/CodeSigning | Terminal.app, Safari.app and other Apple platform binaries report `hardened_runtime: false` and appear in `injection_methods` as `dyld_insert`. These apps have SIP (System Integrity Protection) kernel-level enforcement that prevents DYLD injection regardless of the CS_RUNTIME flag. The injection assessment should add a `is_sip_protected` check (path starts with /System/) to suppress false positives. | Phase 1.6 | Medium |
 | TD-007 | collector/CodeSigning | sudo/root run could not be tested via CI pipeline (requires interactive terminal for sudo). Root run expected to show `has_fda: true` and parse system TCC.db. Verify manually. | Phase 1.6 | Low |
+| TD-008 | collector/XPC | XPC scanning is the dominant performance bottleneck (~4.8s of 5.3s total on a 184-app Mac). XPC plist reading is sequential; parallelizing with TaskGroup (same pattern as EntitlementDataSource) should yield 2–3x speedup. Deferred because total scan time is already well within the 30s target. | Phase 5.3 | Low |
+| TD-009 | collector | App bundles without CFBundleIdentifier now get a path-based pseudo-ID (`path.<AppName>`). These pseudo-IDs are stable within a machine but not portable across machines or installs. Neo4j import will MERGE on this ID — acceptable for MVP but may cause duplicate nodes if the app is reinstalled at a different path. | Phase 5.3 | Low |
 
 ## Resolved Debt
 

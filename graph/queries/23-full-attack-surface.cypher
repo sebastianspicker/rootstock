@@ -37,7 +37,7 @@ RETURN attack_type,
 
 UNION ALL
 
-MATCH (app:Application {is_electron: true})-[r:CHILD_INHERITS_TCC]->(child:Application)
+MATCH (attacker2:Application {bundle_id: 'attacker.payload'})-[r:CHILD_INHERITS_TCC]->(app:Application {is_electron: true})
 OPTIONAL MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(perm:TCC_Permission)
 WITH 'CHILD_INHERITS_TCC' AS attack_type,
      app.name                                 AS target_app,

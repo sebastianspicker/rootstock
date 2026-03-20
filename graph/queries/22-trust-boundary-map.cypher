@@ -10,19 +10,19 @@
 // either exposes the data accessible by both.
 //
 // Trust types modelled:
-//   SIGNED_BY      — same signing team (code identity trust)
+//   SIGNED_BY_SAME_TEAM  — same signing team (code identity trust)
 //   CAN_SEND_APPLE_EVENT — automation trust
 //   COMMUNICATES_WITH    — XPC service trust
 //   CAN_INJECT_INTO      — injection vulnerability (unintended trust)
 
 MATCH (a:Application)-[r]->(b)
-WHERE type(r) IN ['SIGNED_BY', 'CAN_SEND_APPLE_EVENT', 'COMMUNICATES_WITH', 'CAN_INJECT_INTO']
+WHERE type(r) IN ['SIGNED_BY_SAME_TEAM', 'CAN_SEND_APPLE_EVENT', 'COMMUNICATES_WITH', 'CAN_INJECT_INTO']
   AND (coalesce($app_name, a.name) = a.name OR $app_name IS NULL)
   AND a.bundle_id <> 'attacker.payload'
 
 WITH a, type(r) AS trust_type, b,
      CASE type(r)
-       WHEN 'SIGNED_BY'           THEN 'code_identity'
+       WHEN 'SIGNED_BY_SAME_TEAM' THEN 'code_identity'
        WHEN 'CAN_SEND_APPLE_EVENT' THEN 'automation'
        WHEN 'COMMUNICATES_WITH'   THEN 'xpc'
        WHEN 'CAN_INJECT_INTO'     THEN 'injection_vuln'

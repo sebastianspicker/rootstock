@@ -117,6 +117,46 @@
 /ralph-loop:ralph-loop "@ralph-prompts/phase-6/6-3-community-feedback.md" --max-iterations 15 --completion-promise "PHASE_6_3_COMPLETE"
 ```
 
+### Full-Repo Review Suite
+
+> Systematisches Review aller Subsysteme nach Abschluss der Entwicklungsphasen 1–5.
+> 6 fokussierte Phase-Reviews + Orchestrator + finaler Konsistenz-Check.
+> Folgt dem Datenfluss: Collect → Import → Infer → Query → Report.
+
+```bash
+# Option A: Manuell, Phase für Phase
+
+# A — Swift Collector (Data Acquisition)
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-a-data-acquisition.md" --max-iterations 30 --completion-promise "REVIEW_A_COMPLETE"
+
+# B — Graph Schema & Import Pipeline
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-b-graph-import.md" --max-iterations 30 --completion-promise "REVIEW_B_COMPLETE"
+
+# C — Inference Engine
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-c-inference-engine.md" --max-iterations 30 --completion-promise "REVIEW_C_COMPLETE"
+
+# D — Cypher Query Library
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-d-query-library.md" --max-iterations 25 --completion-promise "REVIEW_D_COMPLETE"
+
+# E — Reporting, Visualization & API
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-e-reporting-viz-api.md" --max-iterations 25 --completion-promise "REVIEW_E_COMPLETE"
+
+# F — Test Harness & Utilities
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-f-test-harness-utils.md" --max-iterations 20 --completion-promise "REVIEW_F_COMPLETE"
+
+# Final — Cross-Subsystem Consistency
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-final-consistency.md" --max-iterations 25 --completion-promise "REVIEW_FINAL_COMPLETE"
+```
+
+```bash
+# Option B: Orchestriert (führt A→F + Final automatisch aus)
+/ralph-loop:ralph-loop "@ralph-prompts/full-review/review-orchestrator.md" --max-iterations 10 --completion-promise "REVIEW_ORCHESTRATOR_COMPLETE"
+```
+
+**Geschätzter Aufwand:** ~185 Iterationen total (6 Phasen × ~25 + Orchestrator + Final)
+
+---
+
 ## Tipps
 
 - **Vor jedem Loop:** Sicherstellen dass der vorherige Abschnitt committed ist (`git add . && git commit`)

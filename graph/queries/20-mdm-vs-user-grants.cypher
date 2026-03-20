@@ -14,10 +14,10 @@
 MATCH (app:Application)-[r:HAS_TCC_GRANT {allowed: true}]->(perm:TCC_Permission)
 WITH perm.display_name AS permission,
      perm.service      AS service,
-     sum(CASE WHEN r.auth_reason = 4 THEN 1 ELSE 0 END) AS mdm_granted,
-     sum(CASE WHEN r.auth_reason = 1 THEN 1 ELSE 0 END) AS user_granted,
-     sum(CASE WHEN r.auth_reason = 3 THEN 1 ELSE 0 END) AS entitlement_granted,
-     sum(CASE WHEN r.auth_reason = 5 THEN 1 ELSE 0 END) AS system_granted,
+     sum(CASE WHEN r.auth_reason = 'mdm' THEN 1 ELSE 0 END) AS mdm_granted,
+     sum(CASE WHEN r.auth_reason = 'user_prompt' THEN 1 ELSE 0 END) AS user_granted,
+     sum(CASE WHEN r.auth_reason = 'entitlement' THEN 1 ELSE 0 END) AS entitlement_granted,
+     sum(CASE WHEN r.auth_reason = 'system' THEN 1 ELSE 0 END) AS system_granted,
      count(*) AS total_grants
 
 RETURN permission,

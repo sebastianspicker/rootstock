@@ -9,17 +9,10 @@
 // Compare output before/after software installs to detect new TCC grants.
 
 MATCH (app:Application)-[r:HAS_TCC_GRANT]->(perm:TCC_Permission)
-WHERE coalesce($scope, r.scope) = r.scope OR $scope IS NULL
+WHERE $scope IS NULL OR r.scope = $scope
 
 WITH app, r, perm,
-     CASE r.auth_reason
-       WHEN 1 THEN 'user_prompt'
-       WHEN 2 THEN 'system_settings'
-       WHEN 3 THEN 'entitlement'
-       WHEN 4 THEN 'mdm'
-       WHEN 5 THEN 'system'
-       ELSE 'unknown_' + toString(r.auth_reason)
-     END AS grant_method,
+     r.auth_reason AS grant_method,
      CASE WHEN r.allowed = true THEN 'allowed' ELSE 'denied' END AS status
 
 RETURN perm.display_name           AS permission,

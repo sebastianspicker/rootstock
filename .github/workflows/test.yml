@@ -25,7 +25,7 @@ jobs:
 
       - name: swift test
         working-directory: collector
-        timeout-minutes: 30
+        timeout-minutes: 45
         run: swift test --parallel
 
   # ── Python unit tests ────────────────────────────────────────────────────

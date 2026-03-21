@@ -22,7 +22,7 @@ import argparse
 import sys
 
 from neo4j_connection import add_neo4j_args, connect_from_args
-from cve_reference import _REGISTRY, _GROUP_REGISTRY, _GROUP_TECHNIQUE_MAP, AttackContext, CveEntry
+from cve_reference import _REGISTRY, _GROUP_REGISTRY, _GROUP_TECHNIQUE_MAP, AttackContext, CveEntry, CWE_REGISTRY
 from cve_enrichment import enrich_registry, EnrichedCveEntry, temporal_score
 from version_matcher import (
     extract_macos_max_version,
@@ -484,6 +484,40 @@ def import_group_technique_edges(session) -> int:
     return count
 
 
+def import_cwe_nodes(session) -> int:
+    """MERGE CWE nodes from CWE_REGISTRY."""
+    count = 0
+    for cwe in CWE_REGISTRY.values():
+        result = session.run(
+            """
+            MERGE (c:CWE {cwe_id: $cwe_id})
+            SET c.name     = $name,
+                c.category = $category
+            RETURN count(c) AS n
+            """,
+            cwe_id=cwe.cwe_id,
+            name=cwe.name,
+            category=cwe.category,
+        )
+        count += result.single()["n"]
+    return count
+
+
+def import_cwe_edges(session) -> int:
+    """Create (:Vulnerability)-[:HAS_CWE]->(:CWE) edges from cwe_ids property."""
+    result = session.run(
+        """
+        MATCH (v:Vulnerability)
+        WHERE v.cwe_ids IS NOT NULL AND size(v.cwe_ids) > 0
+        UNWIND v.cwe_ids AS cwe_id
+        MATCH (c:CWE {cwe_id: cwe_id})
+        MERGE (v)-[:HAS_CWE]->(c)
+        RETURN count(*) AS n
+        """
+    )
+    return result.single()["n"]
+
+
 def import_all(session) -> dict[str, int]:
     """Run the full vulnerability import pipeline."""
     vuln_count = import_vulnerability_nodes(session)
@@ -493,6 +527,8 @@ def import_all(session) -> dict[str, int]:
     category_count = import_affected_by_edges(session)
     group_count = import_threat_group_nodes(session)
     group_edge_count = import_group_technique_edges(session)
+    cwe_count = import_cwe_nodes(session)
+    cwe_edge_count = import_cwe_edges(session)
 
     return {
         "vulnerabilities": vuln_count,
@@ -503,6 +539,8 @@ def import_all(session) -> dict[str, int]:
         "affected_by": precise_count + category_count,
         "threat_groups": group_count,
         "uses_technique": group_edge_count,
+        "cwe_nodes": cwe_count,
+        "has_cwe_edges": cwe_edge_count,
     }
 
 
@@ -531,6 +569,8 @@ def main() -> int:
     print(f"  AFFECTED_BY edges (total): {counts['affected_by']}")
     print(f"  ThreatGroup nodes: {counts['threat_groups']}")
     print(f"  USES_TECHNIQUE edges: {counts['uses_technique']}")
+    print(f"  CWE nodes: {counts['cwe_nodes']}")
+    print(f"  HAS_CWE edges: {counts['has_cwe_edges']}")
     return 0
 
 

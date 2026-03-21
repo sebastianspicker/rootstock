@@ -309,6 +309,7 @@ def import_system_extensions(
             "team_id": e.team_id,
             "extension_type": e.extension_type,
             "enabled": e.enabled,
+            "subscribed_events": e.subscribed_events,
         }
         for e in extensions
     ]
@@ -317,9 +318,10 @@ def import_system_extensions(
         """
         UNWIND $records AS r
         MERGE (se:SystemExtension {identifier: r.identifier})
-        SET se.team_id        = r.team_id,
-            se.extension_type = r.extension_type,
-            se.enabled        = r.enabled
+        SET se.team_id            = r.team_id,
+            se.extension_type     = r.extension_type,
+            se.enabled            = r.enabled,
+            se.subscribed_events  = r.subscribed_events
         """,
         records=records,
     )

@@ -16,17 +16,22 @@ public struct SystemExtension: GraphNode {
     /// Whether the extension is currently enabled.
     public let enabled: Bool
 
+    /// ESF event types this extension subscribes to (endpoint_security type only).
+    /// Populated from `systemextensionsctl list` output when available.
+    public let subscribedEvents: [String]
+
     public enum ExtensionType: String, Codable, Sendable {
         case network
         case endpointSecurity = "endpoint_security"
         case driver
     }
 
-    public init(identifier: String, teamId: String?, extensionType: ExtensionType, enabled: Bool) {
+    public init(identifier: String, teamId: String?, extensionType: ExtensionType, enabled: Bool, subscribedEvents: [String] = []) {
         self.identifier = identifier
         self.teamId = teamId
         self.extensionType = extensionType
         self.enabled = enabled
+        self.subscribedEvents = subscribedEvents
     }
 
     enum CodingKeys: String, CodingKey {
@@ -34,5 +39,6 @@ public struct SystemExtension: GraphNode {
         case teamId = "team_id"
         case extensionType = "extension_type"
         case enabled
+        case subscribedEvents = "subscribed_events"
     }
 }

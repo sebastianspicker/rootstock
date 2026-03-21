@@ -17,6 +17,13 @@ OWNED_PROPERTY = "owned"
 OWNED_AT_PROPERTY = "owned_at"
 TIER_PROPERTY = "tier"
 
+# Risk scoring properties (set by infer_risk_score.py)
+RISK_SCORE_PROPERTY = "risk_score"
+RISK_LEVEL_PROPERTY = "risk_level"
+ATTACK_CATEGORIES_PROPERTY = "attack_categories"
+CRITICAL_FINDING_COUNT_PROPERTY = "critical_finding_count"
+HIGH_FINDING_COUNT_PROPERTY = "high_finding_count"
+
 # Canonical mapping of Neo4j labels to their unique key property.
 # Used by mark_owned.py (for node lookup) and opengraph_export.py (for ID generation).
 # Keychain_Item uses a composite key (label+kind) handled separately where needed.
@@ -47,4 +54,6 @@ NODE_KEY_PROPERTY: dict[str, str] = {
     "SandboxProfile": "bundle_id",
     "ADUser": "object_id",
     "ThreatGroup": "group_id",
+    "CWE": "cwe_id",
+    "Recommendation": "key",
 }

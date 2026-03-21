@@ -19,8 +19,9 @@ _VALID_ATTACK_COMPLEXITIES = {"low", "medium", "high"}
 class CweReference:
     """A CWE weakness class reference."""
 
-    cwe_id: str   # "CWE-416"
-    name: str     # "Use After Free"
+    cwe_id: str       # "CWE-416"
+    name: str         # "Use After Free"
+    category: str = "other"  # "memory_safety", "access_control", "input_validation", etc.
 
 
 @dataclass(frozen=True)
@@ -1023,25 +1024,25 @@ def get_all_critical_cves(min_cvss: float = 8.0) -> list[CveEntry]:
 
 # Master CWE reference table — maps CWE IDs to human-readable names.
 CWE_REGISTRY: dict[str, CweReference] = {
-    "CWE-20":  CweReference("CWE-20",  "Improper Input Validation"),
-    "CWE-22":  CweReference("CWE-22",  "Path Traversal"),
-    "CWE-59":  CweReference("CWE-59",  "Improper Link Resolution Before File Access"),
-    "CWE-120": CweReference("CWE-120", "Buffer Overflow"),
-    "CWE-122": CweReference("CWE-122", "Heap-based Buffer Overflow"),
-    "CWE-200": CweReference("CWE-200", "Exposure of Sensitive Information"),
-    "CWE-269": CweReference("CWE-269", "Improper Privilege Management"),
-    "CWE-276": CweReference("CWE-276", "Incorrect Default Permissions"),
-    "CWE-284": CweReference("CWE-284", "Improper Access Control"),
-    "CWE-287": CweReference("CWE-287", "Improper Authentication"),
-    "CWE-347": CweReference("CWE-347", "Improper Verification of Cryptographic Signature"),
-    "CWE-362": CweReference("CWE-362", "Race Condition"),
-    "CWE-416": CweReference("CWE-416", "Use After Free"),
-    "CWE-427": CweReference("CWE-427", "Uncontrolled Search Path Element"),
-    "CWE-668": CweReference("CWE-668", "Exposure of Resource to Wrong Sphere"),
-    "CWE-693": CweReference("CWE-693", "Protection Mechanism Failure"),
-    "CWE-787": CweReference("CWE-787", "Out-of-bounds Write"),
-    "CWE-862": CweReference("CWE-862", "Missing Authorization"),
-    "CWE-863": CweReference("CWE-863", "Incorrect Authorization"),
+    "CWE-20":  CweReference("CWE-20",  "Improper Input Validation",                      "input_validation"),
+    "CWE-22":  CweReference("CWE-22",  "Path Traversal",                                 "input_validation"),
+    "CWE-59":  CweReference("CWE-59",  "Improper Link Resolution Before File Access",    "input_validation"),
+    "CWE-120": CweReference("CWE-120", "Buffer Overflow",                                "memory_safety"),
+    "CWE-122": CweReference("CWE-122", "Heap-based Buffer Overflow",                     "memory_safety"),
+    "CWE-200": CweReference("CWE-200", "Exposure of Sensitive Information",               "information_disclosure"),
+    "CWE-269": CweReference("CWE-269", "Improper Privilege Management",                   "access_control"),
+    "CWE-276": CweReference("CWE-276", "Incorrect Default Permissions",                   "access_control"),
+    "CWE-284": CweReference("CWE-284", "Improper Access Control",                         "access_control"),
+    "CWE-287": CweReference("CWE-287", "Improper Authentication",                         "authentication"),
+    "CWE-347": CweReference("CWE-347", "Improper Verification of Cryptographic Signature","authentication"),
+    "CWE-362": CweReference("CWE-362", "Race Condition",                                  "concurrency"),
+    "CWE-416": CweReference("CWE-416", "Use After Free",                                  "memory_safety"),
+    "CWE-427": CweReference("CWE-427", "Uncontrolled Search Path Element",                "input_validation"),
+    "CWE-668": CweReference("CWE-668", "Exposure of Resource to Wrong Sphere",            "access_control"),
+    "CWE-693": CweReference("CWE-693", "Protection Mechanism Failure",                    "access_control"),
+    "CWE-787": CweReference("CWE-787", "Out-of-bounds Write",                             "memory_safety"),
+    "CWE-862": CweReference("CWE-862", "Missing Authorization",                           "access_control"),
+    "CWE-863": CweReference("CWE-863", "Incorrect Authorization",                         "access_control"),
 }
 
 

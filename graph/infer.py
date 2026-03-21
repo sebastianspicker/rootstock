@@ -32,6 +32,8 @@ import infer_password
 import infer_kerberos
 import infer_sandbox
 import infer_quarantine
+import infer_risk_score
+import infer_recommendations
 
 
 def main() -> int:
@@ -88,12 +90,20 @@ def main() -> int:
         n_quarantine = infer_quarantine.infer(session)
         print(f"  BYPASSED_GATEKEEPER:  {n_quarantine}")
 
+        # Risk scoring runs after all other inference + tier classification
+        n_risk = infer_risk_score.infer(session)
+        print(f"  RISK_SCORE:           {n_risk} apps scored")
+
+        # Recommendations run last (depend on edges created by earlier modules)
+        n_recs = infer_recommendations.infer(session)
+        print(f"  HAS_RECOMMENDATION:   {n_recs}")
+
     driver.close()
 
     total = (n_inject + n_inherit + n_apple_events + n_transitive_fda
              + n_mdm_overgrant + n_keychain_groups + n_file_acl + n_shell_hooks
              + n_a11y + n_esf + n_group_cap + n_password + n_kerberos
-             + n_sandbox + n_quarantine)
+             + n_sandbox + n_quarantine + n_recs)
     print(
         f"\nInferred {n_inject} CAN_INJECT_INTO, "
         f"{n_inherit} CHILD_INHERITS_TCC, "
@@ -109,7 +119,9 @@ def main() -> int:
         f"{n_password} CAN_CHANGE_PASSWORD, "
         f"{n_kerberos} CAN_READ_KERBEROS, "
         f"{n_sandbox} SANDBOX edges, "
-        f"{n_quarantine} BYPASSED_GATEKEEPER"
+        f"{n_quarantine} BYPASSED_GATEKEEPER, "
+        f"{n_risk} apps risk-scored, "
+        f"{n_recs} HAS_RECOMMENDATION"
     )
     if total == 0:
         print("Note: No inferred edges created. Import scan data first with: python3 graph/import.py")

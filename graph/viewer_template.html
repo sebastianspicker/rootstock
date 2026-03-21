@@ -177,6 +177,18 @@ canvas.grabbing{cursor:grabbing}
     <h3>Queries</h3>
     <div id="query-list"></div>
   </div>
+  <div id="custom-query-section" class="filter-section" style="display:none">
+    <h3 style="cursor:pointer" onclick="document.getElementById('custom-query-body').style.display=document.getElementById('custom-query-body').style.display==='none'?'block':'none'">Custom Cypher</h3>
+    <div id="custom-query-body">
+      <textarea id="cypher-input" rows="4" style="width:100%;background:#0f3460;border:1px solid #2a2a4a;border-radius:4px;color:#e0e0e0;font-family:'SF Mono',Menlo,monospace;font-size:11px;padding:8px;resize:vertical" placeholder="MATCH (n) RETURN n LIMIT 25"></textarea>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="live-btn" onclick="runCustomCypher()" style="flex:1">Run</button>
+        <select id="cypher-history-select" style="flex:1;background:#0f3460;border:1px solid #2a2a4a;border-radius:4px;color:#888;font-size:10px;padding:2px" onchange="if(this.value){document.getElementById('cypher-input').value=this.value}">
+          <option value="">History</option>
+        </select>
+      </div>
+    </div>
+  </div>
   </div>
   <div class="live-actions" id="live-actions">
     <button class="live-btn" onclick="liveRefresh()">Refresh</button>
@@ -1449,6 +1461,7 @@ if (isLive) {
   // Enable live UI elements
   document.getElementById('query-section').classList.add('live');
   document.getElementById('live-actions').classList.add('live');
+  document.getElementById('custom-query-section').style.display = 'block';
 
   // Fetch and populate query browser
   fetch(API_BASE + '/api/queries')
@@ -1621,6 +1634,97 @@ function liveShowOwned() {
     })
     .catch(err => console.warn('Show owned failed:', err));
 }
+
+// ── Custom Cypher console ────────────────────────────────────────────────
+function runCustomCypher() {
+  if (!isLive) return;
+  const input = document.getElementById('cypher-input');
+  const cypher = input.value.trim();
+  if (!cypher) return;
+
+  // Save to history (localStorage, last 10)
+  const historyKey = '__rs_cypher_history__';
+  let history = [];
+  try { history = JSON.parse(localStorage.getItem(historyKey) || '[]'); } catch(e) {}
+  history = [cypher, ...history.filter(h => h !== cypher)].slice(0, 10);
+  localStorage.setItem(historyKey, JSON.stringify(history));
+  _updateCypherHistory(history);
+
+  const panel = document.getElementById('results-panel');
+  const body = document.getElementById('results-body');
+  const meta = document.getElementById('results-meta');
+  document.getElementById('results-title').textContent = 'Custom Cypher';
+  meta.textContent = 'Running...';
+  body.textContent = '';
+  panel.classList.add('open');
+
+  fetch(API_BASE + '/api/cypher', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cypher: cypher, params: {}})
+  })
+    .then(r => {
+      if (r.status === 403) return r.json().then(d => { throw new Error(d.detail || 'Write operations not allowed'); });
+      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Query failed'); });
+      return r.json();
+    })
+    .then(data => {
+      meta.textContent = data.count + ' row(s)';
+      if (!data.rows || data.rows.length === 0) {
+        body.appendChild(el('div', {textContent: 'No results.', className: 'prop-row'}));
+        return;
+      }
+      const headers = data.columns || Object.keys(data.rows[0]);
+      const table = document.createElement('table');
+      const thead = document.createElement('thead');
+      const hrow = document.createElement('tr');
+      headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; hrow.appendChild(th); });
+      thead.appendChild(hrow);
+      table.appendChild(thead);
+      const tbody = document.createElement('tbody');
+      data.rows.forEach(row => {
+        const tr = document.createElement('tr');
+        headers.forEach(h => {
+          const td = document.createElement('td');
+          const val = row[h];
+          td.textContent = Array.isArray(val) ? val.join(', ') : String(val ?? '');
+          td.title = td.textContent;
+          tr.appendChild(td);
+        });
+        tr.style.cursor = 'pointer';
+        tr.addEventListener('click', () => highlightQueryResult(row));
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      body.textContent = '';
+      body.appendChild(table);
+    })
+    .catch(err => { meta.textContent = 'Error: ' + err.message; });
+}
+
+function _updateCypherHistory(history) {
+  const sel = document.getElementById('cypher-history-select');
+  if (!sel) return;
+  // Clear existing options safely
+  while (sel.options.length > 1) sel.remove(1);
+  history.forEach(q => {
+    const opt = document.createElement('option');
+    opt.value = q;
+    opt.textContent = q.length > 40 ? q.substring(0, 40) + '...' : q;
+    sel.appendChild(opt);
+  });
+}
+
+// Load history on startup
+try {
+  const h = JSON.parse(localStorage.getItem('__rs_cypher_history__') || '[]');
+  if (h.length) _updateCypherHistory(h);
+} catch(e) {}
+
+// Allow Ctrl+Enter to run
+document.getElementById('cypher-input')?.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runCustomCypher(); }
+});
 
 // Override toggleOwned in live mode to persist to API
 if (isLive) {

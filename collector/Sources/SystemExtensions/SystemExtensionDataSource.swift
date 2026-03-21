@@ -81,14 +81,35 @@ public struct SystemExtensionDataSource: DataSource {
                 extType = .driver
             }
 
+            // Parse ESF subscribed events from lines like "events: [AUTH_EXEC, NOTIFY_FORK, ...]"
+            let subscribedEvents = Self.parseSubscribedEvents(stripped)
+
             extensions.append(SystemExtension(
                 identifier: id,
                 teamId: teamId,
                 extensionType: extType,
-                enabled: enabled
+                enabled: enabled,
+                subscribedEvents: subscribedEvents
             ))
         }
 
         return extensions
+    }
+
+    /// Parse ESF event subscriptions from systemextensionsctl output.
+    /// Looks for patterns like "events=[AUTH_EXEC,NOTIFY_FORK]" or "events: AUTH_EXEC, NOTIFY_FORK".
+    internal static func parseSubscribedEvents(_ line: String) -> [String] {
+        // Pattern 1: events=[EVENT1,EVENT2]
+        if let range = line.range(of: "events=\\[[^\\]]*\\]", options: .regularExpression) {
+            let eventsStr = line[range]
+            let inner = eventsStr.dropFirst("events=[".count).dropLast(1)
+            return inner.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        // Pattern 2: events: EVENT1, EVENT2
+        if let range = line.range(of: "events:\\s*[A-Z_,\\s]+", options: .regularExpression) {
+            let eventsStr = String(line[range]).replacingOccurrences(of: "events:", with: "").trimmingCharacters(in: .whitespaces)
+            return eventsStr.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        return []
     }
 }

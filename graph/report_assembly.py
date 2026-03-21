@@ -469,51 +469,61 @@ def assemble_report(
     sections.append("")
 
     # ── Top Vulnerabilities & ATT&CK Mapping ─────────────────────────────
+    # Read attack_categories from graph-native risk scoring (infer_risk_score.py).
+    # Falls back to query-based detection if graph data is unavailable.
     active_categories: set[str] = set()
-    if injectable_rows:
-        active_categories.update({"injectable_fda", "dyld_injection"})
-    if electron_rows:
-        active_categories.add("electron_inheritance")
-    if apple_event_rows:
-        active_categories.update({"apple_events", "tcc_bypass"})
-    if get_rows("29-hijackable-launch-daemons.cypher"):
-        active_categories.add("persistence_hijack")
-    if get_rows("30-xpc-no-client-verification.cypher"):
-        active_categories.add("xpc_exploitation")
-    if get_rows("54-accessibility-abuse.cypher"):
-        active_categories.add("accessibility_abuse")
-    if get_rows("40-injectable-shared-keychain.cypher") or get_rows("59-keychain-crown-jewels.cypher"):
-        active_categories.add("keychain_access")
-    if get_rows("73-kerberos-ticket-theft.cypher"):
-        active_categories.add("kerberos")
-    if get_rows("64-weak-physical-posture.cypher"):
-        active_categories.add("physical_security")
-    if get_rows("24-admin-group-escalation.cypher") or get_rows("33-weak-authorization-rights.cypher") or get_rows("36-sudoers-nopasswd.cypher"):
-        active_categories.add("authorization_hardening")
-    if icloud_rows_68 or icloud_rows_69 or icloud_rows_70:
-        active_categories.add("icloud_risk")
-    if get_rows("50-shell-hook-injection.cypher"):
-        active_categories.add("shell_hooks")
-    if get_rows("48-file-acl-write-paths.cypher") or get_rows("49-file-permission-escalation.cypher"):
-        active_categories.add("file_acl_escalation")
-    if get_rows("55-injectable-esf-client.cypher") or get_rows("56-injectable-network-extension.cypher"):
-        active_categories.add("esf_bypass")
-    if get_rows("27-sandbox-escape-risk.cypher"):
-        active_categories.add("sandbox_escape")
-    if get_rows("10-mdm-managed-tcc.cypher") or get_rows("39-mdm-overgrant.cypher"):
-        active_categories.add("mdm_risk")
-    if get_rows("25-remote-access-surface.cypher") or get_rows("52-cross-host-user.cypher") or get_rows("53-cross-host-injection-chain.cypher"):
-        active_categories.add("lateral_movement")
-    if get_rows("38-running-injectable-with-tcc.cypher"):
-        active_categories.add("running_processes")
-    if cert_rows_60 or cert_rows_61 or cert_rows_62:
-        active_categories.add("certificate_hygiene")
-    if get_rows("34-non-apple-auth-plugins.cypher"):
-        active_categories.add("auth_plugin_risk")
-    if get_rows("28-firewall-exposed-injectable.cypher"):
-        active_categories.add("firewall_exposure")
-    if get_rows("88-unquarantined-apps.cypher") or get_rows("89-quarantine-bypass-with-tcc.cypher"):
-        active_categories.add("gatekeeper_bypass")
+    risk_rows = get_rows("95-high-risk-apps.cypher")
+    for row in risk_rows:
+        cats = row.get("attack_categories")
+        if isinstance(cats, list):
+            active_categories.update(cats)
+
+    # Fallback: if graph-native categories are empty, derive from query results
+    if not active_categories:
+        if injectable_rows:
+            active_categories.update({"injectable_fda", "dyld_injection"})
+        if electron_rows:
+            active_categories.add("electron_inheritance")
+        if apple_event_rows:
+            active_categories.update({"apple_events", "tcc_bypass"})
+        if get_rows("29-hijackable-launch-daemons.cypher"):
+            active_categories.add("persistence_hijack")
+        if get_rows("30-xpc-no-client-verification.cypher"):
+            active_categories.add("xpc_exploitation")
+        if get_rows("54-accessibility-abuse.cypher"):
+            active_categories.add("accessibility_abuse")
+        if get_rows("40-injectable-shared-keychain.cypher") or get_rows("59-keychain-crown-jewels.cypher"):
+            active_categories.add("keychain_access")
+        if get_rows("73-kerberos-ticket-theft.cypher"):
+            active_categories.add("kerberos")
+        if get_rows("64-weak-physical-posture.cypher"):
+            active_categories.add("physical_security")
+        if get_rows("24-admin-group-escalation.cypher") or get_rows("33-weak-authorization-rights.cypher") or get_rows("36-sudoers-nopasswd.cypher"):
+            active_categories.add("authorization_hardening")
+        if icloud_rows_68 or icloud_rows_69 or icloud_rows_70:
+            active_categories.add("icloud_risk")
+        if get_rows("50-shell-hook-injection.cypher"):
+            active_categories.add("shell_hooks")
+        if get_rows("48-file-acl-write-paths.cypher") or get_rows("49-file-permission-escalation.cypher"):
+            active_categories.add("file_acl_escalation")
+        if get_rows("55-injectable-esf-client.cypher") or get_rows("56-injectable-network-extension.cypher"):
+            active_categories.add("esf_bypass")
+        if get_rows("27-sandbox-escape-risk.cypher"):
+            active_categories.add("sandbox_escape")
+        if get_rows("10-mdm-managed-tcc.cypher") or get_rows("39-mdm-overgrant.cypher"):
+            active_categories.add("mdm_risk")
+        if get_rows("25-remote-access-surface.cypher") or get_rows("52-cross-host-user.cypher") or get_rows("53-cross-host-injection-chain.cypher"):
+            active_categories.add("lateral_movement")
+        if get_rows("38-running-injectable-with-tcc.cypher"):
+            active_categories.add("running_processes")
+        if cert_rows_60 or cert_rows_61 or cert_rows_62:
+            active_categories.add("certificate_hygiene")
+        if get_rows("34-non-apple-auth-plugins.cypher"):
+            active_categories.add("auth_plugin_risk")
+        if get_rows("28-firewall-exposed-injectable.cypher"):
+            active_categories.add("firewall_exposure")
+        if get_rows("88-unquarantined-apps.cypher") or get_rows("89-quarantine-bypass-with-tcc.cypher"):
+            active_categories.add("gatekeeper_bypass")
 
     vuln_section = _build_vulnerability_section(active_categories)
     if vuln_section:

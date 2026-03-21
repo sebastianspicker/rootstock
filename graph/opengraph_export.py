@@ -52,6 +52,8 @@ NODE_TYPE_MAP: dict[str, dict] = {
     "SandboxProfile":       {"kind": "rs_SandboxProfile",    "icon": "fa-box",           "color": "#88AA44"},
     "ADUser":               {"kind": "rs_ADUser",            "icon": "fa-user-shield",   "color": "#3366CC"},
     "ThreatGroup":          {"kind": "rs_ThreatGroup",       "icon": "fa-skull-crossbones", "color": "#880000"},
+    "CWE":                  {"kind": "rs_CWE",               "icon": "fa-triangle-exclamation", "color": "#FF6600"},
+    "Recommendation":       {"kind": "rs_Recommendation",    "icon": "fa-lightbulb",        "color": "#44BB88"},
 }
 
 # ── Edge type mapping ───────────────────────────────────────────────────────
@@ -104,6 +106,9 @@ EDGE_TYPE_MAP: dict[str, dict] = {
     "SAME_IDENTITY": {"kind": "rs_SameIdentity", "traversable": True},
     "AD_MEMBER_OF": {"kind": "rs_ADMemberOf", "traversable": True},
     "USES_TECHNIQUE": {"kind": "rs_UsesTechnique", "traversable": False},
+    "HAS_CWE": {"kind": "rs_HasCWE", "traversable": False},
+    "HAS_RECOMMENDATION": {"kind": "rs_HasRecommendation", "traversable": False},
+    "MITIGATES": {"kind": "rs_Mitigates", "traversable": False},
 }
 
 

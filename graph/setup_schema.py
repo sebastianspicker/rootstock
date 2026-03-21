@@ -45,6 +45,8 @@ CONSTRAINTS = [
     ("sandbox_bundle_unique",    "SandboxProfile",       "sp.bundle_id"),
     ("ad_user_sid_unique",       "ADUser",               "u.object_id"),
     ("threat_group_id_unique",   "ThreatGroup",          "g.group_id"),
+    ("cwe_id_unique",            "CWE",                  "c.cwe_id"),
+    ("recommendation_key_unique", "Recommendation",      "r.key"),
 ]
 
 # Composite uniqueness constraint (Keychain items keyed by label + kind)
@@ -61,6 +63,7 @@ INDEXES = [
     ("vuln_cvss",    "Vulnerability",   "v.cvss_score"),
     ("vuln_epss",    "Vulnerability",   "v.epss_score"),
     ("vuln_kev",     "Vulnerability",   "v.in_kev"),
+    ("app_risk_score", "Application",   "a.risk_score"),
 ]
 
 

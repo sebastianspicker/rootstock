@@ -62,6 +62,7 @@ ALL_NODE_LABELS = [
     "KerberosArtifact", "ADGroup",
     "Vulnerability", "AttackTechnique",
     "SandboxProfile", "ADUser", "ThreatGroup",
+    "CWE", "Recommendation",
 ]
 
 

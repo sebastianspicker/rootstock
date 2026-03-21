@@ -56,7 +56,7 @@ class TestQueryEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        assert len(data) == 94
+        assert len(data) == 101
         # Each query should have required fields
         for q in data:
             assert "id" in q
@@ -64,10 +64,10 @@ class TestQueryEndpoints:
             assert "category" in q
             assert "severity" in q
 
-    def test_list_queries_has_94(self, client):
-        """Should discover exactly 94 queries."""
+    def test_list_queries_has_101(self, client):
+        """Should discover exactly 101 queries."""
         response = client.get("/api/queries")
-        assert len(response.json()) == 94
+        assert len(response.json()) == 101
 
     def test_query_79_in_list(self, client):
         """Query 79 (stale keytab detection) should appear in the list."""
@@ -108,3 +108,71 @@ class TestTierEndpoint:
         assert "tier1" in data
         assert "tier2" in data
         assert "total" in data
+
+
+class TestCypherEndpoint:
+    def test_read_query_succeeds(self, client):
+        """POST /api/cypher with a MATCH query should return 200."""
+        response = client.post("/api/cypher", json={
+            "cypher": "MATCH (n) RETURN n LIMIT 1"
+        })
+        assert response.status_code == 200
+        data = response.json()
+        assert "columns" in data
+        assert "rows" in data
+        assert "count" in data
+
+    def test_write_query_rejected_create(self, client):
+        """POST /api/cypher with CREATE should return 403."""
+        response = client.post("/api/cypher", json={
+            "cypher": "CREATE (n:Test {name: 'bad'})"
+        })
+        assert response.status_code == 403
+
+    def test_write_query_rejected_merge(self, client):
+        """POST /api/cypher with MERGE should return 403."""
+        response = client.post("/api/cypher", json={
+            "cypher": "MERGE (n:Test {name: 'bad'})"
+        })
+        assert response.status_code == 403
+
+    def test_write_query_rejected_delete(self, client):
+        """POST /api/cypher with DELETE should return 403."""
+        response = client.post("/api/cypher", json={
+            "cypher": "MATCH (n) DELETE n"
+        })
+        assert response.status_code == 403
+
+    def test_write_query_rejected_set(self, client):
+        """POST /api/cypher with SET should return 403."""
+        response = client.post("/api/cypher", json={
+            "cypher": "MATCH (n) SET n.name = 'bad'"
+        })
+        assert response.status_code == 403
+
+    def test_write_query_rejected_drop(self, client):
+        """POST /api/cypher with DROP should return 403."""
+        response = client.post("/api/cypher", json={
+            "cypher": "DROP INDEX my_index"
+        })
+        assert response.status_code == 403
+
+    def test_write_query_rejected_case_insensitive(self, client):
+        """Write detection should be case-insensitive."""
+        response = client.post("/api/cypher", json={
+            "cypher": "create (n:Test)"
+        })
+        assert response.status_code == 403
+
+    def test_write_in_string_literal_allowed(self, client):
+        """'CREATE' inside a string literal should NOT be rejected."""
+        response = client.post("/api/cypher", json={
+            "cypher": "MATCH (n) WHERE n.name = 'CREATE something' RETURN n"
+        })
+        assert response.status_code == 200
+
+    def test_empty_query(self, client):
+        """Empty cypher should still go through (server or Neo4j handles it)."""
+        response = client.post("/api/cypher", json={"cypher": ""})
+        # Empty query likely fails at Neo4j level with 400
+        assert response.status_code in (200, 400)

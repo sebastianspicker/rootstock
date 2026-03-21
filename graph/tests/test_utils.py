@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from utils import first_cypher_statement, list_or_str, run_query, sanitize_id, truncate
+from utils import first_cypher_statement, list_or_str, run_query, sanitize_id, truncate, validate_read_only_cypher
 
 
 # ── list_or_str ──────────────────────────────────────────────────────────────
@@ -90,3 +90,80 @@ def test_run_query_returns_dicts():
     result = run_query(mock_session, "MATCH (n) RETURN n.name AS name")
     assert result == [record1, record2]
     mock_session.run.assert_called_once_with("MATCH (n) RETURN n.name AS name", {})
+
+
+# ── validate_read_only_cypher ───────────────────────────────────────────────
+
+def test_validate_match_is_safe():
+    assert validate_read_only_cypher("MATCH (n) RETURN n") is None
+
+
+def test_validate_return_is_safe():
+    assert validate_read_only_cypher("RETURN 1 + 1") is None
+
+
+def test_validate_create_rejected():
+    result = validate_read_only_cypher("CREATE (n:Test)")
+    assert result is not None
+    assert "CREATE" in result
+
+
+def test_validate_merge_rejected():
+    result = validate_read_only_cypher("MERGE (n:Test {id: 1})")
+    assert result is not None
+    assert "MERGE" in result
+
+
+def test_validate_set_rejected():
+    result = validate_read_only_cypher("MATCH (n) SET n.name = 'x'")
+    assert result is not None
+    assert "SET" in result
+
+
+def test_validate_delete_rejected():
+    result = validate_read_only_cypher("MATCH (n) DELETE n")
+    assert result is not None
+    assert "DELETE" in result
+
+
+def test_validate_remove_rejected():
+    result = validate_read_only_cypher("MATCH (n) REMOVE n.name")
+    assert result is not None
+    assert "REMOVE" in result
+
+
+def test_validate_drop_rejected():
+    result = validate_read_only_cypher("DROP INDEX my_index")
+    assert result is not None
+    assert "DROP" in result
+
+
+def test_validate_detach_rejected():
+    result = validate_read_only_cypher("MATCH (n) DETACH DELETE n")
+    assert result is not None
+
+
+def test_validate_case_insensitive():
+    assert validate_read_only_cypher("create (n:Test)") is not None
+    assert validate_read_only_cypher("MeRgE (n:Test)") is not None
+
+
+def test_validate_create_in_string_literal():
+    """'CREATE' inside a string literal should NOT be rejected."""
+    assert validate_read_only_cypher("MATCH (n) WHERE n.name = 'CREATE' RETURN n") is None
+
+
+def test_validate_comments_stripped():
+    """Comments should be stripped before validation."""
+    assert validate_read_only_cypher("// CREATE node\nMATCH (n) RETURN n") is None
+
+
+def test_validate_complex_read_query():
+    """Complex read queries with WITH, UNWIND, etc. should pass."""
+    query = """
+        MATCH (app:Application)-[:HAS_TCC_GRANT]->(tcc:TCC_Permission)
+        WITH app, collect(tcc.service) AS services
+        UNWIND services AS svc
+        RETURN app.name, svc
+    """
+    assert validate_read_only_cypher(query) is None

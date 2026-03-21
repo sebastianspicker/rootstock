@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import importlib
 
 from query_runner import discover_queries, find_query, load_cypher
-from utils import first_cypher_statement, run_query
+from utils import first_cypher_statement, run_query, validate_read_only_cypher
 
 _import_mod = importlib.import_module("import")
 query_stats = _import_mod.query_stats
@@ -70,6 +70,11 @@ class ClearOwnedRequest(BaseModel):
 
 
 class QueryRunRequest(BaseModel):
+    params: dict[str, Any] | None = None
+
+
+class CypherRequest(BaseModel):
+    cypher: str
     params: dict[str, Any] | None = None
 
 
@@ -415,6 +420,35 @@ async def import_bloodhound(file: UploadFile, session=Depends(get_session)):
         Path(tmp_path).unlink(missing_ok=True)
 
     return counts
+
+
+# ── Ad-hoc Cypher endpoint ─────────────────────────────────────────────────
+
+@app.post("/api/cypher")
+def run_cypher_endpoint(body: CypherRequest, session=Depends(get_session)):
+    """Execute an ad-hoc Cypher query (read-only).
+
+    Accepts {"cypher": "MATCH ...", "params": {}}.
+    Returns {"columns": [...], "rows": [...], "count": N}.
+    Rejects write operations (CREATE, MERGE, SET, DELETE, etc.) with 403.
+    """
+    error = validate_read_only_cypher(body.cypher)
+    if error:
+        raise HTTPException(status_code=403, detail=error)
+
+    try:
+        result = session.run(body.cypher, body.params or {})
+        records = list(result)
+        columns = list(records[0].keys()) if records else []
+        rows = [dict(r) for r in records]
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "columns": columns,
+        "rows": rows,
+        "count": len(rows),
+    }
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

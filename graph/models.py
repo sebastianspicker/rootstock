@@ -215,6 +215,7 @@ class SystemExtensionData(BaseModel):
     team_id: str | None = None
     extension_type: Literal["network", "endpoint_security", "driver"]
     enabled: bool
+    subscribed_events: list[str] = Field(default_factory=list)
 
 
 class SudoersRuleData(BaseModel):

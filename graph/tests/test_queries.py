@@ -22,7 +22,7 @@ import pytest
 from conftest import cleanup_test_nodes
 
 QUERIES_DIR = Path(__file__).parent.parent / "queries"
-EXPECTED_QUERY_COUNT = 94
+EXPECTED_QUERY_COUNT = 101
 
 _HEADER_RE = re.compile(
     r"^//\s*(?P<key>Name|Purpose|Category|Severity|Parameters|CVE|ATT&CK):\s*(?P<value>.+)$",

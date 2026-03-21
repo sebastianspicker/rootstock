@@ -53,3 +53,38 @@ def sanitize_id(text: str, fallback: str = "node") -> str:
 def truncate(text: str, max_len: int = 30) -> str:
     """Truncate long labels for diagram readability."""
     return text if len(text) <= max_len else text[: max_len - 1] + "…"
+
+
+# ── Read-only Cypher validation ─────────────────────────────────────────────
+
+_WRITE_KEYWORDS = re.compile(
+    r"\b(CREATE|MERGE|SET|DELETE|REMOVE|DROP|DETACH|CALL\s*\{)\b",
+    re.IGNORECASE,
+)
+
+
+def validate_read_only_cypher(cypher: str) -> str | None:
+    """
+    Check that a Cypher query is read-only.
+
+    Returns None if the query is safe, or an error message string
+    describing the rejected keyword if a write operation is detected.
+
+    Strips comments before checking.
+    """
+    # Strip // comments
+    lines = [
+        line for line in cypher.splitlines()
+        if not line.strip().startswith("//")
+    ]
+    cleaned = " ".join(lines)
+
+    # Strip string literals to avoid false positives
+    # (e.g., "SET something" as a string value)
+    no_strings = re.sub(r"'[^']*'", "''", cleaned)
+    no_strings = re.sub(r'"[^"]*"', '""', no_strings)
+
+    match = _WRITE_KEYWORDS.search(no_strings)
+    if match:
+        return f"Write operation not allowed: {match.group(0).strip()}"
+    return None

@@ -193,12 +193,12 @@ class TestTypeMaps:
             assert isinstance(info["traversable"], bool)
 
     def test_node_type_count(self):
-        """Verify all 27 Rootstock node types are mapped (22 core + Vulnerability + AttackTechnique + SandboxProfile + ADUser + ThreatGroup)."""
-        assert len(NODE_TYPE_MAP) == 27
+        """Verify all 29 Rootstock node types are mapped (27 post-Phase 6 + CWE + Recommendation)."""
+        assert len(NODE_TYPE_MAP) == 29
 
     def test_edge_type_count(self):
-        """Verify all 47 Rootstock edge types are mapped (38 core + AFFECTED_BY + MAPS_TO_TECHNIQUE + 3 sandbox + BYPASSED_GATEKEEPER + SAME_IDENTITY + AD_MEMBER_OF + USES_TECHNIQUE)."""
-        assert len(EDGE_TYPE_MAP) == 47
+        """Verify all 50 Rootstock edge types are mapped (47 post-Phase 6 + HAS_CWE + HAS_RECOMMENDATION + MITIGATES)."""
+        assert len(EDGE_TYPE_MAP) == 50
 
 
 # ── Primary label selection ─────────────────────────────────────────────────

@@ -14,9 +14,9 @@ Think: BloodHound for macOS-native security boundaries.
 
 ## Project Phase
 
-**Current phase:** Post-Phase 6 — SOTA Differentiation & Intelligence
-**Status:** All 6 phases complete. Collector has 23 data source modules, graph pipeline
-has 16 inference engines, 94 Cypher queries, 27 node types, and 397 Python tests.
+**Current phase:** Post-Phase 7 — Graph Intelligence Maturation
+**Status:** All 7 phases complete. Collector has 23 data source modules, graph pipeline
+has 18 inference engines, 101 Cypher queries, 29 node types, and 425 Python tests.
 
 ## Repository Layout
 

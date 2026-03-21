@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -37,16 +37,18 @@ def client():
     mock_driver.session.return_value.__enter__ = lambda self: mock_session
     mock_driver.session.return_value.__exit__ = lambda self, *a: None
 
-    app.state.driver = mock_driver
     app.state.neo4j_uri = "bolt://localhost:7687"
     app.state.neo4j_user = "neo4j"
-    app.state.neo4j_password = "rootstock"
+    app.state.neo4j_password = "test"
 
     from fastapi.testclient import TestClient
 
-    # Override lifespan to avoid real Neo4j connection
-    with TestClient(app, raise_server_exceptions=False) as tc:
-        yield tc
+    # Patch GraphDatabase.driver so the lifespan handler uses our mock
+    # instead of attempting a real Neo4j connection.
+    with patch("server.GraphDatabase") as mock_gdb:
+        mock_gdb.driver.return_value = mock_driver
+        with TestClient(app, raise_server_exceptions=False) as tc:
+            yield tc
 
 
 class TestQueryEndpoints:

@@ -53,6 +53,14 @@ class SandboxProfileData(BaseModel):
     has_unconstrained_file_read: bool = False
 
 
+class QuarantineInfoData(BaseModel):
+    has_quarantine_flag: bool
+    quarantine_agent: str | None = None
+    quarantine_timestamp: str | None = None
+    was_user_approved: bool = False
+    was_translocated: bool = False
+
+
 class ApplicationData(BaseModel):
     name: str = Field(min_length=1)
     bundle_id: str = Field(min_length=1)
@@ -80,6 +88,7 @@ class ApplicationData(BaseModel):
     injection_methods: list[InjectionMethod] = Field(default_factory=list)
     launch_constraint_category: str | None = None
     sandbox_profile: SandboxProfileData | None = None
+    quarantine_info: QuarantineInfoData | None = None
 
 
 class TCCGrantData(BaseModel):

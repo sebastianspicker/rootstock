@@ -924,6 +924,12 @@ _REGISTRY: dict[str, AttackContext] = {
         cves=[],
         remediation_priority="High",
     ),
+    "gatekeeper_bypass": AttackContext(
+        category="gatekeeper_bypass",
+        techniques=[_T1553_001],
+        cves=[_CVE_2022_42821, _CVE_2024_44175],
+        remediation_priority="High",
+    ),
 }
 
 

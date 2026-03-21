@@ -28,6 +28,7 @@ public struct Application: Codable, Sendable, GraphNode {
     public let injectionMethods: [InjectionMethod]
     public let launchConstraintCategory: String?
     public let sandboxProfile: SandboxProfile?
+    public let quarantineInfo: QuarantineInfo?
 
     public var nodeType: String { "Application" }
 
@@ -57,7 +58,8 @@ public struct Application: Codable, Sendable, GraphNode {
         entitlements: [EntitlementInfo] = [],
         injectionMethods: [InjectionMethod] = [],
         launchConstraintCategory: String? = nil,
-        sandboxProfile: SandboxProfile? = nil
+        sandboxProfile: SandboxProfile? = nil,
+        quarantineInfo: QuarantineInfo? = nil
     ) {
         self.name = name
         self.bundleId = bundleId
@@ -85,6 +87,7 @@ public struct Application: Codable, Sendable, GraphNode {
         self.injectionMethods = injectionMethods
         self.launchConstraintCategory = launchConstraintCategory
         self.sandboxProfile = sandboxProfile
+        self.quarantineInfo = quarantineInfo
     }
 
     enum CodingKeys: String, CodingKey {
@@ -114,5 +117,6 @@ public struct Application: Codable, Sendable, GraphNode {
         case injectionMethods = "injection_methods"
         case launchConstraintCategory = "launch_constraint_category"
         case sandboxProfile = "sandbox_profile"
+        case quarantineInfo = "quarantine_info"
     }
 }

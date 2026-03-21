@@ -158,6 +158,11 @@ def import_applications(session: Session, apps: list[ApplicationData], scan_id: 
             "certificate_trust_valid": app.certificate_trust_valid,
             "injection_methods": app.injection_methods,
             "launch_constraint_category": app.launch_constraint_category,
+            "has_quarantine_flag": app.quarantine_info.has_quarantine_flag if app.quarantine_info else None,
+            "quarantine_agent": app.quarantine_info.quarantine_agent if app.quarantine_info else None,
+            "quarantine_timestamp": app.quarantine_info.quarantine_timestamp if app.quarantine_info else None,
+            "was_user_approved": app.quarantine_info.was_user_approved if app.quarantine_info else None,
+            "was_translocated": app.quarantine_info.was_translocated if app.quarantine_info else None,
             "scan_id": scan_id,
             "imported_at": now,
         }
@@ -190,6 +195,11 @@ def import_applications(session: Session, apps: list[ApplicationData], scan_id: 
             a.certificate_trust_valid = r.certificate_trust_valid,
             a.injection_methods = r.injection_methods,
             a.launch_constraint_category = r.launch_constraint_category,
+            a.has_quarantine_flag = r.has_quarantine_flag,
+            a.quarantine_agent = r.quarantine_agent,
+            a.quarantine_timestamp = r.quarantine_timestamp,
+            a.was_user_approved = r.was_user_approved,
+            a.was_translocated = r.was_translocated,
             a.scan_id          = r.scan_id,
             a.imported_at      = r.imported_at
         """,

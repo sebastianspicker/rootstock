@@ -22,6 +22,7 @@ import PhysicalSecurity
 import ActiveDirectory
 import KerberosArtifacts
 import Sandbox
+import Quarantine
 
 /// Coordinates all data source modules and assembles the final ScanResult.
 struct ScanOrchestrator {
@@ -50,6 +51,7 @@ struct ScanOrchestrator {
         let activeDirectory: Bool
         let kerberos: Bool
         let sandbox: Bool
+        let quarantine: Bool
 
         /// Parse a comma-separated module string or "all".
         static func from(_ moduleString: String) -> ModuleConfig {
@@ -77,7 +79,8 @@ struct ScanOrchestrator {
                 physicalSecurity: all || parts.contains("physicalsecurity"),
                 activeDirectory: all || parts.contains("activedirectory"),
                 kerberos: all || parts.contains("kerberos"),
-                sandbox: all || parts.contains("sandbox")
+                sandbox: all || parts.contains("sandbox"),
+                quarantine: all || parts.contains("quarantine")
             )
         }
     }
@@ -170,6 +173,12 @@ struct ScanOrchestrator {
             let (count, elapsed) = await timed { SandboxDataSource().enrich(applications: &applications) }
             sandboxElapsed = elapsed
             if verbose { err("  [Sandbox]      completed in \(format(elapsed))  (\(count) profiles)") }
+        }
+        var quarantineElapsed = 0.0
+        if config.quarantine && config.entitlements {
+            let (count, elapsed) = await timed { QuarantineDataSource().enrich(applications: &applications) }
+            quarantineElapsed = elapsed
+            if verbose { err("  [Quarantine]   completed in \(format(elapsed))  (\(count) quarantined)") }
         }
 
         // Phase 3: Await concurrent results.

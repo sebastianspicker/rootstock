@@ -31,6 +31,7 @@ import infer_group_capabilities
 import infer_password
 import infer_kerberos
 import infer_sandbox
+import infer_quarantine
 
 
 def main() -> int:
@@ -84,12 +85,15 @@ def main() -> int:
         n_sandbox = infer_sandbox.infer(session)
         print(f"  SANDBOX edges:        {n_sandbox}")
 
+        n_quarantine = infer_quarantine.infer(session)
+        print(f"  BYPASSED_GATEKEEPER:  {n_quarantine}")
+
     driver.close()
 
     total = (n_inject + n_inherit + n_apple_events + n_transitive_fda
              + n_mdm_overgrant + n_keychain_groups + n_file_acl + n_shell_hooks
              + n_a11y + n_esf + n_group_cap + n_password + n_kerberos
-             + n_sandbox)
+             + n_sandbox + n_quarantine)
     print(
         f"\nInferred {n_inject} CAN_INJECT_INTO, "
         f"{n_inherit} CHILD_INHERITS_TCC, "
@@ -104,7 +108,8 @@ def main() -> int:
         f"{n_group_cap} CAN_DEBUG, "
         f"{n_password} CAN_CHANGE_PASSWORD, "
         f"{n_kerberos} CAN_READ_KERBEROS, "
-        f"{n_sandbox} SANDBOX edges"
+        f"{n_sandbox} SANDBOX edges, "
+        f"{n_quarantine} BYPASSED_GATEKEEPER"
     )
     if total == 0:
         print("Note: No inferred edges created. Import scan data first with: python3 graph/import.py")

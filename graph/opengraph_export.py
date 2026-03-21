@@ -98,6 +98,7 @@ EDGE_TYPE_MAP: dict[str, dict] = {
     "HAS_SANDBOX_PROFILE": {"kind": "rs_HasSandboxProfile", "traversable": False},
     "CAN_ESCAPE_SANDBOX":  {"kind": "rs_CanEscapeSandbox",  "traversable": True},
     "CAN_ACCESS_MACH_SERVICE": {"kind": "rs_CanAccessMachService", "traversable": True},
+    "BYPASSED_GATEKEEPER": {"kind": "rs_BypassedGatekeeper", "traversable": True},
 }
 
 

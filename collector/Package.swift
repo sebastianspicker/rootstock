@@ -39,6 +39,7 @@ let package = Package(
                 "ActiveDirectory",
                 "KerberosArtifacts",
                 "Sandbox",
+                "Quarantine",
             ]
         ),
         .target(
@@ -141,6 +142,10 @@ let package = Package(
             name: "Sandbox",
             dependencies: ["Models"]
         ),
+        .target(
+            name: "Quarantine",
+            dependencies: ["Models"]
+        ),
         .testTarget(
             name: "TCCTests",
             dependencies: ["TCC", "Models"],
@@ -237,6 +242,10 @@ let package = Package(
         .testTarget(
             name: "SandboxTests",
             dependencies: ["Sandbox", "Models"]
+        ),
+        .testTarget(
+            name: "QuarantineTests",
+            dependencies: ["Quarantine", "Models"]
         ),
     ]
 )

@@ -168,7 +168,8 @@ public struct SandboxDataSource {
                     entitlements: applications[i].entitlements,
                     injectionMethods: applications[i].injectionMethods,
                     launchConstraintCategory: applications[i].launchConstraintCategory,
-                    sandboxProfile: profile
+                    sandboxProfile: profile,
+                    quarantineInfo: applications[i].quarantineInfo
                 )
                 count += 1
             }

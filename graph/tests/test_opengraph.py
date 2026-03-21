@@ -197,8 +197,8 @@ class TestTypeMaps:
         assert len(NODE_TYPE_MAP) == 25
 
     def test_edge_type_count(self):
-        """Verify all 43 Rootstock edge types are mapped (38 core + AFFECTED_BY + MAPS_TO_TECHNIQUE + 3 sandbox)."""
-        assert len(EDGE_TYPE_MAP) == 43
+        """Verify all 44 Rootstock edge types are mapped (38 core + AFFECTED_BY + MAPS_TO_TECHNIQUE + 3 sandbox + BYPASSED_GATEKEEPER)."""
+        assert len(EDGE_TYPE_MAP) == 44
 
 
 # ── Primary label selection ─────────────────────────────────────────────────

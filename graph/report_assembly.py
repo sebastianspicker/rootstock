@@ -69,6 +69,39 @@ RECOMMENDATIONS = {
         "Review non-Apple authorization plugins in `/Library/Security/SecurityAgentPlugins/` — third-party plugins execute in the authorization flow.",
         "Harden weak authorization rights that use `allow` or `authenticate-session-owner` rules for sensitive operations.",
     ],
+    "shell_hooks": [
+        "Audit writable shell configuration files (.zshrc, .bashrc, .zprofile) — restrict write access to the owning user only. [ref: CVE-2023-32364]",
+        "Deploy file integrity monitoring on shell hook files to detect unauthorised modifications that could inject keyloggers or credential harvesters.",
+    ],
+    "file_acl_escalation": [
+        "Audit file ACLs on security-critical files (TCC.db, sudoers, sshd_config) — remove non-root write ACEs. [ref: CVE-2024-23296]",
+        "Implement periodic ACL scanning to detect privilege creep on LaunchDaemon directories and authorization databases.",
+    ],
+    "esf_bypass": [
+        "Harden injectable apps with ESF entitlements — these can blind EDR and security monitoring if compromised. [ref: CVE-2024-27842]",
+        "Monitor for anomalous ESF client registrations and network extension loads that may indicate tampered security tools.",
+    ],
+    "sandbox_escape": [
+        "Prioritise patching sandbox escape CVEs (CVE-2023-32414, CVE-2023-38606) — sandbox escapes enable full system access from app-level compromise.",
+        "Audit unsandboxed injectable apps and consider deploying App Sandbox for in-house tools where feasible.",
+    ],
+    "mdm_risk": [
+        "Review MDM PPPC profiles for overgrants — ensure scripting interpreters (Python, Ruby, osascript) do not hold FDA or Accessibility grants via MDM. [ref: CVE-2024-44301]",
+        "Implement MDM profile change auditing to detect unauthorized TCC grant modifications.",
+    ],
+    "lateral_movement": [
+        "Restrict SSH and Screen Sharing access to authorised users via MDM or `/etc/ssh/sshd_config` AllowUsers/AllowGroups directives. [ref: T1021.004]",
+        "Audit cross-host user accounts — shared credentials across hosts enable lateral movement after initial compromise.",
+    ],
+    "running_processes": [
+        "Monitor running injectable processes with active TCC grants — these are live exploitation targets. [ref: CVE-2025-24085]",
+        "Implement runtime injection detection (e.g., DYLD_INSERT_LIBRARIES monitoring) for high-value processes.",
+    ],
+    "gatekeeper_bypass": [
+        "Investigate unquarantined non-system applications — these bypassed Gatekeeper download checks. [ref: CVE-2022-42821, CVE-2024-44175]",
+        "Enable Gatekeeper enforcement via `spctl --master-enable` on all endpoints.",
+        "Review apps without quarantine attributes that hold TCC grants for potential Gatekeeper bypass abuse.",
+    ],
     "general": [
         "Ensure System Integrity Protection (SIP) is enabled on all managed endpoints (`csrutil status`).",
         "Enforce Full Disk Access via MDM Privacy Preferences Policy Control (PPPC) profiles — maintain an allow-list of approved applications.",
@@ -235,6 +268,35 @@ def assemble_report(
         certificate_risk_count=certificate_risk_count,
     ))
     sections.append("")
+
+    # ── Vulnerability Intelligence subsection ────────────────────────────────
+    try:
+        from cve_enrichment import enrich_registry, get_enrichment_status
+        enriched = enrich_registry()
+        if enriched:
+            kev_cves = [e for e in enriched.values() if e.in_kev]
+            high_epss = [e for e in enriched.values() if e.epss_score is not None and e.epss_score > 0.3]
+            highest_epss = max(
+                (e for e in enriched.values() if e.epss_score is not None),
+                key=lambda e: e.epss_score,
+                default=None,
+            )
+
+            if kev_cves or high_epss:
+                vuln_lines = ["### Vulnerability Intelligence"]
+                if kev_cves:
+                    vuln_lines.append(f"- **CISA KEV CVEs:** {len(kev_cves)} actively exploited vulnerabilities")
+                if high_epss:
+                    vuln_lines.append(f"- **High exploitation probability:** {len(high_epss)} CVE(s) with EPSS > 0.3")
+                if highest_epss and highest_epss.epss_score is not None:
+                    vuln_lines.append(
+                        f"- **Highest exploitation probability:** {highest_epss.base.cve_id} "
+                        f"(EPSS {highest_epss.epss_score:.2f})"
+                    )
+                vuln_lines.append("")
+                sections.extend(vuln_lines)
+    except Exception:
+        pass  # Enrichment not available — skip gracefully
 
     # ── Critical: Injectable FDA Apps ─────────────────────────────────────────
     sections.append("## Critical Findings: Injectable Apps with Privileged TCC Grants")
@@ -430,6 +492,28 @@ def assemble_report(
         active_categories.add("authorization_hardening")
     if icloud_rows_68 or icloud_rows_69 or icloud_rows_70:
         active_categories.add("icloud_risk")
+    if get_rows("50-shell-hook-injection.cypher"):
+        active_categories.add("shell_hooks")
+    if get_rows("48-file-acl-write-paths.cypher") or get_rows("49-file-permission-escalation.cypher"):
+        active_categories.add("file_acl_escalation")
+    if get_rows("55-injectable-esf-client.cypher") or get_rows("56-injectable-network-extension.cypher"):
+        active_categories.add("esf_bypass")
+    if get_rows("27-sandbox-escape-risk.cypher"):
+        active_categories.add("sandbox_escape")
+    if get_rows("10-mdm-managed-tcc.cypher") or get_rows("39-mdm-overgrant.cypher"):
+        active_categories.add("mdm_risk")
+    if get_rows("25-remote-access-surface.cypher") or get_rows("52-cross-host-user.cypher") or get_rows("53-cross-host-injection-chain.cypher"):
+        active_categories.add("lateral_movement")
+    if get_rows("38-running-injectable-with-tcc.cypher"):
+        active_categories.add("running_processes")
+    if cert_rows_60 or cert_rows_61 or cert_rows_62:
+        active_categories.add("certificate_hygiene")
+    if get_rows("34-non-apple-auth-plugins.cypher"):
+        active_categories.add("auth_plugin_risk")
+    if get_rows("28-firewall-exposed-injectable.cypher"):
+        active_categories.add("firewall_exposure")
+    if get_rows("88-unquarantined-apps.cypher") or get_rows("89-quarantine-bypass-with-tcc.cypher"):
+        active_categories.add("gatekeeper_bypass")
 
     vuln_section = _build_vulnerability_section(active_categories)
     if vuln_section:
@@ -462,6 +546,34 @@ def assemble_report(
                                  or get_rows("33-weak-authorization-rights.cypher")
                                  or get_rows("36-sudoers-nopasswd.cypher")
                                  or get_rows("58-group-capability-escalation.cypher")))
+    _append_recommendations(sections, "Shell Hook Hardening",
+                            "shell_hooks", bool(get_rows("50-shell-hook-injection.cypher")))
+    _append_recommendations(sections, "File ACL Escalation Mitigation",
+                            "file_acl_escalation",
+                            bool(get_rows("48-file-acl-write-paths.cypher")
+                                 or get_rows("49-file-permission-escalation.cypher")))
+    _append_recommendations(sections, "Endpoint Security Framework Protection",
+                            "esf_bypass",
+                            bool(get_rows("55-injectable-esf-client.cypher")
+                                 or get_rows("56-injectable-network-extension.cypher")))
+    _append_recommendations(sections, "Sandbox Escape Mitigation",
+                            "sandbox_escape", bool(get_rows("27-sandbox-escape-risk.cypher")))
+    _append_recommendations(sections, "MDM Configuration Hygiene",
+                            "mdm_risk",
+                            bool(get_rows("10-mdm-managed-tcc.cypher")
+                                 or get_rows("39-mdm-overgrant.cypher")))
+    _append_recommendations(sections, "Lateral Movement Mitigation",
+                            "lateral_movement",
+                            bool(get_rows("25-remote-access-surface.cypher")
+                                 or get_rows("52-cross-host-user.cypher")
+                                 or get_rows("53-cross-host-injection-chain.cypher")))
+    _append_recommendations(sections, "Running Process Hardening",
+                            "running_processes",
+                            bool(get_rows("38-running-injectable-with-tcc.cypher")))
+    _append_recommendations(sections, "Gatekeeper Bypass Mitigation",
+                            "gatekeeper_bypass",
+                            bool(get_rows("88-unquarantined-apps.cypher")
+                                 or get_rows("89-quarantine-bypass-with-tcc.cypher")))
 
     sections.append("### General macOS Hardening")
     for rec in RECOMMENDATIONS["general"]:

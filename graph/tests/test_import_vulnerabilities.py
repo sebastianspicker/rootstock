@@ -106,25 +106,32 @@ class TestImportFunctions:
             count = import_vulnerability_nodes(mock_session)
 
         assert count == 1
-        # Verify MERGE was called
+        # Verify batched UNWIND MERGE was called
         call_args = mock_session.run.call_args
+        assert "UNWIND" in call_args[0][0]
         assert "MERGE" in call_args[0][0]
-        assert call_args[1]["cve_id"] == "CVE-2099-99999"
+        batch = call_args[1]["batch"]
+        assert len(batch) == 1
+        assert batch[0]["cve_id"] == "CVE-2099-99999"
 
     def test_import_technique_nodes_deduplicates(self):
         """Same technique appearing in multiple categories should be imported once."""
         mock_session = MagicMock()
         mock_result = MagicMock()
-        mock_result.single.return_value = {"n": 1}
-        mock_session.run.return_value = mock_result
-
-        count = import_technique_nodes(mock_session)
-        # Count should equal unique techniques, not total references
         seen = set()
         for ctx in _REGISTRY.values():
             for tech in ctx.techniques:
                 seen.add(tech.technique_id)
+        mock_result.single.return_value = {"n": len(seen)}
+        mock_session.run.return_value = mock_result
+
+        count = import_technique_nodes(mock_session)
+        # Count should equal unique techniques, not total references
         assert count == len(seen)
+        # Single batched call
+        mock_session.run.assert_called_once()
+        batch = mock_session.run.call_args[1]["batch"]
+        assert len(batch) == len(seen)
 
 
 # ── Integration tests (require Neo4j) ────────────────────────────────────

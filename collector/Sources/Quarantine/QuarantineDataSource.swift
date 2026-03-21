@@ -31,43 +31,53 @@ public struct QuarantineDataSource {
     /// Enrich an array of applications with quarantine attribute data in place.
     /// Returns the count of applications that have quarantine data.
     public func enrich(applications: inout [Application]) -> Int {
+        let (enrichedApps, count) = enriched(applications: applications)
+        applications = enrichedApps
+        return count
+    }
+
+    /// Return a new array of applications enriched with quarantine attribute data.
+    /// Uses copy-on-return pattern for safe use with structured concurrency.
+    /// Returns the enriched array and the count of quarantined applications.
+    public func enriched(applications: [Application]) -> ([Application], Int) {
+        var result = applications
         var count = 0
-        for i in applications.indices {
-            let info = readQuarantine(at: applications[i].path)
-            applications[i] = Application(
-                name: applications[i].name,
-                bundleId: applications[i].bundleId,
-                path: applications[i].path,
-                version: applications[i].version,
-                teamId: applications[i].teamId,
-                hardenedRuntime: applications[i].hardenedRuntime,
-                libraryValidation: applications[i].libraryValidation,
-                isElectron: applications[i].isElectron,
-                isSystem: applications[i].isSystem,
-                signed: applications[i].signed,
-                isSipProtected: applications[i].isSipProtected,
-                isSandboxed: applications[i].isSandboxed,
-                sandboxExceptions: applications[i].sandboxExceptions,
-                isNotarized: applications[i].isNotarized,
-                isAdhocSigned: applications[i].isAdhocSigned,
-                signingCertificateCN: applications[i].signingCertificateCN,
-                signingCertificateSHA256: applications[i].signingCertificateSHA256,
-                certificateExpires: applications[i].certificateExpires,
-                isCertificateExpired: applications[i].isCertificateExpired,
-                certificateChainLength: applications[i].certificateChainLength,
-                certificateTrustValid: applications[i].certificateTrustValid,
-                certificateChain: applications[i].certificateChain,
-                entitlements: applications[i].entitlements,
-                injectionMethods: applications[i].injectionMethods,
-                launchConstraintCategory: applications[i].launchConstraintCategory,
-                sandboxProfile: applications[i].sandboxProfile,
+        for i in result.indices {
+            let info = readQuarantine(at: result[i].path)
+            result[i] = Application(
+                name: result[i].name,
+                bundleId: result[i].bundleId,
+                path: result[i].path,
+                version: result[i].version,
+                teamId: result[i].teamId,
+                hardenedRuntime: result[i].hardenedRuntime,
+                libraryValidation: result[i].libraryValidation,
+                isElectron: result[i].isElectron,
+                isSystem: result[i].isSystem,
+                signed: result[i].signed,
+                isSipProtected: result[i].isSipProtected,
+                isSandboxed: result[i].isSandboxed,
+                sandboxExceptions: result[i].sandboxExceptions,
+                isNotarized: result[i].isNotarized,
+                isAdhocSigned: result[i].isAdhocSigned,
+                signingCertificateCN: result[i].signingCertificateCN,
+                signingCertificateSHA256: result[i].signingCertificateSHA256,
+                certificateExpires: result[i].certificateExpires,
+                isCertificateExpired: result[i].isCertificateExpired,
+                certificateChainLength: result[i].certificateChainLength,
+                certificateTrustValid: result[i].certificateTrustValid,
+                certificateChain: result[i].certificateChain,
+                entitlements: result[i].entitlements,
+                injectionMethods: result[i].injectionMethods,
+                launchConstraintCategory: result[i].launchConstraintCategory,
+                sandboxProfile: result[i].sandboxProfile,
                 quarantineInfo: info
             )
             if info.hasQuarantineFlag {
                 count += 1
             }
         }
-        return count
+        return (result, count)
     }
 
     // MARK: - Quarantine attribute reading

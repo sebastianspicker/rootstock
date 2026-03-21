@@ -56,14 +56,19 @@ COMPOSITE_CONSTRAINTS = [
 
 # Additional indexes for query performance (beyond what constraints provide)
 INDEXES = [
-    ("app_team_id",  "Application", "a.team_id"),
-    ("app_scan_id",  "Application", "a.scan_id"),
-    ("app_owned",    "Application", "a.owned"),
-    ("app_tier",     "Application", "a.tier"),
-    ("vuln_cvss",    "Vulnerability",   "v.cvss_score"),
-    ("vuln_epss",    "Vulnerability",   "v.epss_score"),
-    ("vuln_kev",     "Vulnerability",   "v.in_kev"),
-    ("app_risk_score", "Application",   "a.risk_score"),
+    ("app_team_id",          "Application", "a.team_id"),
+    ("app_scan_id",          "Application", "a.scan_id"),
+    ("app_owned",            "Application", "a.owned"),
+    ("app_tier",             "Application", "a.tier"),
+    ("app_is_electron",      "Application", "a.is_electron"),
+    ("app_hardened_runtime",  "Application", "a.hardened_runtime"),
+    ("app_library_validation","Application", "a.library_validation"),
+    ("app_is_running",       "Application", "a.is_running"),
+    ("app_is_sandboxed",     "Application", "a.is_sandboxed"),
+    ("vuln_cvss",            "Vulnerability",   "v.cvss_score"),
+    ("vuln_epss",            "Vulnerability",   "v.epss_score"),
+    ("vuln_kev",             "Vulnerability",   "v.in_kev"),
+    ("app_risk_score",       "Application",   "a.risk_score"),
 ]
 
 

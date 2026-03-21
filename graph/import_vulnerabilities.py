@@ -22,7 +22,7 @@ import argparse
 import sys
 
 from neo4j_connection import add_neo4j_args, connect_from_args
-from cve_reference import _REGISTRY, _GROUP_REGISTRY, _GROUP_TECHNIQUE_MAP, AttackContext, CveEntry, CWE_REGISTRY
+from cve_reference import _REGISTRY, _GROUP_REGISTRY, _GROUP_TECHNIQUE_MAP, AttackContext, CveEntry, CWE_REGISTRY, REGISTRY_VERSION
 from cve_enrichment import enrich_registry, EnrichedCveEntry, temporal_score
 from version_matcher import (
     extract_macos_max_version,
@@ -199,105 +199,121 @@ def _estimate_years_since_disclosure(entry: EnrichedCveEntry) -> float:
 
 
 def import_vulnerability_nodes(session) -> int:
-    """MERGE Vulnerability nodes from the enriched CVE registry."""
+    """MERGE Vulnerability nodes from the enriched CVE registry (batched)."""
     enriched = enrich_registry()
 
-    count = 0
+    batch = []
     for entry in enriched.values():
         cve = entry.base
         years = _estimate_years_since_disclosure(entry)
         tp = temporal_score(cve.cvss_score, entry.epss_score, years)
+        batch.append({
+            "cve_id": cve.cve_id,
+            "title": cve.title,
+            "cvss_score": cve.cvss_score,
+            "epss_score": entry.epss_score,
+            "epss_percentile": entry.epss_percentile,
+            "in_kev": entry.in_kev,
+            "kev_date_added": entry.kev_date_added,
+            "exploitation_status": cve.exploitation_status,
+            "attack_complexity": cve.attack_complexity,
+            "affected_versions": cve.affected_versions,
+            "patched_version": cve.patched_version,
+            "description": cve.description,
+            "reference_url": cve.reference_url,
+            "kev_ransomware": entry.kev_ransomware,
+            "cwe_ids": list(cve.cwe_ids),
+            "cvss_vector": entry.cvss_vector,
+            "temporal_priority": round(tp, 4),
+        })
 
-        result = session.run(
-            """
-            MERGE (v:Vulnerability {cve_id: $cve_id})
-            SET v.title = $title,
-                v.cvss_score = $cvss_score,
-                v.epss_score = $epss_score,
-                v.epss_percentile = $epss_percentile,
-                v.in_kev = $in_kev,
-                v.kev_date_added = $kev_date_added,
-                v.exploitation_status = $exploitation_status,
-                v.attack_complexity = $attack_complexity,
-                v.affected_versions = $affected_versions,
-                v.patched_version = $patched_version,
-                v.description = $description,
-                v.reference_url = $reference_url,
-                v.kev_ransomware = $kev_ransomware,
-                v.cwe_ids = $cwe_ids,
-                v.cvss_vector = $cvss_vector,
-                v.temporal_priority = $temporal_priority
-            RETURN count(v) AS n
-            """,
-            cve_id=cve.cve_id,
-            title=cve.title,
-            cvss_score=cve.cvss_score,
-            epss_score=entry.epss_score,
-            epss_percentile=entry.epss_percentile,
-            in_kev=entry.in_kev,
-            kev_date_added=entry.kev_date_added,
-            exploitation_status=cve.exploitation_status,
-            attack_complexity=cve.attack_complexity,
-            affected_versions=cve.affected_versions,
-            patched_version=cve.patched_version,
-            description=cve.description,
-            reference_url=cve.reference_url,
-            kev_ransomware=entry.kev_ransomware,
-            cwe_ids=list(cve.cwe_ids),
-            cvss_vector=entry.cvss_vector,
-            temporal_priority=round(tp, 4),
-        )
-        count += result.single()["n"]
+    if not batch:
+        return 0
 
-    return count
+    result = session.run(
+        """
+        UNWIND $batch AS row
+        MERGE (v:Vulnerability {cve_id: row.cve_id})
+        SET v.title = row.title,
+            v.cvss_score = row.cvss_score,
+            v.epss_score = row.epss_score,
+            v.epss_percentile = row.epss_percentile,
+            v.in_kev = row.in_kev,
+            v.kev_date_added = row.kev_date_added,
+            v.exploitation_status = row.exploitation_status,
+            v.attack_complexity = row.attack_complexity,
+            v.affected_versions = row.affected_versions,
+            v.patched_version = row.patched_version,
+            v.description = row.description,
+            v.reference_url = row.reference_url,
+            v.kev_ransomware = row.kev_ransomware,
+            v.cwe_ids = row.cwe_ids,
+            v.cvss_vector = row.cvss_vector,
+            v.temporal_priority = row.temporal_priority
+        RETURN count(v) AS n
+        """,
+        batch=batch,
+    )
+    return result.single()["n"]
 
 
 def import_technique_nodes(session) -> int:
-    """MERGE AttackTechnique nodes from the registry."""
+    """MERGE AttackTechnique nodes from the registry (batched)."""
     seen: set[str] = set()
-    count = 0
+    batch = []
 
     for ctx in _REGISTRY.values():
         for tech in ctx.techniques:
             if tech.technique_id in seen:
                 continue
             seen.add(tech.technique_id)
+            batch.append({
+                "technique_id": tech.technique_id,
+                "name": tech.name,
+                "tactic": tech.tactic,
+            })
 
-            result = session.run(
-                """
-                MERGE (t:AttackTechnique {technique_id: $technique_id})
-                SET t.name = $name,
-                    t.tactic = $tactic
-                RETURN count(t) AS n
-                """,
-                technique_id=tech.technique_id,
-                name=tech.name,
-                tactic=tech.tactic,
-            )
-            count += result.single()["n"]
+    if not batch:
+        return 0
 
-    return count
+    result = session.run(
+        """
+        UNWIND $batch AS row
+        MERGE (t:AttackTechnique {technique_id: row.technique_id})
+        SET t.name = row.name,
+            t.tactic = row.tactic
+        RETURN count(t) AS n
+        """,
+        batch=batch,
+    )
+    return result.single()["n"]
 
 
 def import_technique_edges(session) -> int:
-    """Create (:Vulnerability)-[:MAPS_TO_TECHNIQUE]->(:AttackTechnique) edges."""
-    count = 0
+    """Create (:Vulnerability)-[:MAPS_TO_TECHNIQUE]->(:AttackTechnique) edges (batched)."""
+    batch = []
     for ctx in _REGISTRY.values():
         for cve in ctx.cves:
             for tech in ctx.techniques:
-                result = session.run(
-                    """
-                    MATCH (v:Vulnerability {cve_id: $cve_id})
-                    MATCH (t:AttackTechnique {technique_id: $technique_id})
-                    MERGE (v)-[:MAPS_TO_TECHNIQUE]->(t)
-                    RETURN count(*) AS n
-                    """,
-                    cve_id=cve.cve_id,
-                    technique_id=tech.technique_id,
-                )
-                count += result.single()["n"]
+                batch.append({
+                    "cve_id": cve.cve_id,
+                    "technique_id": tech.technique_id,
+                })
 
-    return count
+    if not batch:
+        return 0
+
+    result = session.run(
+        """
+        UNWIND $batch AS row
+        MATCH (v:Vulnerability {cve_id: row.cve_id})
+        MATCH (t:AttackTechnique {technique_id: row.technique_id})
+        MERGE (v)-[:MAPS_TO_TECHNIQUE]->(t)
+        RETURN count(*) AS n
+        """,
+        batch=batch,
+    )
+    return result.single()["n"]
 
 
 # ── Two-tier AFFECTED_BY matching ────────────────────────────────────────
@@ -447,60 +463,70 @@ def import_affected_by_edges(session) -> int:
 
 
 def import_threat_group_nodes(session) -> int:
-    """MERGE ThreatGroup nodes from the registry."""
-    count = 0
-    for group in _GROUP_REGISTRY.values():
-        result = session.run(
-            """
-            MERGE (g:ThreatGroup {group_id: $group_id})
-            SET g.name = $name,
-                g.aliases = $aliases
-            RETURN count(g) AS n
-            """,
-            group_id=group.group_id,
-            name=group.name,
-            aliases=list(group.aliases),
-        )
-        count += result.single()["n"]
-    return count
+    """MERGE ThreatGroup nodes from the registry (batched)."""
+    batch = [
+        {"group_id": g.group_id, "name": g.name, "aliases": list(g.aliases)}
+        for g in _GROUP_REGISTRY.values()
+    ]
+    if not batch:
+        return 0
+
+    result = session.run(
+        """
+        UNWIND $batch AS row
+        MERGE (g:ThreatGroup {group_id: row.group_id})
+        SET g.name = row.name,
+            g.aliases = row.aliases
+        RETURN count(g) AS n
+        """,
+        batch=batch,
+    )
+    return result.single()["n"]
 
 
 def import_group_technique_edges(session) -> int:
-    """Create (:ThreatGroup)-[:USES_TECHNIQUE]->(:AttackTechnique) edges."""
-    count = 0
-    for group_id, technique_ids in _GROUP_TECHNIQUE_MAP.items():
-        for tid in technique_ids:
-            result = session.run(
-                """
-                MATCH (g:ThreatGroup {group_id: $gid})
-                MATCH (t:AttackTechnique {technique_id: $tid})
-                MERGE (g)-[:USES_TECHNIQUE]->(t)
-                RETURN count(*) AS n
-                """,
-                gid=group_id,
-                tid=tid,
-            )
-            count += result.single()["n"]
-    return count
+    """Create (:ThreatGroup)-[:USES_TECHNIQUE]->(:AttackTechnique) edges (batched)."""
+    batch = [
+        {"gid": group_id, "tid": tid}
+        for group_id, technique_ids in _GROUP_TECHNIQUE_MAP.items()
+        for tid in technique_ids
+    ]
+    if not batch:
+        return 0
+
+    result = session.run(
+        """
+        UNWIND $batch AS row
+        MATCH (g:ThreatGroup {group_id: row.gid})
+        MATCH (t:AttackTechnique {technique_id: row.tid})
+        MERGE (g)-[:USES_TECHNIQUE]->(t)
+        RETURN count(*) AS n
+        """,
+        batch=batch,
+    )
+    return result.single()["n"]
 
 
 def import_cwe_nodes(session) -> int:
-    """MERGE CWE nodes from CWE_REGISTRY."""
-    count = 0
-    for cwe in CWE_REGISTRY.values():
-        result = session.run(
-            """
-            MERGE (c:CWE {cwe_id: $cwe_id})
-            SET c.name     = $name,
-                c.category = $category
-            RETURN count(c) AS n
-            """,
-            cwe_id=cwe.cwe_id,
-            name=cwe.name,
-            category=cwe.category,
-        )
-        count += result.single()["n"]
-    return count
+    """MERGE CWE nodes from CWE_REGISTRY (batched)."""
+    batch = [
+        {"cwe_id": cwe.cwe_id, "name": cwe.name, "category": cwe.category}
+        for cwe in CWE_REGISTRY.values()
+    ]
+    if not batch:
+        return 0
+
+    result = session.run(
+        """
+        UNWIND $batch AS row
+        MERGE (c:CWE {cwe_id: row.cwe_id})
+        SET c.name     = row.name,
+            c.category = row.category
+        RETURN count(c) AS n
+        """,
+        batch=batch,
+    )
+    return result.single()["n"]
 
 
 def import_cwe_edges(session) -> int:
@@ -555,7 +581,7 @@ def main() -> int:
 
     driver = connect_from_args(args)
 
-    print("Importing vulnerability data...")
+    print(f"Importing vulnerability data (registry v{REGISTRY_VERSION})...")
     with driver.session() as session:
         counts = import_all(session)
 

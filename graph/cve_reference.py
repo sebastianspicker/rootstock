@@ -10,6 +10,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+# Registry version — bump when CVE/ATT&CK/CWE entries are added or modified.
+# Imported by import_vulnerabilities.py and embedded in graph metadata.
+REGISTRY_VERSION = "2026-03-21"
 
 _VALID_EXPLOITATION_STATUSES = {"actively_exploited", "poc_available", "theoretical"}
 _VALID_ATTACK_COMPLEXITIES = {"low", "medium", "high"}

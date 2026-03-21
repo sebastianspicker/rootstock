@@ -52,18 +52,20 @@ class TestCweImportFunctions:
     def test_import_cwe_nodes_calls_merge(self):
         mock_session = MagicMock()
         mock_result = MagicMock()
-        mock_result.single.return_value = {"n": 1}
+        mock_result.single.return_value = {"n": len(CWE_REGISTRY)}
         mock_session.run.return_value = mock_result
 
         count = import_cwe_nodes(mock_session)
         assert count == len(CWE_REGISTRY)
 
-        # Each CWE should trigger a MERGE call
-        calls = mock_session.run.call_args_list
-        assert len(calls) == len(CWE_REGISTRY)
-        for c in calls:
-            assert "MERGE" in c[0][0]
-            assert "cwe_id" in c[1]
+        # Batched: single UNWIND call with all CWEs
+        mock_session.run.assert_called_once()
+        call_args = mock_session.run.call_args
+        assert "UNWIND" in call_args[0][0]
+        assert "MERGE" in call_args[0][0]
+        batch = call_args[1]["batch"]
+        assert len(batch) == len(CWE_REGISTRY)
+        assert all("cwe_id" in entry for entry in batch)
 
     def test_import_cwe_edges_runs_query(self):
         mock_session = MagicMock()

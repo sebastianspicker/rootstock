@@ -76,7 +76,7 @@ final class TCCTests: XCTestCase {
         makeFixtureDB(at: path)
 
         let db = try SQLiteDatabase(path: path)
-        let rows = db.query("SELECT * FROM access")
+        let rows = try db.query("SELECT * FROM access")
         XCTAssertEqual(rows.count, 7)
     }
 
@@ -86,7 +86,7 @@ final class TCCTests: XCTestCase {
         makeFixtureDB(at: path)
 
         let db = try SQLiteDatabase(path: path)
-        let rows = db.query("SELECT service, client_type, last_modified FROM access LIMIT 1")
+        let rows = try db.query("SELECT service, client_type, last_modified FROM access LIMIT 1")
         XCTAssertEqual(rows.count, 1)
 
         let row = rows[0]

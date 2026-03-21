@@ -43,7 +43,7 @@ EPSS_CACHE = CACHE_DIR / "epss.json"
 KEV_CACHE = CACHE_DIR / "kev.json"
 
 EPSS_TTL_SECONDS = 24 * 3600   # 24 hours
-KEV_TTL_SECONDS = 12 * 3600    # 12 hours
+KEV_TTL_SECONDS = 24 * 3600    # 24 hours (aligned with EPSS)
 
 EPSS_API_URL = "https://api.first.org/data/v1/epss"
 KEV_FEED_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"

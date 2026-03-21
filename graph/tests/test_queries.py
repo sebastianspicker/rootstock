@@ -202,6 +202,28 @@ class TestQueryFileStructure:
         expected = list(range(1, EXPECTED_QUERY_COUNT + 1))
         assert ids == expected, f"Non-sequential IDs: got {ids}, expected {expected}"
 
+    def test_all_queries_are_read_only(self):
+        """Every .cypher file should pass the read-only Cypher validator."""
+        from utils import validate_read_only_cypher
+        failures = []
+        for path in _all_cypher_files():
+            cypher = path.read_text(encoding="utf-8")
+            stmt = _first_statement(cypher)
+            error = validate_read_only_cypher(stmt)
+            if error:
+                failures.append(f"{path.name}: {error}")
+        assert not failures, "Queries that failed read-only validation:\n" + "\n".join(failures)
+
+    def test_all_queries_parseable(self):
+        """Every .cypher file should produce a non-empty first statement."""
+        failures = []
+        for path in _all_cypher_files():
+            cypher = path.read_text(encoding="utf-8")
+            stmt = _first_statement(cypher)
+            if not stmt:
+                failures.append(path.name)
+        assert not failures, f"Queries with no parseable statement: {failures}"
+
     def test_cve_header_format_when_present(self):
         """CVE headers (when present) must contain valid CVE IDs."""
         cve_id_re = re.compile(r"CVE-\d{4}-\d+")

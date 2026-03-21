@@ -168,13 +168,67 @@ struct ScanOrchestrator {
             allErrors.append(contentsOf: csErrors)
             csElapsed = elapsed
         }
-        if config.sandbox && config.entitlements {
-            let (count, elapsed) = await timed { SandboxDataSource().enrich(applications: &applications) }
-            if verbose { err("  [Sandbox]      completed in \(format(elapsed))  (\(count) profiles)") }
-        }
-        if config.quarantine && config.entitlements {
-            let (count, elapsed) = await timed { QuarantineDataSource().enrich(applications: &applications) }
-            if verbose { err("  [Quarantine]   completed in \(format(elapsed))  (\(count) quarantined)") }
+        if config.entitlements && (config.sandbox || config.quarantine) {
+            let enrichStart = Date()
+            let appSnapshot = applications  // copy for concurrent reads
+
+            if config.sandbox && config.quarantine {
+                // Run both enrichments concurrently using async let
+                async let sandboxResult = { SandboxDataSource().enriched(applications: appSnapshot) }()
+                async let quarantineResult = { QuarantineDataSource().enriched(applications: appSnapshot) }()
+                let ((sandboxApps, sandboxCount), (quarantineApps, quarantineCount)) = await (sandboxResult, quarantineResult)
+
+                // Merge: sandbox writes sandboxProfile, quarantine writes quarantineInfo.
+                // Start from sandbox results and overlay quarantine data.
+                applications = sandboxApps
+                for i in applications.indices {
+                    applications[i] = Application(
+                        name: applications[i].name,
+                        bundleId: applications[i].bundleId,
+                        path: applications[i].path,
+                        version: applications[i].version,
+                        teamId: applications[i].teamId,
+                        hardenedRuntime: applications[i].hardenedRuntime,
+                        libraryValidation: applications[i].libraryValidation,
+                        isElectron: applications[i].isElectron,
+                        isSystem: applications[i].isSystem,
+                        signed: applications[i].signed,
+                        isSipProtected: applications[i].isSipProtected,
+                        isSandboxed: applications[i].isSandboxed,
+                        sandboxExceptions: applications[i].sandboxExceptions,
+                        isNotarized: applications[i].isNotarized,
+                        isAdhocSigned: applications[i].isAdhocSigned,
+                        signingCertificateCN: applications[i].signingCertificateCN,
+                        signingCertificateSHA256: applications[i].signingCertificateSHA256,
+                        certificateExpires: applications[i].certificateExpires,
+                        isCertificateExpired: applications[i].isCertificateExpired,
+                        certificateChainLength: applications[i].certificateChainLength,
+                        certificateTrustValid: applications[i].certificateTrustValid,
+                        certificateChain: applications[i].certificateChain,
+                        entitlements: applications[i].entitlements,
+                        injectionMethods: applications[i].injectionMethods,
+                        launchConstraintCategory: applications[i].launchConstraintCategory,
+                        sandboxProfile: applications[i].sandboxProfile,
+                        quarantineInfo: quarantineApps[i].quarantineInfo
+                    )
+                }
+
+                let elapsed = Date().timeIntervalSince(enrichStart)
+                if verbose {
+                    err("  [Sandbox]      completed in \(format(elapsed))  (\(sandboxCount) profiles)")
+                    err("  [Quarantine]   completed in \(format(elapsed))  (\(quarantineCount) quarantined)")
+                }
+            } else if config.sandbox {
+                let (sandboxApps, sandboxCount) = SandboxDataSource().enriched(applications: appSnapshot)
+                applications = sandboxApps
+                let elapsed = Date().timeIntervalSince(enrichStart)
+                if verbose { err("  [Sandbox]      completed in \(format(elapsed))  (\(sandboxCount) profiles)") }
+            } else {
+                let (quarantineApps, quarantineCount) = QuarantineDataSource().enriched(applications: appSnapshot)
+                applications = quarantineApps
+                let elapsed = Date().timeIntervalSince(enrichStart)
+                if verbose { err("  [Quarantine]   completed in \(format(elapsed))  (\(quarantineCount) quarantined)") }
+            }
         }
 
         // Phase 3: Await concurrent results.

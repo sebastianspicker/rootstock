@@ -6,7 +6,7 @@
 
 Attack path discovery for macOS that maps TCC grants, entitlements, Keychain ACLs, and XPC trust relationships as an exploitable graph.
 
-> **Status:** Phase 5 Complete — Collector + Graph Pipeline + Hardening. Scans macOS apps, extracts entitlements and code signing metadata, imports into Neo4j, and discovers attack paths via pre-built Cypher queries.
+> **Status:** Phase 7 Complete — Full graph intelligence pipeline with risk scoring, CWE taxonomy, ESF enrichment, vulnerability correlation, and 101 Cypher queries.
 
 ## What is Rootstock?
 
@@ -220,7 +220,7 @@ Run with `sudo` or grant FDA to the binary to collect TCC grants. See `docs/rese
 ## Project Structure
 
 ```
-collector/                 Swift CLI collector
+collector/                 Swift CLI collector (23 modules)
 ├── Sources/
 │   ├── Models/            Shared data models + MacOSVersion detection
 │   ├── TCC/               TCC database parser (version-aware schema adapters)
@@ -230,17 +230,56 @@ collector/                 Swift CLI collector
 │   ├── Keychain/          Keychain ACL metadata reader
 │   ├── Persistence/       LaunchDaemons/Agents/crontab scanner
 │   ├── MDM/               MDM configuration profile parser
+│   ├── Groups/            Local groups + user details
+│   ├── RemoteAccess/      SSH, VNC, ARD service detection
+│   ├── Firewall/          Application firewall policy
+│   ├── LoginSession/      Active login sessions
+│   ├── AuthorizationDB/   Authorization rights database
+│   ├── AuthorizationPlugins/ Security agent plugins
+│   ├── SystemExtensions/  System/network extensions
+│   ├── Sudoers/           Sudoers NOPASSWD rules
+│   ├── ProcessSnapshot/   Running process enumeration
+│   ├── FileACLs/          Critical file ACL auditing
+│   ├── ShellHooks/        Shell config injection points
+│   ├── PhysicalSecurity/  Bluetooth, screen lock, Thunderbolt posture
+│   ├── ActiveDirectory/   AD binding + user/group discovery
+│   ├── KerberosArtifacts/ ccache, keytab, krb5.conf
+│   ├── Sandbox/           Sandbox profile deep parsing (SBPL rules)
+│   ├── Quarantine/        Gatekeeper quarantine xattr reader
 │   ├── Export/            JSON serialization
 │   └── RootstockCLI/      CLI entry point + scan orchestration
-├── Tests/                 Unit tests (100 tests across 8 modules)
+├── Tests/                 Unit tests
 └── schema/                JSON Schema for output validation
 
-graph/                     Neo4j import + Cypher queries
-├── import.py              JSON → Neo4j graph importer (UNWIND-batched)
-├── infer.py               Relationship inference engine
+graph/                     Neo4j import, inference, query engine & API
+├── import.py              Scan JSON → Neo4j importer (orchestrator)
+├── import_nodes_core.py   Core node imports (apps, TCC, entitlements, certs)
+├── import_nodes_services.py   Services (XPC, persistence, keychain)
+├── import_nodes_security.py   Security nodes (groups, firewall, auth, sudoers)
+├── import_nodes_security_enterprise.py  Enterprise (AD, Kerberos, process, file ACL)
+├── import_nodes_enrichment.py Enrichment (physical, iCloud, bluetooth)
+├── import_vulnerabilities.py  CVE/ATT&CK/ThreatGroup import + version matching
+├── infer.py               Inference engine orchestrator (18 modules)
+├── infer_esf.py           ESF event enrichment + monitoring gap analysis
+├── infer_risk_score.py    Composite risk scoring engine (0-100 scale)
+├── infer_recommendations.py  Automated remediation recommendations
+├── server.py              FastAPI REST API server
+├── models.py              Pydantic v2 graph node/edge type definitions
+├── setup_schema.py        Neo4j schema constraints and indices
+├── constants.py           Shared constants and configuration
+├── tier_classification.py Asset tier classification engine
+├── cve_reference.py       CVE + ATT&CK + ThreatGroup registry
+├── cve_enrichment.py      Live EPSS + KEV + NVD enrichment with caching
+├── version_matcher.py     Version-aware CVE matching
+├── bloodhound_import.py   SharpHound ZIP → ADUser/SAME_IDENTITY import
+├── opengraph_export.py    BloodHound OpenGraph JSON export
 ├── report.py              Markdown report generator
-├── queries/               23 pre-built Cypher queries (4 severity levels)
-└── tests/                 87 Python tests
+├── report_assembly.py     Report section assembly + orchestration
+├── report_formatters.py   Report output formatters (MD, HTML, JSON)
+├── viewer_template.html   Interactive Canvas-based graph viewer
+├── pipeline.sh            One-command pipeline (schema → import → infer → classify → report)
+├── queries/               101 pre-built Cypher queries (10 categories)
+└── tests/                 425+ Python tests
 
 scripts/
 ├── validate-scan.py       Output validation script

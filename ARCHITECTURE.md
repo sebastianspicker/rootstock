@@ -154,6 +154,19 @@ Application {
     is_system: Bool         // Located in /System/ or /usr/
     signed: Bool
     scan_id: String         // Which scan produced this node
+    is_running: Bool?       // From process snapshot
+    is_sandboxed: Bool?     // Has sandbox profile
+    sandbox_profile: String? // Sandbox profile path
+    has_automation_tcc: Bool?
+    injection_methods: [String]  // ["dyld_insert", "electron_env_var", etc.]
+    risk_score: Float?      // 0-100 composite risk score
+    tier: String?           // "tier_0" | "tier_1" | "tier_2" | "tier_3"
+    certificate_authority: String?
+    certificate_expiry: String?
+    is_notarized: Bool?
+    has_sudo_nopasswd: Bool?
+    quarantine_origin: String?
+    code_directory_hash: String?
 }
 
 User {
@@ -205,6 +218,61 @@ MDM_Profile {
     organization: String?
     install_date: String?
 }
+
+Vulnerability {
+    cve_id: String          // e.g., "CVE-2024-1234"
+    description: String
+    severity: String        // "critical" | "high" | "medium" | "low"
+    cvss_score: Float?
+    epss_score: Float?      // Exploit Prediction Scoring
+    in_kev: Bool            // In CISA Known Exploited Vulnerabilities
+    published: String?
+    affected_versions: String?
+}
+
+CWE {
+    cwe_id: String          // e.g., "CWE-78"
+    name: String
+    description: String?
+    category: String?       // "memory_safety" | "injection" | "auth" | etc.
+}
+
+Recommendation {
+    id: String
+    title: String
+    description: String
+    priority: String        // "critical" | "high" | "medium" | "low"
+    category: String
+    effort: String?         // "quick_win" | "moderate" | "significant"
+}
+
+ADUser {
+    sam_account_name: String
+    distinguished_name: String?
+    domain: String
+    enabled: Bool
+    admin_count: Bool?
+}
+
+ThreatGroup {
+    name: String            // e.g., "APT28"
+    aliases: [String]?
+    description: String?
+    source: String          // "MITRE ATT&CK"
+}
+
+Computer {
+    hostname: String
+    os: String?
+    domain: String?
+}
+
+AttackTechnique {
+    technique_id: String    // e.g., "T1055"
+    name: String
+    tactic: String?
+    description: String?
+}
 ```
 
 ### Relationship Types
@@ -224,6 +292,14 @@ MDM_Profile {
 (User)-[:HAS_KEYCHAIN]->(Keychain_Item)
 (LaunchItem)-[:RUNS_AS]->(User)
 (MDM_Profile)-[:CONFIGURES]->(TCC_Permission)  // MDM-managed TCC policies
+(Application)-[:HAS_VULNERABILITY]->(Vulnerability)
+(Vulnerability)-[:MAPS_TO_CWE]->(CWE)
+(Application)-[:HAS_RECOMMENDATION]->(Recommendation)
+(AttackTechnique)-[:EXPLOITS]->(Vulnerability)
+(ThreatGroup)-[:USES_TECHNIQUE]->(AttackTechnique)
+(ADUser)-[:SAME_IDENTITY]->(User)
+(Application)-[:MONITORED_BY_ESF {event_types: [String]}]->(ESF_Event)
+(Application)-[:HAS_RISK_SCORE {score: Float, factors: Map}]->(RiskAssessment)
 ```
 
 ### Inferred Relationships (computed at import time)

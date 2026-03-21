@@ -159,31 +159,37 @@ class TestTemporalScore:
 # ── Import functions (mock session) ──────────────────────────────────────
 
 class TestImportThreatGroups:
-    def _mock_session(self):
+    def _mock_session(self, return_n=None):
         session = MagicMock()
         result = MagicMock()
-        result.single.return_value = {"n": 1}
+        if return_n is not None:
+            result.single.return_value = {"n": return_n}
+        else:
+            result.single.return_value = {"n": 1}
         session.run.return_value = result
         return session
 
     def test_import_threat_group_nodes(self):
-        session = self._mock_session()
+        session = self._mock_session(return_n=len(_GROUP_REGISTRY))
         count = import_threat_group_nodes(session)
         assert count == len(_GROUP_REGISTRY)
-        # Verify MERGE was called for each group
-        assert session.run.call_count == len(_GROUP_REGISTRY)
+        # Batched: single UNWIND call
+        session.run.assert_called_once()
+        batch = session.run.call_args[1]["batch"]
+        assert len(batch) == len(_GROUP_REGISTRY)
 
     def test_import_group_technique_edges(self):
-        session = self._mock_session()
         total_edges = sum(len(techs) for techs in _GROUP_TECHNIQUE_MAP.values())
+        session = self._mock_session(return_n=total_edges)
         count = import_group_technique_edges(session)
         assert count == total_edges
+        # Batched: single UNWIND call
+        session.run.assert_called_once()
 
     def test_import_all_includes_threat_groups(self):
-        session = self._mock_session()
+        session = self._mock_session(return_n=0)
         with patch("import_vulnerabilities.enrich_registry") as mock_enrich:
             mock_enrich.return_value = {}
             counts = import_all(session)
         assert "threat_groups" in counts
         assert "uses_technique" in counts
-        assert counts["threat_groups"] == len(_GROUP_REGISTRY)

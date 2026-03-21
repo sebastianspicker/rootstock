@@ -167,3 +167,58 @@ def test_validate_complex_read_query():
         RETURN app.name, svc
     """
     assert validate_read_only_cypher(query) is None
+
+
+def test_validate_load_csv_rejected():
+    """LOAD CSV is a write/import operation and must be blocked."""
+    assert validate_read_only_cypher("LOAD CSV FROM 'file:///x' AS row CREATE (n)") is not None
+
+
+def test_validate_foreach_rejected():
+    """FOREACH can mutate graph state and must be blocked."""
+    query = "MATCH p=(n)-[*]->(m) FOREACH (x IN nodes(p) | SET x.visited = true)"
+    assert validate_read_only_cypher(query) is not None
+
+
+def test_validate_bare_call_rejected():
+    """Bare CALL (not to db./dbms./apoc.) should be blocked."""
+    assert validate_read_only_cypher("CALL custom.procedure()") is not None
+
+
+def test_validate_call_db_safe():
+    """CALL db.* and CALL dbms.* are safe read-only procedures."""
+    assert validate_read_only_cypher("CALL db.labels()") is None
+    assert validate_read_only_cypher("CALL dbms.listConfig()") is None
+
+
+def test_validate_call_apoc_safe():
+    """CALL apoc.* is generally safe for read operations."""
+    assert validate_read_only_cypher("CALL apoc.meta.schema()") is None
+
+
+def test_validate_load_csv_case_insensitive():
+    """LOAD CSV bypass should be case-insensitive."""
+    assert validate_read_only_cypher("load csv FROM 'x' AS row") is not None
+
+
+# ── safe_count ────────────────────────────────────────────────────────────
+
+from utils import safe_count
+
+
+def test_safe_count_normal():
+    mock_result = MagicMock()
+    mock_result.single.return_value = {"n": 42}
+    assert safe_count(mock_result) == 42
+
+
+def test_safe_count_none_result():
+    mock_result = MagicMock()
+    mock_result.single.return_value = None
+    assert safe_count(mock_result) == 0
+
+
+def test_safe_count_none_value():
+    mock_result = MagicMock()
+    mock_result.single.return_value = {"n": None}
+    assert safe_count(mock_result) == 0

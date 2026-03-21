@@ -11,6 +11,27 @@ def format_no_findings() -> str:
     return "_No findings in this category._"
 
 
+ColumnSpec = list[tuple[str, str, str | None]]
+"""List of (header_label, dict_key, default_value) tuples for _format_table."""
+
+
+def _format_table(rows: list[dict], columns: ColumnSpec) -> str:
+    """Generic table builder: maps row dicts to a Markdown table via a column spec.
+
+    Each entry in *columns* is ``(header, key, default)`` — the dict key to extract
+    and the fallback value.  Uses :func:`list_or_str` for list→string coercion.
+    Returns a GitHub-flavoured Markdown table via :func:`tabulate`.
+    """
+    if not rows:
+        return format_no_findings()
+    table_rows = [
+        [list_or_str(row.get(key, default)) for _, key, default in columns]
+        for row in rows
+    ]
+    headers = [h for h, _, _ in columns]
+    return tabulate(table_rows, headers=headers, tablefmt="github")
+
+
 def format_generic_table(rows: list[dict]) -> str:
     """Format any query result set as a GitHub-flavoured Markdown table."""
     if not rows:
@@ -58,57 +79,32 @@ def format_injectable_fda_table(rows: list[dict]) -> str:
 
 def format_electron_table(rows: list[dict]) -> str:
     """Format Query 03 results: Electron apps with TCC inheritance."""
-    if not rows:
-        return format_no_findings()
-
-    table_rows = []
-    for r in rows:
-        perms = list_or_str(r.get("inherited_permissions", []))
-        table_rows.append([
-            r.get("app_name", "?"),
-            r.get("bundle_id", "?"),
-            perms,
-            str(r.get("permission_count", 0)),
-        ])
-
-    headers = ["Electron App", "Bundle ID", "Inherited Permissions", "Count"]
-    return tabulate(table_rows, headers=headers, tablefmt="github")
+    return _format_table(rows, [
+        ("Electron App", "app_name", "?"),
+        ("Bundle ID", "bundle_id", "?"),
+        ("Inherited Permissions", "inherited_permissions", "—"),
+        ("Count", "permission_count", "0"),
+    ])
 
 
 def format_apple_event_table(rows: list[dict]) -> str:
     """Format Query 05 results: Apple Event TCC cascade."""
-    if not rows:
-        return format_no_findings()
-
-    table_rows = []
-    for r in rows:
-        table_rows.append([
-            r.get("source_app", "?"),
-            r.get("target_app", "?"),
-            r.get("permission_gained", "?"),
-        ])
-
-    headers = ["Source App", "Target App", "Gained Permission"]
-    return tabulate(table_rows, headers=headers, tablefmt="github")
+    return _format_table(rows, [
+        ("Source App", "source_app", "?"),
+        ("Target App", "target_app", "?"),
+        ("Gained Permission", "permission_gained", "?"),
+    ])
 
 
 def format_tcc_overview_table(rows: list[dict]) -> str:
     """Format Query 07 section-1 results: TCC grant distribution."""
-    if not rows:
-        return format_no_findings()
-
-    table_rows = []
-    for r in rows:
-        table_rows.append([
-            r.get("permission", "?"),
-            r.get("service", "?"),
-            str(r.get("allowed_count", 0)),
-            str(r.get("denied_count", 0)),
-            str(r.get("total_grants", 0)),
-        ])
-
-    headers = ["Permission", "TCC Service", "Allowed", "Denied", "Total"]
-    return tabulate(table_rows, headers=headers, tablefmt="github")
+    return _format_table(rows, [
+        ("Permission", "permission", "?"),
+        ("TCC Service", "service", "?"),
+        ("Allowed", "allowed_count", "0"),
+        ("Denied", "denied_count", "0"),
+        ("Total", "total_grants", "0"),
+    ])
 
 
 def format_private_entitlement_table(rows: list[dict]) -> str:

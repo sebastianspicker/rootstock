@@ -14,9 +14,10 @@ Think: BloodHound for macOS-native security boundaries.
 
 ## Project Phase
 
-**Current phase:** Post-Phase 7 — Graph Intelligence Maturation
-**Status:** All 7 phases complete. Collector has 23 data source modules, graph pipeline
-has 18 inference engines, 101 Cypher queries, 29 node types, and 425 Python tests.
+**Current phase:** Post-Phase 7 — SOTA Review & Improvement
+**Status:** All 7 phases complete + full-repo review. Collector has 23 data source modules,
+graph pipeline has 18 inference engines, 101 Cypher queries, 29 node types, and 425+ Python tests.
+All subsystems at A-grade quality after systematic audit and improvement pass.
 
 ## Repository Layout
 
@@ -66,10 +67,13 @@ rootstock/
 │   ├── import_nodes_security_enterprise.py  # Enterprise (AD, Kerberos, process, file ACL)
 │   ├── import_nodes_enrichment.py # Enrichment (physical, iCloud, bluetooth)
 │   ├── import_vulnerabilities.py  # CVE/ATT&CK/ThreatGroup import + version matching
-│   ├── infer.py              # Inference engine orchestrator (16 modules)
+│   ├── infer.py              # Inference engine orchestrator (18 modules)
+│   ├── infer_esf.py          # ESF event enrichment + monitoring gap analysis
+│   ├── infer_risk_score.py   # Composite risk scoring engine (0-100 scale)
+│   ├── infer_recommendations.py # Automated remediation recommendations
 │   ├── server.py             # FastAPI REST API server
 │   ├── models.py             # Pydantic v2 graph node/edge type definitions
-│   ├── queries/              # Pre-built Cypher queries (94 .cypher files)
+│   ├── queries/              # Pre-built Cypher queries (101 .cypher files)
 │   ├── bloodhound_import.py  # SharpHound ZIP → ADUser/SAME_IDENTITY import
 │   ├── cve_reference.py      # CVE + ATT&CK + ThreatGroup registry
 │   ├── cve_enrichment.py     # Live EPSS + KEV + NVD enrichment with caching

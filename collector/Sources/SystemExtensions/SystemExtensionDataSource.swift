@@ -22,7 +22,79 @@ public struct SystemExtensionDataSource: DataSource {
 
     /// Parse `systemextensionsctl list` output.
     /// Lines look like: `---  com.crowdstrike.falcon.Agent (1.0/1.0)  TeamID  [activated enabled]`
+    ///
+    /// Uses a regex-based parser as the primary method for robustness, with
+    /// the original heuristic parser as a fallback for unexpected formats.
     internal static func parseSystemExtensionsOutput(_ output: String) -> [SystemExtension] {
+        let regexResult = parseWithRegex(output)
+        if !regexResult.isEmpty {
+            return regexResult
+        }
+        // Fallback to heuristic parser for unexpected output formats
+        return parseWithHeuristic(output)
+    }
+
+    // MARK: - Regex-based parser (primary)
+
+    /// Regex-based parser that handles known `systemextensionsctl list` output formats.
+    ///
+    /// Supported formats:
+    ///   - `--- com.example.ext (1.0/1.0)  TEAMID1234  [activated enabled]`
+    ///   - `*   com.example.ext (1.0/1.0)  TEAMID1234  [activated enabled]`
+    ///   - Lines without version parenthetical
+    ///   - State strings like `[activated enabled]`, `[activated waiting for user]`, etc.
+    private static func parseWithRegex(_ output: String) -> [SystemExtension] {
+        // Match: optional prefix (--- or *), bundle identifier (reverse-DNS with dots),
+        //        optional (version), optional TeamID (10 alphanum chars), optional [state]
+        let pattern = #"^[\s]*(?:---|\*)\s+([\w.-]+(?:\.[\w.-]+)+)\s*(?:\([^)]*\))?\s*([A-Z0-9]{10})?\s*(?:\[([^\]]*)\])?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .anchorsMatchLines) else {
+            return []
+        }
+
+        var extensions: [SystemExtension] = []
+        let nsOutput = output as NSString
+        let matches = regex.matches(in: output, range: NSRange(location: 0, length: nsOutput.length))
+
+        for match in matches {
+            // Group 1: identifier (always present if matched)
+            guard match.numberOfRanges >= 2,
+                  match.range(at: 1).location != NSNotFound else { continue }
+            let identifier = nsOutput.substring(with: match.range(at: 1))
+
+            // Group 2: teamId (optional)
+            var teamId: String? = nil
+            if match.numberOfRanges >= 3, match.range(at: 2).location != NSNotFound {
+                teamId = nsOutput.substring(with: match.range(at: 2))
+            }
+
+            // Group 3: state string inside brackets (optional)
+            var enabled = false
+            if match.numberOfRanges >= 4, match.range(at: 3).location != NSNotFound {
+                let state = nsOutput.substring(with: match.range(at: 3))
+                enabled = state.contains("enabled")
+            }
+
+            let extType = classifyExtensionType(identifier)
+            let fullLine = nsOutput.substring(with: match.range(at: 0))
+            let subscribedEvents = parseSubscribedEvents(fullLine)
+
+            extensions.append(SystemExtension(
+                identifier: identifier,
+                teamId: teamId,
+                extensionType: extType,
+                enabled: enabled,
+                subscribedEvents: subscribedEvents
+            ))
+        }
+
+        return extensions
+    }
+
+    // MARK: - Heuristic parser (fallback)
+
+    /// Original heuristic-based parser kept as a fallback for output formats
+    /// not matched by the regex parser.
+    private static func parseWithHeuristic(_ output: String) -> [SystemExtension] {
         var extensions: [SystemExtension] = []
 
         for line in output.split(separator: "\n") {
@@ -71,17 +143,7 @@ public struct SystemExtensionDataSource: DataSource {
 
             guard let id = identifier else { continue }
 
-            // Determine extension type from identifier patterns
-            let extType: SystemExtension.ExtensionType
-            if id.contains("network") || id.contains("dns") || id.contains("vpn") || id.contains("firewall") {
-                extType = .network
-            } else if id.contains("endpoint") || id.contains("security") || id.contains("falcon") || id.contains("sentinel") {
-                extType = .endpointSecurity
-            } else {
-                extType = .driver
-            }
-
-            // Parse ESF subscribed events from lines like "events: [AUTH_EXEC, NOTIFY_FORK, ...]"
+            let extType = classifyExtensionType(id)
             let subscribedEvents = Self.parseSubscribedEvents(stripped)
 
             extensions.append(SystemExtension(
@@ -94,6 +156,19 @@ public struct SystemExtensionDataSource: DataSource {
         }
 
         return extensions
+    }
+
+    // MARK: - Shared helpers
+
+    /// Determine extension type from identifier patterns.
+    private static func classifyExtensionType(_ identifier: String) -> SystemExtension.ExtensionType {
+        if identifier.contains("network") || identifier.contains("dns") || identifier.contains("vpn") || identifier.contains("firewall") {
+            return .network
+        } else if identifier.contains("endpoint") || identifier.contains("security") || identifier.contains("falcon") || identifier.contains("sentinel") {
+            return .endpointSecurity
+        } else {
+            return .driver
+        }
     }
 
     /// Parse ESF event subscriptions from systemextensionsctl output.

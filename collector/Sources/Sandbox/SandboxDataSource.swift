@@ -139,42 +139,52 @@ public struct SandboxDataSource {
     /// Enrich an array of applications with sandbox profile data in place.
     /// Returns the count of profiles added.
     public func enrich(applications: inout [Application]) -> Int {
+        let (enriched, count) = enriched(applications: applications)
+        applications = enriched
+        return count
+    }
+
+    /// Return a new array of applications enriched with sandbox profile data.
+    /// Uses copy-on-return pattern for safe use with structured concurrency.
+    /// Returns the enriched array and the count of profiles added.
+    public func enriched(applications: [Application]) -> ([Application], Int) {
+        var result = applications
         var count = 0
-        for i in applications.indices {
-            if let profile = buildProfile(for: applications[i]) {
-                applications[i] = Application(
-                    name: applications[i].name,
-                    bundleId: applications[i].bundleId,
-                    path: applications[i].path,
-                    version: applications[i].version,
-                    teamId: applications[i].teamId,
-                    hardenedRuntime: applications[i].hardenedRuntime,
-                    libraryValidation: applications[i].libraryValidation,
-                    isElectron: applications[i].isElectron,
-                    isSystem: applications[i].isSystem,
-                    signed: applications[i].signed,
-                    isSipProtected: applications[i].isSipProtected,
-                    isSandboxed: applications[i].isSandboxed,
-                    sandboxExceptions: applications[i].sandboxExceptions,
-                    isNotarized: applications[i].isNotarized,
-                    isAdhocSigned: applications[i].isAdhocSigned,
-                    signingCertificateCN: applications[i].signingCertificateCN,
-                    signingCertificateSHA256: applications[i].signingCertificateSHA256,
-                    certificateExpires: applications[i].certificateExpires,
-                    isCertificateExpired: applications[i].isCertificateExpired,
-                    certificateChainLength: applications[i].certificateChainLength,
-                    certificateTrustValid: applications[i].certificateTrustValid,
-                    certificateChain: applications[i].certificateChain,
-                    entitlements: applications[i].entitlements,
-                    injectionMethods: applications[i].injectionMethods,
-                    launchConstraintCategory: applications[i].launchConstraintCategory,
+        for i in result.indices {
+            if let profile = buildProfile(for: result[i]) {
+                result[i] = Application(
+                    name: result[i].name,
+                    bundleId: result[i].bundleId,
+                    path: result[i].path,
+                    version: result[i].version,
+                    teamId: result[i].teamId,
+                    hardenedRuntime: result[i].hardenedRuntime,
+                    libraryValidation: result[i].libraryValidation,
+                    isElectron: result[i].isElectron,
+                    isSystem: result[i].isSystem,
+                    signed: result[i].signed,
+                    isSipProtected: result[i].isSipProtected,
+                    isSandboxed: result[i].isSandboxed,
+                    sandboxExceptions: result[i].sandboxExceptions,
+                    isNotarized: result[i].isNotarized,
+                    isAdhocSigned: result[i].isAdhocSigned,
+                    signingCertificateCN: result[i].signingCertificateCN,
+                    signingCertificateSHA256: result[i].signingCertificateSHA256,
+                    certificateExpires: result[i].certificateExpires,
+                    isCertificateExpired: result[i].isCertificateExpired,
+                    certificateChainLength: result[i].certificateChainLength,
+                    certificateTrustValid: result[i].certificateTrustValid,
+                    certificateChain: result[i].certificateChain,
+                    entitlements: result[i].entitlements,
+                    injectionMethods: result[i].injectionMethods,
+                    launchConstraintCategory: result[i].launchConstraintCategory,
                     sandboxProfile: profile,
-                    quarantineInfo: applications[i].quarantineInfo
+                    quarantineInfo: result[i].quarantineInfo
                 )
                 count += 1
             }
         }
-        return count
+        return (result, count)
     }
 
     // MARK: - System profile loading

@@ -115,8 +115,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:*", "http://127.0.0.1:*"],
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 
@@ -148,7 +148,7 @@ def serve_viewer(request: Request):
     template_path = Path(__file__).parent / "viewer_template.html"
     template = template_path.read_text()
 
-    safe_json = json.dumps(data).replace("</", "<\\/")
+    safe_json = json.dumps(data, ensure_ascii=True).replace("</", "<\\/")
     title = f"{hostname} Attack Graph"
 
     # Inject live mode flag and replace template placeholders

@@ -58,7 +58,13 @@ def truncate(text: str, max_len: int = 30) -> str:
 # ── Read-only Cypher validation ─────────────────────────────────────────────
 
 _WRITE_KEYWORDS = re.compile(
-    r"\b(CREATE|MERGE|SET|DELETE|REMOVE|DROP|DETACH|CALL\s*\{)\b",
+    r"\b("
+    r"CREATE|MERGE|SET|DELETE|REMOVE|DROP|DETACH"
+    r"|LOAD\s+CSV"
+    r"|FOREACH"
+    r"|CALL\s*\{"
+    r"|CALL\s+(?!db\.|dbms\.|apoc\.)"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -88,3 +94,32 @@ def validate_read_only_cypher(cypher: str) -> str | None:
     if match:
         return f"Write operation not allowed: {match.group(0).strip()}"
     return None
+
+
+def safe_count(result) -> int:
+    """Extract count from a Neo4j result, returning 0 if the result is empty or None.
+
+    Safely handles the common pattern of ``result.single()["n"]`` where
+    ``single()`` may return ``None`` (empty result set) or the value itself
+    may be ``None``.
+    """
+    row = result.single()
+    if row is None:
+        return 0
+    value = row.get("n") if hasattr(row, "get") else row["n"]
+    return int(value) if value is not None else 0
+
+
+def batched_unwind(session, cypher: str, records: list[dict], *, batch_size: int = 500) -> int:
+    """Execute a Cypher UNWIND query in batches, returning the total count.
+
+    Splits *records* into chunks of *batch_size* and runs *cypher* (which must
+    use ``UNWIND $batch AS row ... RETURN count(*) AS n``) once per chunk.
+    This prevents Neo4j transaction-size pressure for large imports.
+    """
+    total = 0
+    for i in range(0, len(records), batch_size):
+        chunk = records[i : i + batch_size]
+        result = session.run(cypher, batch=chunk)
+        total += safe_count(result)
+    return total

@@ -3,11 +3,14 @@ import SQLite3
 
 enum SQLiteError: Error, LocalizedError {
     case cannotOpen(path: String, message: String)
+    case queryFailed(code: Int32, message: String)
 
     var errorDescription: String? {
         switch self {
         case .cannotOpen(let path, let message):
             return "Cannot open SQLite database at \(path): \(message)"
+        case .queryFailed(let code, let message):
+            return "SQLite query failed (code \(code)): \(message)"
         }
     }
 }
@@ -40,23 +43,37 @@ final class SQLiteDatabase {
     func columnNames(table: String) -> Set<String> {
         // PRAGMA arguments cannot be parameterised; table name is caller-controlled.
         // Only called internally with the hardcoded literal "access".
-        let rows = query("PRAGMA table_info(\(table))")
+        guard let rows = try? query("PRAGMA table_info(\(table))") else {
+            return []
+        }
         return Set(rows.compactMap { $0["name"] as? String })
     }
 
     /// Execute a SELECT query and return rows as dictionaries.
-    /// Returns an empty array on any error to avoid crashing the scan.
-    func query(_ sql: String) -> [[String: Any]] {
-        guard let db = db else { return [] }
+    /// Throws `SQLiteError.queryFailed` on prepare or step errors.
+    func query(_ sql: String) throws -> [[String: Any]] {
+        guard let db = db else {
+            throw SQLiteError.queryFailed(code: SQLITE_MISUSE, message: "Database handle is nil")
+        }
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return []
+        let prepareRC = sqlite3_prepare_v2(db, sql, -1, &stmt, nil)
+        guard prepareRC == SQLITE_OK else {
+            let msg = String(validatingUTF8: sqlite3_errmsg(db)) ?? "unknown error"
+            throw SQLiteError.queryFailed(code: prepareRC, message: msg)
         }
         defer { sqlite3_finalize(stmt) }
 
         var rows: [[String: Any]] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
+        while true {
+            let stepRC = sqlite3_step(stmt)
+            if stepRC == SQLITE_DONE {
+                break
+            }
+            guard stepRC == SQLITE_ROW else {
+                let msg = String(validatingUTF8: sqlite3_errmsg(db)) ?? "unknown error"
+                throw SQLiteError.queryFailed(code: stepRC, message: msg)
+            }
             var row: [String: Any] = [:]
             let columnCount = sqlite3_column_count(stmt)
             for i in 0..<columnCount {

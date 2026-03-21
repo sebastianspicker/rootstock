@@ -18,20 +18,38 @@ import re
 
 # ── Version parsing ──────────────────────────────────────────────────────────
 
+_PRE_RELEASE_RE = re.compile(r"(\d+)\s*(alpha|beta|rc|dev)(\d*)", re.IGNORECASE)
+
+
 def parse_version_tuple(version_str: str) -> tuple[int, ...]:
     """Parse a dotted version string into a comparable int tuple.
+
+    Pre-release suffixes (alpha, beta, rc, dev) sort before the corresponding
+    release: ``"15beta3"`` → ``(15, -3, 3)`` which is less than ``(15,)`` because
+    the pre-release sentinel (-3..-1) is negative.
+
+    Pre-release ordering: dev (-4) < alpha (-3) < beta (-2) < rc (-1) < release (0).
 
     Examples:
         "14.6"        → (14, 6)
         "127.0.6533.72" → (127, 0, 6533, 72)
         "15"          → (15,)
+        "15beta3"     → (15, -2, 3)
+        "15.0alpha1"  → (15, 0, -3, 1)
     """
+    _PRE_RANK = {"dev": -4, "alpha": -3, "beta": -2, "rc": -1}
     parts: list[int] = []
     for segment in version_str.strip().split("."):
-        # Extract leading digits from each segment
-        m = re.match(r"(\d+)", segment)
-        if m:
-            parts.append(int(m.group(1)))
+        pre = _PRE_RELEASE_RE.match(segment)
+        if pre:
+            parts.append(int(pre.group(1)))
+            parts.append(_PRE_RANK.get(pre.group(2).lower(), -1))
+            if pre.group(3):
+                parts.append(int(pre.group(3)))
+        else:
+            m = re.match(r"(\d+)", segment)
+            if m:
+                parts.append(int(m.group(1)))
     if not parts:
         raise ValueError(f"Cannot parse version: {version_str!r}")
     return tuple(parts)
@@ -50,9 +68,14 @@ def _compare_versions(a: tuple[int, ...], b: tuple[int, ...]) -> int:
     return 0
 
 
-def version_lte(version: str, ceiling: str) -> bool:
-    """Return True if *version* <= *ceiling*."""
-    return _compare_versions(parse_version_tuple(version), parse_version_tuple(ceiling)) <= 0
+def version_lte(version, ceiling) -> bool:
+    """Return True if *version* <= *ceiling*.
+
+    Accepts either raw strings or pre-parsed tuples.
+    """
+    a = version if isinstance(version, tuple) else parse_version_tuple(version)
+    b = ceiling if isinstance(ceiling, tuple) else parse_version_tuple(ceiling)
+    return _compare_versions(a, b) <= 0
 
 
 def version_lt(version: str, ceiling: str) -> bool:

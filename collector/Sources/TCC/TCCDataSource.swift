@@ -70,7 +70,16 @@ public struct TCCDataSource: DataSource {
             )])
         }
 
-        let rows = db.query(result.adapter.buildQuery())
+        let rows: [[String: Any]]
+        do {
+            rows = try db.query(result.adapter.buildQuery())
+        } catch {
+            return ([], [CollectionError(
+                source: name,
+                message: "TCC query failed for \(path): \(error.localizedDescription)",
+                recoverable: true
+            )])
+        }
         var grants: [TCCGrant] = []
         for row in rows {
             if let grant = result.adapter.parseRow(row, scope: scope) {

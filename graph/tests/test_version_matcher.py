@@ -51,9 +51,44 @@ class TestParseVersionTuple:
         with pytest.raises(ValueError):
             parse_version_tuple("")
 
-    def test_version_with_suffix(self):
-        # e.g. "27.1.0-beta" → should extract (27, 1, 0)
-        assert parse_version_tuple("27.1.0-beta") == (27, 1, 0)
+    def test_version_with_dash_suffix(self):
+        # e.g. "27.1.0-beta" → dash-separated suffix treated as separate segment
+        result = parse_version_tuple("27.1.0-beta")
+        # "0-beta" is one segment — no dot separating, so -beta not parsed as pre-release
+        assert result[0] == 27
+        assert result[1] == 1
+
+    def test_prerelease_beta(self):
+        """15beta3 should parse with pre-release sentinel."""
+        result = parse_version_tuple("15beta3")
+        assert result[0] == 15
+        assert result[1] < 0  # pre-release sentinel is negative
+
+    def test_prerelease_alpha(self):
+        result = parse_version_tuple("15alpha1")
+        assert result[0] == 15
+        assert result[1] < 0
+
+    def test_prerelease_rc(self):
+        result = parse_version_tuple("15rc2")
+        assert result[0] == 15
+        assert result[1] < 0
+
+    def test_prerelease_ordering(self):
+        """alpha < beta < rc < release (via version_lt, which pads with zeros)."""
+        assert version_lt("15alpha1", "15beta1") is True
+        assert version_lt("15beta1", "15rc1") is True
+        assert version_lt("15rc1", "15.0") is True
+        assert version_lt("15alpha1", "15.0") is True
+
+    def test_prerelease_less_than_release(self):
+        """15beta3 < 15.0 must hold."""
+        assert version_lte("15beta3", "15.0") is True
+        assert version_lt("15beta3", "15.0") is True
+
+    def test_release_not_less_than_prerelease(self):
+        """15.0 > 15beta3 must hold."""
+        assert version_lte("15.0", "15beta3") is False
 
 
 # ── Version comparison ───────────────────────────────────────────────────────

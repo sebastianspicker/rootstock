@@ -8,7 +8,7 @@ the importer pipeline. They intentionally mirror `collector/schema/scan-result.s
 from __future__ import annotations
 
 from typing import Literal
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ElevationInfo(BaseModel):
@@ -62,6 +62,8 @@ class QuarantineInfoData(BaseModel):
 
 
 class ApplicationData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1)
     bundle_id: str = Field(min_length=1)
     path: str = Field(min_length=1)
@@ -318,6 +320,8 @@ class ComputerData(BaseModel):
 
 
 class ScanResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scan_id: str = Field(min_length=1)
     timestamp: str = Field(min_length=1)
     hostname: str = Field(min_length=1)

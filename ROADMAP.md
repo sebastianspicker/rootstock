@@ -598,6 +598,33 @@ Phase 6                                                                         
 
 ---
 
+## Phase 7 — Graph Intelligence Maturation
+
+> **Goal:** Elevate the graph pipeline from attack path discovery to a full
+> risk intelligence platform with quantitative scoring, weakness taxonomy,
+> and actionable recommendations.
+
+### 7.1 Risk Scoring Engine
+- [x] Composite risk score per Application (0-100 scale)
+- [x] Weighted factors: TCC exposure, injection surface, entitlement danger, CVE presence
+- [x] 7 new Cypher queries (95-101) for risk analysis
+
+### 7.2 CWE Weakness Taxonomy
+- [x] CWE nodes linked to Applications via vulnerability patterns
+- [x] Weakness heatmap query for systemic risk identification
+
+### 7.3 ESF Event Enrichment
+- [x] Endpoint Security Framework monitoring gap analysis
+- [x] ESF event type correlation with Application capabilities
+
+### 7.4 Recommendation Engine
+- [x] Automated remediation recommendations per Application
+- [x] Priority-ranked action items based on risk score
+
+**Milestone:** M7 — "Quantitative risk intelligence"
+
+---
+
 ## Milestone Overview
 
 | Milestone | Description | Criterion |
@@ -608,6 +635,7 @@ Phase 6                                                                         
 | **M4** | Usable by third parties | Reports, Neo4j UI, query library, documentation |
 | **M5** | Publication-ready | Tests, compatibility, academic documentation |
 | **M6** | Living open-source project | Public release, community feedback, first external contributions |
+| **M7** | Quantitative risk intelligence | Risk scoring, CWE taxonomy, ESF enrichment, recommendation engine |
 
 ---
 

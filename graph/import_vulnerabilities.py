@@ -113,7 +113,12 @@ _CATEGORY_MATCH: dict[str, str] = {
         }
     """,
     "certificate_hygiene": """
-        app.signing_info_flags IS NOT NULL
+        app.signed = true
+        AND (
+            coalesce(app.is_certificate_expired, false) = true
+            OR coalesce(app.is_adhoc_signed, false) = true
+            OR app.certificate_trust_valid = false
+        )
     """,
     "shell_hooks": """
         EXISTS {
@@ -133,7 +138,7 @@ _CATEGORY_MATCH: dict[str, str] = {
         AND size(app.injection_methods) > 0
     """,
     "sandbox_escape": """
-        app.sandboxed = false
+        coalesce(app.is_sandboxed, false) = false
         AND size(app.injection_methods) > 0
     """,
     "mdm_risk": """

@@ -6,7 +6,7 @@
 
 MATCH (ad:ADUser)-[:AD_MEMBER_OF]->(ag:ADGroup)
 MATCH (ad)-[:SAME_IDENTITY]->(u:User)
-MATCH (app:Application)-[:RUNS_AS]->(u)
+MATCH (app:Application)-[:PERSISTS_VIA]->(li:LaunchItem)-[:RUNS_AS]->(u)
 MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(tcc:TCC_Permission)
 RETURN ag.name                              AS ad_group,
        ag.domain                            AS ad_domain,

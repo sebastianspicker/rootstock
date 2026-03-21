@@ -168,16 +168,12 @@ struct ScanOrchestrator {
             allErrors.append(contentsOf: csErrors)
             csElapsed = elapsed
         }
-        var sandboxElapsed = 0.0
         if config.sandbox && config.entitlements {
             let (count, elapsed) = await timed { SandboxDataSource().enrich(applications: &applications) }
-            sandboxElapsed = elapsed
             if verbose { err("  [Sandbox]      completed in \(format(elapsed))  (\(count) profiles)") }
         }
-        var quarantineElapsed = 0.0
         if config.quarantine && config.entitlements {
             let (count, elapsed) = await timed { QuarantineDataSource().enrich(applications: &applications) }
-            quarantineElapsed = elapsed
             if verbose { err("  [Quarantine]   completed in \(format(elapsed))  (\(count) quarantined)") }
         }
 

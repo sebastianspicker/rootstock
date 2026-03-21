@@ -396,8 +396,12 @@ async def import_bloodhound(file: UploadFile, session=Depends(get_session)):
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="File must be a .zip archive")
 
+    MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Upload exceeds 50 MB limit")
+
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-        content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
 

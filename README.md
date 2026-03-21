@@ -364,9 +364,9 @@ threat model, including assumptions, limitations, BloodHound comparison, and eth
 ```bibtex
 @software{rootstock2026,
   title   = {Rootstock: Graph-Based Attack Path Discovery for macOS Security Boundaries},
-  author  = {[Author Names]},
+  author  = {Sebastian J. Spicker},
   year    = {2026},
-  url     = {https://github.com/[org]/rootstock},
-  note    = {Open-source research tool, [University Name]}
+  url     = {https://github.com/sebastianspicker/rootstock},
+  note    = {Open-source research tool, Cologne University of Music}
 }
 ```

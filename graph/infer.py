@@ -16,17 +16,21 @@ from __future__ import annotations
 import argparse
 import sys
 
-try:
-    from neo4j import GraphDatabase  # noqa: F401
-    from neo4j.exceptions import ServiceUnavailable, AuthError  # noqa: F401
-except ImportError:
-    print("ERROR: neo4j driver not installed. Run: pip3 install -r graph/requirements.txt", file=sys.stderr)
-    sys.exit(1)
-
 from neo4j_connection import add_neo4j_args, connect_from_args
 import infer_injection
 import infer_electron
 import infer_automation
+import infer_finder_fda
+import infer_mdm_overgrant
+import infer_keychain_groups
+import infer_file_acl
+import infer_shell_hooks
+import infer_accessibility
+import infer_esf
+import infer_group_capabilities
+import infer_password
+import infer_kerberos
+import infer_sandbox
 
 
 def main() -> int:
@@ -47,13 +51,60 @@ def main() -> int:
         n_apple_events = infer_automation.infer(session)
         print(f"  CAN_SEND_APPLE_EVENT: {n_apple_events}")
 
+        n_transitive_fda = infer_finder_fda.infer(session)
+        print(f"  HAS_TRANSITIVE_FDA:   {n_transitive_fda}")
+
+        n_mdm_overgrant = infer_mdm_overgrant.infer(session)
+        print(f"  MDM_OVERGRANT:        {n_mdm_overgrant}")
+
+        n_keychain_groups = infer_keychain_groups.infer(session)
+        print(f"  SHARES_KEYCHAIN_GROUP:{n_keychain_groups}")
+
+        n_file_acl = infer_file_acl.infer(session)
+        print(f"  FILE_ACL edges:       {n_file_acl}")
+
+        n_shell_hooks = infer_shell_hooks.infer(session)
+        print(f"  CAN_INJECT_SHELL:     {n_shell_hooks}")
+
+        n_a11y = infer_accessibility.infer(session)
+        print(f"  CAN_CONTROL_VIA_A11Y: {n_a11y}")
+
+        n_esf = infer_esf.infer(session)
+        print(f"  CAN_BLIND_MONITORING: {n_esf}")
+
+        n_group_cap = infer_group_capabilities.infer(session)
+        print(f"  CAN_DEBUG:            {n_group_cap}")
+
+        n_password = infer_password.infer(session)
+        print(f"  CAN_CHANGE_PASSWORD:  {n_password}")
+
+        n_kerberos = infer_kerberos.infer(session)
+        print(f"  CAN_READ_KERBEROS:    {n_kerberos}")
+
+        n_sandbox = infer_sandbox.infer(session)
+        print(f"  SANDBOX edges:        {n_sandbox}")
+
     driver.close()
 
-    total = n_inject + n_inherit + n_apple_events
+    total = (n_inject + n_inherit + n_apple_events + n_transitive_fda
+             + n_mdm_overgrant + n_keychain_groups + n_file_acl + n_shell_hooks
+             + n_a11y + n_esf + n_group_cap + n_password + n_kerberos
+             + n_sandbox)
     print(
         f"\nInferred {n_inject} CAN_INJECT_INTO, "
         f"{n_inherit} CHILD_INHERITS_TCC, "
-        f"{n_apple_events} CAN_SEND_APPLE_EVENT edges"
+        f"{n_apple_events} CAN_SEND_APPLE_EVENT, "
+        f"{n_transitive_fda} HAS_TRANSITIVE_FDA, "
+        f"{n_mdm_overgrant} MDM_OVERGRANT, "
+        f"{n_keychain_groups} SHARES_KEYCHAIN_GROUP, "
+        f"{n_file_acl} FILE_ACL, "
+        f"{n_shell_hooks} CAN_INJECT_SHELL, "
+        f"{n_a11y} CAN_CONTROL_VIA_A11Y, "
+        f"{n_esf} CAN_BLIND_MONITORING, "
+        f"{n_group_cap} CAN_DEBUG, "
+        f"{n_password} CAN_CHANGE_PASSWORD, "
+        f"{n_kerberos} CAN_READ_KERBEROS, "
+        f"{n_sandbox} SANDBOX edges"
     )
     if total == 0:
         print("Note: No inferred edges created. Import scan data first with: python3 graph/import.py")

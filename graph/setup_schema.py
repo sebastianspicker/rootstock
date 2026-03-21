@@ -13,25 +13,36 @@ from __future__ import annotations
 import argparse
 import sys
 
-try:
-    from neo4j import GraphDatabase  # noqa: F401
-except ImportError:
-    print("ERROR: neo4j driver not installed. Run: pip3 install -r graph/requirements.txt", file=sys.stderr)
-    sys.exit(1)
-
 from neo4j_connection import add_neo4j_args, connect_from_args
 
 # ── Schema definitions ───────────────────────────────────────────────────────
 
 # Uniqueness constraints (also create implicit indexes)
 CONSTRAINTS = [
-    ("app_bundle_unique",     "Application",    "a.bundle_id"),
-    ("tcc_service_unique",    "TCC_Permission",  "t.service"),
-    ("ent_name_unique",       "Entitlement",     "e.name"),
-    ("xpc_label_unique",      "XPC_Service",     "x.label"),
-    ("launch_label_unique",   "LaunchItem",      "l.label"),
-    ("mdm_id_unique",         "MDM_Profile",     "m.identifier"),
-    ("user_name_unique",      "User",            "u.name"),
+    ("app_bundle_unique",     "Application",         "a.bundle_id"),
+    ("tcc_service_unique",    "TCC_Permission",       "t.service"),
+    ("ent_name_unique",       "Entitlement",          "e.name"),
+    ("xpc_label_unique",      "XPC_Service",          "x.label"),
+    ("launch_label_unique",   "LaunchItem",           "l.label"),
+    ("mdm_id_unique",         "MDM_Profile",          "m.identifier"),
+    ("user_name_unique",      "User",                 "u.name"),
+    ("group_name_unique",     "LocalGroup",           "g.name"),
+    ("remote_svc_unique",     "RemoteAccessService",  "r.service"),
+    ("firewall_name_unique",  "FirewallPolicy",       "f.name"),
+    ("session_terminal_unique", "LoginSession",       "s.terminal"),
+    ("auth_right_unique",      "AuthorizationRight", "ar.name"),
+    ("auth_plugin_unique",     "AuthorizationPlugin","ap.name"),
+    ("sysext_id_unique",       "SystemExtension",    "se.identifier"),
+    ("sudoers_key_unique",     "SudoersRule",        "sr.key"),
+    ("critfile_path_unique",   "CriticalFile",       "cf.path"),
+    ("computer_hostname_unique", "Computer",         "c.hostname"),
+    ("ca_sha256_unique",         "CertificateAuthority", "ca.sha256"),
+    ("bt_device_addr_unique",    "BluetoothDevice",      "bt.address"),
+    ("kerberos_path_unique",     "KerberosArtifact",     "ka.path"),
+    ("adgroup_name_unique",      "ADGroup",              "ag.name"),
+    ("vuln_cve_unique",          "Vulnerability",        "v.cve_id"),
+    ("technique_id_unique",      "AttackTechnique",      "t.technique_id"),
+    ("sandbox_bundle_unique",    "SandboxProfile",       "sp.bundle_id"),
 ]
 
 # Composite uniqueness constraint (Keychain items keyed by label + kind)
@@ -43,6 +54,11 @@ COMPOSITE_CONSTRAINTS = [
 INDEXES = [
     ("app_team_id",  "Application", "a.team_id"),
     ("app_scan_id",  "Application", "a.scan_id"),
+    ("app_owned",    "Application", "a.owned"),
+    ("app_tier",     "Application", "a.tier"),
+    ("vuln_cvss",    "Vulnerability",   "v.cvss_score"),
+    ("vuln_epss",    "Vulnerability",   "v.epss_score"),
+    ("vuln_kev",     "Vulnerability",   "v.in_kev"),
 ]
 
 

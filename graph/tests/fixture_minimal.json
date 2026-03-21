@@ -40,7 +40,52 @@
           "is_security_critical": false
         }
       ],
-      "injection_methods": ["dyld_insert_via_entitlement", "missing_library_validation"]
+      "is_adhoc_signed": false,
+      "signing_certificate_cn": "Developer ID Application: George Nachman (H7V7XYVQ7D)",
+      "signing_certificate_sha256": "aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb",
+      "certificate_expires": "2027-02-01T22:12:15Z",
+      "is_certificate_expired": false,
+      "certificate_chain_length": 3,
+      "certificate_trust_valid": null,
+      "certificate_chain": [
+        {
+          "common_name": "Developer ID Application: George Nachman (H7V7XYVQ7D)",
+          "organization": "George Nachman",
+          "sha256": "aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb",
+          "valid_from": "2022-02-01T22:12:15Z",
+          "valid_to": "2027-02-01T22:12:15Z",
+          "is_root": false
+        },
+        {
+          "common_name": "Developer ID Certification Authority",
+          "organization": "Apple Inc.",
+          "sha256": "1122334455667788990011223344556677889900aabbccddeeff001122334455",
+          "valid_from": "2012-02-01T22:12:15Z",
+          "valid_to": "2027-02-01T22:12:15Z",
+          "is_root": false
+        },
+        {
+          "common_name": "Apple Root CA",
+          "organization": "Apple Inc.",
+          "sha256": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
+          "valid_from": "2006-04-25T21:40:36Z",
+          "valid_to": "2035-02-09T21:40:36Z",
+          "is_root": true
+        }
+      ],
+      "injection_methods": ["dyld_insert_via_entitlement", "missing_library_validation"],
+      "sandbox_profile": {
+        "bundle_id": "com.googlecode.iterm2",
+        "profile_source": "entitlements",
+        "file_read_rules": ["com.apple.security.files.user-selected.read-write"],
+        "file_write_rules": ["com.apple.security.files.user-selected.read-write"],
+        "mach_lookup_rules": [],
+        "network_rules": [],
+        "iokit_rules": [],
+        "exception_count": 1,
+        "has_unconstrained_network": false,
+        "has_unconstrained_file_read": false
+      }
     },
     {
       "name": "Slack",
@@ -77,6 +122,45 @@
           "is_private": true,
           "category": "tcc",
           "is_security_critical": true
+        },
+        {
+          "name": "com.apple.developer.icloud-container-identifiers",
+          "is_private": false,
+          "category": "icloud",
+          "is_security_critical": false
+        }
+      ],
+      "is_adhoc_signed": false,
+      "signing_certificate_cn": "Developer ID Application: Slack Technologies, Inc. (BQR82RBBHL)",
+      "signing_certificate_sha256": "00aabbccdd11223344556677889900aabbccddeeff11223344556677889900aa",
+      "certificate_expires": "2027-02-01T22:12:15Z",
+      "is_certificate_expired": false,
+      "certificate_chain_length": 3,
+      "certificate_trust_valid": null,
+      "certificate_chain": [
+        {
+          "common_name": "Developer ID Application: Slack Technologies, Inc. (BQR82RBBHL)",
+          "organization": "Slack Technologies, Inc.",
+          "sha256": "00aabbccdd11223344556677889900aabbccddeeff11223344556677889900aa",
+          "valid_from": "2022-02-01T22:12:15Z",
+          "valid_to": "2027-02-01T22:12:15Z",
+          "is_root": false
+        },
+        {
+          "common_name": "Developer ID Certification Authority",
+          "organization": "Apple Inc.",
+          "sha256": "1122334455667788990011223344556677889900aabbccddeeff001122334455",
+          "valid_from": "2012-02-01T22:12:15Z",
+          "valid_to": "2027-02-01T22:12:15Z",
+          "is_root": false
+        },
+        {
+          "common_name": "Apple Root CA",
+          "organization": "Apple Inc.",
+          "sha256": "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100",
+          "valid_from": "2006-04-25T21:40:36Z",
+          "valid_to": "2035-02-09T21:40:36Z",
+          "is_root": true
         }
       ],
       "injection_methods": ["dyld_insert_via_entitlement", "missing_library_validation", "electron_env_var"]
@@ -112,6 +196,14 @@
           "is_security_critical": true
         }
       ],
+      "is_adhoc_signed": false,
+      "signing_certificate_cn": null,
+      "signing_certificate_sha256": null,
+      "certificate_expires": null,
+      "is_certificate_expired": false,
+      "certificate_chain_length": null,
+      "certificate_trust_valid": null,
+      "certificate_chain": [],
       "injection_methods": []
     }
   ],
@@ -267,5 +359,233 @@
       "entitlements": []
     }
   ],
+  "local_groups": [
+    {
+      "name": "admin",
+      "gid": 80,
+      "members": ["testuser"]
+    },
+    {
+      "name": "_developer",
+      "gid": 204,
+      "members": ["testuser"]
+    },
+    {
+      "name": "com.apple.access_ssh",
+      "gid": 399,
+      "members": ["testuser"]
+    },
+    {
+      "name": "wheel",
+      "gid": 0,
+      "members": ["testuser"]
+    }
+  ],
+  "remote_access_services": [
+    {
+      "service": "ssh",
+      "enabled": true,
+      "port": 22
+    }
+  ],
+  "login_sessions": [
+    {
+      "username": "testuser",
+      "terminal": "console",
+      "login_time": "Mar 18 09:15",
+      "session_type": "console"
+    },
+    {
+      "username": "testuser",
+      "terminal": "ttys000",
+      "login_time": "Mar 18 09:30",
+      "session_type": "ssh"
+    }
+  ],
+  "authorization_rights": [
+    {
+      "name": "system.privilege.admin",
+      "rule": "authenticate-admin-nonshared",
+      "allow_root": true,
+      "require_authentication": true
+    },
+    {
+      "name": "system.preferences",
+      "rule": "authenticate-session-owner",
+      "allow_root": false,
+      "require_authentication": true
+    }
+  ],
+  "authorization_plugins": [
+    {
+      "name": "TestPlugin",
+      "path": "/Library/Security/SecurityAgentPlugins/TestPlugin.bundle",
+      "team_id": null
+    }
+  ],
+  "system_extensions": [
+    {
+      "identifier": "com.example.endpoint.security",
+      "team_id": "TEAM123456",
+      "extension_type": "endpoint_security",
+      "enabled": true
+    }
+  ],
+  "sudoers_rules": [
+    {
+      "user": "testuser",
+      "host": "ALL",
+      "command": "ALL",
+      "nopasswd": true
+    }
+  ],
+  "running_processes": [
+    {
+      "pid": 123,
+      "user": "testuser",
+      "command": "/Applications/iTerm.app/Contents/MacOS/iTerm2",
+      "bundle_id": "com.googlecode.iterm2"
+    }
+  ],
+  "user_details": [
+    {
+      "name": "testuser",
+      "shell": "/bin/zsh",
+      "home_dir": "/Users/testuser",
+      "is_hidden": false
+    }
+  ],
+  "file_acls": [
+    {
+      "path": "/Library/Application Support/com.apple.TCC/TCC.db",
+      "owner": "root",
+      "group": "admin",
+      "mode": "644",
+      "acl_entries": [],
+      "is_sip_protected": false,
+      "is_writable_by_non_root": false,
+      "category": "tcc_database"
+    },
+    {
+      "path": "/etc/sudoers",
+      "owner": "root",
+      "group": "wheel",
+      "mode": "440",
+      "acl_entries": [],
+      "is_sip_protected": false,
+      "is_writable_by_non_root": false,
+      "category": "sudoers"
+    }
+  ],
+  "ad_binding": {
+    "is_bound": true,
+    "realm": "CORP.EXAMPLE.COM",
+    "forest": "EXAMPLE.COM",
+    "computer_account": "TESTMAC$",
+    "organizational_unit": "OU=Macs,DC=corp,DC=example,DC=com",
+    "preferred_dc": "dc01.corp.example.com",
+    "group_mappings": [
+      {
+        "ad_group": "CORP\\Domain Admins",
+        "local_group": "admin"
+      }
+    ]
+  },
+  "kerberos_artifacts": [
+    {
+      "path": "/tmp/krb5cc_501",
+      "artifact_type": "ccache",
+      "owner": "testuser",
+      "group": "staff",
+      "mode": "600",
+      "modification_time": "2026-03-18T10:00:00Z",
+      "principal_hint": "testuser",
+      "is_readable": true,
+      "is_world_readable": false,
+      "is_group_readable": false
+    },
+    {
+      "path": "/etc/krb5.keytab",
+      "artifact_type": "keytab",
+      "owner": "root",
+      "group": "wheel",
+      "mode": "640",
+      "modification_time": "2024-01-15T08:00:00Z",
+      "principal_hint": null,
+      "is_readable": false,
+      "is_world_readable": false,
+      "is_group_readable": true
+    },
+    {
+      "path": "/etc/krb5.conf",
+      "artifact_type": "config",
+      "owner": "root",
+      "group": "wheel",
+      "mode": "644",
+      "modification_time": "2026-02-01T12:00:00Z",
+      "principal_hint": null,
+      "is_readable": true,
+      "is_world_readable": true,
+      "is_group_readable": true,
+      "default_realm": "CORP.EXAMPLE.COM",
+      "permitted_enc_types": ["aes256-cts-hmac-sha1-96", "aes128-cts-hmac-sha1-96", "rc4-hmac"],
+      "realm_names": ["CORP.EXAMPLE.COM"],
+      "is_forwardable": true
+    }
+  ],
+  "bluetooth_devices": [
+    {
+      "name": "Magic Keyboard",
+      "address": "AA:BB:CC:DD:EE:FF",
+      "device_type": "Keyboard",
+      "connected": true
+    },
+    {
+      "name": "AirPods Pro",
+      "address": "11:22:33:44:55:66",
+      "device_type": "Headphones",
+      "connected": false
+    }
+  ],
+  "sandbox_profiles": [
+    {
+      "bundle_id": "com.googlecode.iterm2",
+      "profile_source": "entitlements",
+      "file_read_rules": ["com.apple.security.files.user-selected.read-write"],
+      "file_write_rules": ["com.apple.security.files.user-selected.read-write"],
+      "mach_lookup_rules": [],
+      "network_rules": [],
+      "iokit_rules": [],
+      "exception_count": 1,
+      "has_unconstrained_network": false,
+      "has_unconstrained_file_read": false
+    },
+    {
+      "bundle_id": "com.tinyspeck.slackmacgap",
+      "profile_source": "entitlements",
+      "file_read_rules": [],
+      "file_write_rules": [],
+      "mach_lookup_rules": ["com.apple.security.temporary-exception.mach-lookup.global-name"],
+      "network_rules": ["com.apple.security.network.client"],
+      "iokit_rules": [],
+      "exception_count": 2,
+      "has_unconstrained_network": true,
+      "has_unconstrained_file_read": false
+    }
+  ],
+  "sip_enabled": true,
+  "filevault_enabled": false,
+  "lockdown_mode_enabled": false,
+  "bluetooth_enabled": true,
+  "bluetooth_discoverable": false,
+  "screen_lock_enabled": true,
+  "screen_lock_delay": 5,
+  "display_sleep_timeout": 10,
+  "thunderbolt_security_level": "full",
+  "secure_boot_level": "full",
+  "external_boot_allowed": false,
+  "icloud_signed_in": true,
+  "icloud_drive_enabled": true,
+  "icloud_keychain_enabled": false,
   "errors": []
 }

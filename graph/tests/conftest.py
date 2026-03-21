@@ -55,16 +55,29 @@ def neo4j_driver():
 ALL_NODE_LABELS = [
     "Application", "Entitlement", "TCC_Permission", "XPC_Service",
     "LaunchItem", "Keychain_Item", "MDM_Profile", "User",
+    "LocalGroup", "RemoteAccessService", "FirewallPolicy",
+    "LoginSession", "AuthorizationRight", "AuthorizationPlugin",
+    "SystemExtension", "SudoersRule", "CriticalFile", "Computer",
+    "CertificateAuthority", "BluetoothDevice",
+    "KerberosArtifact", "ADGroup",
+    "Vulnerability", "AttackTechnique",
+    "SandboxProfile",
 ]
 
 
 def cleanup_test_nodes(session, scan_id: str) -> None:
-    """Remove all nodes created during a test run, identified by scan_id."""
+    """Remove test nodes by scan_id, then clean up orphans.
+
+    1. DETACH DELETE all Application nodes matching the test's scan_id
+       (removes the apps and every edge touching them).
+    2. Sweep non-Application nodes that have no remaining relationships.
+       This removes test-created nodes while preserving any nodes still
+       referenced by other (non-test) data.
+    """
     session.run(
         "MATCH (a:Application {scan_id: $scan_id}) DETACH DELETE a",
         scan_id=scan_id,
     )
-    # Phase 3 nodes aren't tagged with scan_id — delete by label.
     for label in ALL_NODE_LABELS:
         if label != "Application":
-            session.run(f"MATCH (n:{label}) DETACH DELETE n")
+            session.run(f"MATCH (n:{label}) WHERE NOT (n)--() DELETE n")

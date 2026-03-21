@@ -1,6 +1,6 @@
 # rootstock
 
-[![Build](https://github.com/[org]/rootstock/actions/workflows/test.yml/badge.svg)](https://github.com/[org]/rootstock/actions)
+[![Build](https://github.com/sebastianspicker/rootstock/actions/workflows/test.yml/badge.svg)](https://github.com/sebastianspicker/rootstock/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-brightgreen)](https://support.apple.com/macos)
 
@@ -21,13 +21,49 @@ Rootstock is a graph-based attack path discovery tool for macOS security boundar
 - **Enterprise integration** — Active Directory binding, Kerberos artifacts, BloodHound interop
 - **ESF monitoring** — Endpoint Security Framework event coverage gap analysis
 
-## Preview
+## Screenshots
 
-Rootstock discovers attack paths that span multiple macOS security boundaries. Below are examples from the [demo scan](examples/demo-scan.json) — synthetic data representing a typical corporate MacBook.
+All screenshots below are generated from the [demo scan](examples/demo-scan.json) — synthetic data — 15 apps, 15 TCC grants, 5 XPC services.
 
-### Injectable App to Full Disk Access
+### Interactive Graph Viewer
 
-The highest-impact finding: an app with DYLD injection vulnerabilities that also holds Full Disk Access.
+| | |
+|---|---|
+| ![Full Graph](docs/screenshots/01-full-graph.png) | ![Attack Path](docs/screenshots/02-attack-path.png) |
+| *Full attack graph — 15 node types, color-coded by kind* | *Shortest path from attacker to Full Disk Access (2 hops)* |
+| ![Node Inspector](docs/screenshots/03-node-inspector.png) | ![Electron TCC](docs/screenshots/04-electron-inheritance.png) |
+| *iTerm2 property inspector with risk score, tier, and entitlements* | *Slack's inherited TCC permissions via focus mode* |
+
+### Security Report
+
+| | |
+|---|---|
+| ![Summary](docs/screenshots/05-report-summary.png) | ![Attack Diagram](docs/screenshots/06-attack-path-diagram.png) |
+| *Executive summary with critical findings and scan metadata* | *Mermaid attack path flowcharts (injectable FDA + Apple Events)* |
+| ![CVE Table](docs/screenshots/07-cve-table.png) | ![Tier Classification](docs/screenshots/08-tier-pie.png) |
+| *CVE reference with CVSS/EPSS scores and ATT&CK mapping* | *Tier classification — Tier 0 through Tier 3 with risk scores* |
+
+### Collector CLI
+
+![CLI Output](docs/screenshots/09-cli-output.png)
+
+*23 modules, 5.49 seconds*
+
+> Regenerate screenshots: `python3 docs/screenshots/generate_screenshots.py`
+
+### Demo Outputs
+
+| Output | Description |
+|--------|-------------|
+| [`demo-scan.json`](examples/demo-scan.json) | Synthetic scan data (15 apps, 15 TCC grants, 5 XPC services) |
+
+> To generate report and viewer outputs (requires Neo4j): `bash examples/regenerate.sh`
+> This produces `demo-report.md` (attack path report) and `demo-viewer.html` (interactive graph viewer).
+
+<details>
+<summary>Mermaid diagrams (GitHub-rendered fallback)</summary>
+
+#### Injectable App to Full Disk Access
 
 ```mermaid
 graph LR
@@ -43,9 +79,7 @@ graph LR
     style E fill:#8e44ad,color:#fff
 ```
 
-### Electron TCC Inheritance
-
-Electron apps are injectable via `ELECTRON_RUN_AS_NODE`. If they hold TCC grants, those grants are inherited.
+#### Electron TCC Inheritance
 
 ```mermaid
 graph LR
@@ -61,9 +95,7 @@ graph LR
     style E fill:#2ecc71,color:#fff
 ```
 
-### Transitive FDA via Finder Automation
-
-An app with Apple Events automation permission to Finder can transitively access Finder's Full Disk Access.
+#### Transitive FDA via Finder Automation
 
 ```mermaid
 graph LR
@@ -75,9 +107,7 @@ graph LR
     style C fill:#c0392b,color:#fff
 ```
 
-### Asset Tier Classification
-
-Rootstock classifies all assets into security tiers based on their privilege level and exposure.
+#### Asset Tier Classification
 
 ```mermaid
 pie title Asset Tier Distribution
@@ -87,14 +117,7 @@ pie title Asset Tier Distribution
     "Tier 3 — Low Privilege" : 3
 ```
 
-### Demo Outputs
-
-| Output | Description |
-|--------|-------------|
-| [`demo-scan.json`](examples/demo-scan.json) | Synthetic scan data (15 apps, 15 TCC grants, 5 XPC services) |
-
-> To generate report and viewer outputs (requires Neo4j): `bash examples/regenerate.sh`
-> This produces `demo-report.md` (attack path report) and `demo-viewer.html` (interactive graph viewer).
+</details>
 
 ## Quick Start
 

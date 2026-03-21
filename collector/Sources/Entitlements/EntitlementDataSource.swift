@@ -31,7 +31,6 @@ public struct EntitlementDataSource: DataSource {
         var applications: [Application] = []
         applications.reserveCapacity(discovered.count)
 
-        // Capture value types once for Sendable closure capture.
         let ext = extractor
         let cls = classifier
 

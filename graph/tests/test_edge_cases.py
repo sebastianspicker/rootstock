@@ -9,8 +9,6 @@ No Neo4j required unless marked with neo4j_required.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -186,7 +184,7 @@ class TestBatchedUnwind:
 
 class TestVersionMatcherEdgeCases:
     def test_prerelease_beta_less_than_release(self):
-        from version_matcher import parse_version_tuple, version_lt
+        from version_matcher import version_lt
         assert version_lt("15beta3", "15.0") is True
 
     def test_dev_less_than_alpha(self):

@@ -12,7 +12,7 @@
 # Environment variables (override defaults):
 #     NEO4J_URI       bolt://localhost:7687
 #     NEO4J_USER      neo4j
-#     NEO4J_PASSWORD   rootstock
+#     NEO4J_PASSWORD   (required — no default)
 #
 # For interactive visualization after pipeline completes (Canvas-based, pre-computed layout):
 #     python3 graph/opengraph_export.py -o graph.json && python3 graph/viewer.py -i graph.json -o viewer.html
@@ -54,7 +54,7 @@ fi
 # Neo4j connection — CLI args override env vars, env vars override defaults
 NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
 NEO4J_USER="${NEO4J_USER:-neo4j}"
-NEO4J_PASS="${NEO4J_PASSWORD:-rootstock}"
+NEO4J_PASS="${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use --password}"
 REPORT_FILE=""
 SKIP_REPORT=false
 SERVE=false

@@ -21,7 +21,6 @@ from cve_reference import (
     _GROUP_REGISTRY,
     _GROUP_TECHNIQUE_MAP,
     _REGISTRY,
-    AttackTechnique,
 )
 from cve_enrichment import temporal_score
 from import_vulnerabilities import (

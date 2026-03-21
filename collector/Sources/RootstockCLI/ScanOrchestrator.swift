@@ -456,20 +456,19 @@ struct ScanOrchestrator {
 
     // MARK: - Private
 
-    /// Detect Gatekeeper status via `spctl --status`.
-    /// Returns nil if spctl is unavailable (distinguishes "disabled" from "unable to check").
+    /// Returns nil if spctl is unavailable.
     private static func detectGatekeeper() -> Bool? {
         guard let output = Shell.run("/usr/sbin/spctl", ["--status"]) else { return nil }
         return output.contains("enabled")
     }
 
-    /// Detect SIP status via `csrutil status`. Returns nil if csrutil is unavailable.
+    /// Returns nil if csrutil is unavailable.
     private static func detectSIP() -> Bool? {
         guard let output = Shell.run("/usr/bin/csrutil", ["status"]) else { return nil }
         return output.contains("enabled")
     }
 
-    /// Detect FileVault status via `fdesetup status`. Returns nil if fdesetup is unavailable.
+    /// Returns nil if fdesetup is unavailable.
     private static func detectFileVault() -> Bool? {
         guard let output = Shell.run("/usr/bin/fdesetup", ["status"]) else { return nil }
         return output.contains("FileVault is On")

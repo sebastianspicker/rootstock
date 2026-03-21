@@ -87,8 +87,9 @@ def validate_read_only_cypher(cypher: str) -> str | None:
 
     # Strip string literals to avoid false positives
     # (e.g., "SET something" as a string value)
-    no_strings = re.sub(r"'[^']*'", "''", cleaned)
-    no_strings = re.sub(r'"[^"]*"', '""', no_strings)
+    # Handle backslash-escaped quotes to prevent bypass via e.g. 'a\'' CREATE ...'
+    no_strings = re.sub(r"'(?:[^'\\]|\\.)*'", "''", cleaned)
+    no_strings = re.sub(r'"(?:[^"\\]|\\.)*"', '""', no_strings)
 
     match = _WRITE_KEYWORDS.search(no_strings)
     if match:

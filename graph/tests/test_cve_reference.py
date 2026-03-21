@@ -17,8 +17,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cve_reference import (
     AttackContext,
-    AttackTechnique,
-    CveEntry,
     get_all_critical_cves,
     get_context,
     get_contexts_for_query,

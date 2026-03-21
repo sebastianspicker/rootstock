@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import zipfile
 from pathlib import Path
@@ -62,13 +63,15 @@ def parse_sharphound_zip(zip_path: str) -> dict:
     MAX_DECOMPRESSED = 100 * 1024 * 1024  # 100 MB per JSON file
 
     with zipfile.ZipFile(zip_path, "r") as zf:
-        # Check decompressed sizes before reading to prevent zip bombs
+        # Check decompressed sizes and reject path traversal attempts
         for info in zf.infolist():
             if info.file_size > MAX_DECOMPRESSED:
                 raise ValueError(
                     f"Entry {info.filename} decompressed size "
                     f"({info.file_size} bytes) exceeds limit"
                 )
+            if os.path.isabs(info.filename) or ".." in info.filename.split("/"):
+                raise ValueError(f"Unsafe path in ZIP: {info.filename}")
 
         users_file = _find_json_in_zip(zf, "users.json")
         groups_file = _find_json_in_zip(zf, "groups.json")

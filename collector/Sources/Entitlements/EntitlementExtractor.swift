@@ -12,8 +12,7 @@ public struct EntitlementExtractor {
 
     public init() { }
 
-    /// Returns the entitlements dictionary for the executable at the given URL.
-    /// Returns an empty dictionary if the executable has no entitlements or if extraction fails.
+    /// Returns an empty dictionary if extraction fails.
     public func extract(from executableURL: URL) -> [String: Any] {
         if let result = extractWithSecurityFramework(url: executableURL) {
             return result

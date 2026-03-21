@@ -98,8 +98,12 @@ info "Paste any query into the Neo4j Browser editor and click the star (☆) to 
 echo ""
 header
 
-# ── Kill existing server on same port (avoid bind error) ─────────────────────
-lsof -ti tcp:"$HTTP_PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
+# ── Kill existing python3 http.server on same port (avoid bind error) ────────
+lsof -ti tcp:"$HTTP_PORT" 2>/dev/null | while read -r pid; do
+    if ps -p "$pid" -o args= 2>/dev/null | grep -q "python3 -m http.server"; then
+        kill "$pid" 2>/dev/null || true
+    fi
+done
 
 cd "$SCRIPT_DIR"
 exec python3 -m http.server "$HTTP_PORT"

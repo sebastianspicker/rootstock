@@ -22,8 +22,6 @@ from import_vulnerabilities import (
     _CATEGORY_MATCH,
     import_vulnerability_nodes,
     import_technique_nodes,
-    import_technique_edges,
-    import_affected_by_edges,
     import_all,
 )
 

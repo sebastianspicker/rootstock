@@ -22,6 +22,7 @@ Edge styles:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -211,7 +212,7 @@ def main() -> int:
     )
     parser.add_argument("--neo4j", default="bolt://localhost:7687", help="Neo4j bolt URI")
     parser.add_argument("--username", default="neo4j", help="Neo4j username")
-    parser.add_argument("--password", default="rootstock", help="Neo4j password")
+    parser.add_argument("--password", default=None, help="Neo4j password (or set NEO4J_PASSWORD)")
     parser.add_argument("--output", required=True, help="Output .dot file path")
     parser.add_argument(
         "--render",
@@ -228,7 +229,13 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    driver = GraphDatabase.driver(args.neo4j, auth=(args.username, args.password))
+    password = args.password or os.environ.get("NEO4J_PASSWORD")
+    if not password:
+        print("ERROR: Neo4j password required via --password or NEO4J_PASSWORD env var",
+              file=sys.stderr)
+        return 1
+
+    driver = GraphDatabase.driver(args.neo4j, auth=(args.username, password))
     try:
         driver.verify_connectivity()
     except Exception as e:

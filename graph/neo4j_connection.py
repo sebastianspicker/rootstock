@@ -11,6 +11,7 @@ are installed, providing a friendly error message if not.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 try:
@@ -39,8 +40,8 @@ def add_neo4j_args(parser: argparse.ArgumentParser) -> None:
                         help="Neo4j bolt URI (default: bolt://localhost:7687)")
     parser.add_argument("--neo4j-user", default="neo4j", dest="neo4j_user",
                         help="Neo4j username (default: neo4j)")
-    parser.add_argument("--neo4j-password", default="rootstock", dest="neo4j_password",
-                        help="Neo4j password (default: rootstock)")
+    parser.add_argument("--neo4j-password", default=None, dest="neo4j_password",
+                        help="Neo4j password (or set NEO4J_PASSWORD env var)")
 
 
 def connect(uri: str, username: str, password: str, *, quiet: bool = False):
@@ -65,4 +66,9 @@ def connect(uri: str, username: str, password: str, *, quiet: bool = False):
 
 def connect_from_args(args):
     """Create a driver from parsed argparse namespace (expects .uri, .neo4j_user, .neo4j_password)."""
-    return connect(args.uri, args.neo4j_user, args.neo4j_password)
+    password = args.neo4j_password or os.environ.get("NEO4J_PASSWORD")
+    if not password:
+        print("ERROR: Neo4j password required via --neo4j-password or NEO4J_PASSWORD env var",
+              file=sys.stderr)
+        sys.exit(1)
+    return connect(args.uri, args.neo4j_user, password)

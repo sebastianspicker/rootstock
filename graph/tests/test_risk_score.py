@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,8 +25,6 @@ from constants import (
     RISK_SCORE_PROPERTY,
     RISK_LEVEL_PROPERTY,
     ATTACK_CATEGORIES_PROPERTY,
-    CRITICAL_FINDING_COUNT_PROPERTY,
-    HIGH_FINDING_COUNT_PROPERTY,
 )
 
 

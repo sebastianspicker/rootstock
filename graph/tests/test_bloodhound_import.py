@@ -22,7 +22,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bloodhound_import import (
     _extract_username,
-    import_ad_groups,
     import_ad_member_of_edges,
     import_ad_users,
     import_all,

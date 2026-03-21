@@ -6,7 +6,6 @@ import json
 import logging
 from pathlib import Path
 
-import pytest
 
 from scan_loader import load_scan
 from models import ScanResult

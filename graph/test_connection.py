@@ -3,12 +3,14 @@
 test_connection.py — Verify Neo4j connectivity and schema state.
 
 Usage:
-    python3 graph/test_connection.py [--uri bolt://localhost:7687] [--user neo4j] [--password rootstock]
+    python3 graph/test_connection.py [--uri bolt://localhost:7687] [--user neo4j] [--password <pw>]
 
+Password can also be set via the NEO4J_PASSWORD environment variable.
 Exit code 0 on success, 1 on failure.
 """
 
 import argparse
+import os
 import sys
 
 try:
@@ -23,11 +25,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Test Rootstock Neo4j connection")
     parser.add_argument("--uri", default="bolt://localhost:7687")
     parser.add_argument("--user", default="neo4j")
-    parser.add_argument("--password", default="rootstock")
+    parser.add_argument("--password", default=None, help="Neo4j password (or set NEO4J_PASSWORD)")
     args = parser.parse_args()
 
+    password = args.password or os.environ.get("NEO4J_PASSWORD")
+    if not password:
+        print("ERROR: Neo4j password required via --password or NEO4J_PASSWORD env var",
+              file=sys.stderr)
+        return 1
+
     try:
-        driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+        driver = GraphDatabase.driver(args.uri, auth=(args.user, password))
         driver.verify_connectivity()
     except ServiceUnavailable:
         print(f"FAIL: Cannot connect to Neo4j at {args.uri}", file=sys.stderr)

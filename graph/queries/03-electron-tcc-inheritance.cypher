@@ -4,6 +4,8 @@
 // Severity: High
 // Parameters: none
 // Attack: ELECTRON_RUN_AS_NODE env var spawns Node.js child that inherits parent's TCC grants
+// CVE: CVE-2023-44402
+// ATT&CK: T1574.006, T1059.007
 // Prerequisites: import.py must have run
 
 MATCH (app:Application {is_electron: true})-[:HAS_TCC_GRANT {allowed: true}]->(perm:TCC_Permission)

@@ -22,10 +22,10 @@ import pytest
 from conftest import cleanup_test_nodes
 
 QUERIES_DIR = Path(__file__).parent.parent / "queries"
-EXPECTED_QUERY_COUNT = 23
+EXPECTED_QUERY_COUNT = 79
 
 _HEADER_RE = re.compile(
-    r"^//\s*(?P<key>Name|Purpose|Category|Severity|Parameters):\s*(?P<value>.+)$",
+    r"^//\s*(?P<key>Name|Purpose|Category|Severity|Parameters|CVE|ATT&CK):\s*(?P<value>.+)$",
     re.IGNORECASE,
 )
 _VALID_CATEGORIES = {"Red Team", "Blue Team", "Forensic"}
@@ -197,6 +197,34 @@ class TestQueryFileStructure:
         ids.sort()
         expected = list(range(1, EXPECTED_QUERY_COUNT + 1))
         assert ids == expected, f"Non-sequential IDs: got {ids}, expected {expected}"
+
+    def test_cve_header_format_when_present(self):
+        """CVE headers (when present) must contain valid CVE IDs."""
+        cve_id_re = re.compile(r"CVE-\d{4}-\d+")
+        bad = []
+        for path in _all_cypher_files():
+            meta = _parse_header(path)
+            cve_val = meta.get("cve", "")
+            if not cve_val:
+                continue
+            ids = cve_id_re.findall(cve_val)
+            if not ids:
+                bad.append(f"{path.name}: '{cve_val}' has no valid CVE IDs")
+        assert not bad, f"Invalid CVE header format: {bad}"
+
+    def test_attack_header_format_when_present(self):
+        """ATT&CK headers (when present) must contain valid technique IDs."""
+        tech_re = re.compile(r"T\d{4}(?:\.\d{3})?")
+        bad = []
+        for path in _all_cypher_files():
+            meta = _parse_header(path)
+            attack_val = meta.get("att&ck", "")
+            if not attack_val:
+                continue
+            ids = tech_re.findall(attack_val)
+            if not ids:
+                bad.append(f"{path.name}: '{attack_val}' has no valid technique IDs")
+        assert not bad, f"Invalid ATT&CK header format: {bad}"
 
 
 # ── Layer 2: Syntax validation (Neo4j EXPLAIN) ────────────────────────────────

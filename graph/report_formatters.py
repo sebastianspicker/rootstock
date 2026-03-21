@@ -1,0 +1,254 @@
+"""report_formatters.py — Table and section formatters for Rootstock reports."""
+
+from __future__ import annotations
+
+from tabulate import tabulate
+
+from utils import list_or_str
+
+
+def format_no_findings() -> str:
+    return "_No findings in this category._"
+
+
+def format_generic_table(rows: list[dict]) -> str:
+    """Format any query result set as a GitHub-flavoured Markdown table."""
+    if not rows:
+        return format_no_findings()
+
+    all_keys: list[str] = []
+    seen_keys: set[str] = set()
+    for row in rows:
+        for k in row.keys():
+            if k not in seen_keys:
+                all_keys.append(k)
+                seen_keys.add(k)
+    table_rows = [[list_or_str(row.get(h)) for h in all_keys] for row in rows]
+    return tabulate(table_rows, headers=all_keys, tablefmt="github")
+
+
+def format_injectable_fda_table(rows: list[dict]) -> str:
+    """Format Query 01 results: injectable apps with Full Disk Access."""
+    if not rows:
+        return format_no_findings()
+
+    table_rows = []
+    for r in rows:
+        methods = list_or_str(r.get("injection_methods", []))
+        table_rows.append([
+            r.get("app_name", "?"),
+            r.get("team_id") or "—",
+            methods,
+            r.get("bundle_id", "?"),
+        ])
+
+    headers = ["App Name", "Team ID", "Injection Method(s)", "Bundle ID"]
+    table = tabulate(table_rows, headers=headers, tablefmt="github")
+
+    risk_lines = []
+    for r in rows:
+        app = r.get("app_name", "?")
+        methods = list_or_str(r.get("injection_methods", []))
+        risk_lines.append(
+            f"- **{app}**: Attacker can inject via `{methods}` to inherit Full Disk Access."
+        )
+
+    return table + "\n\n" + "\n".join(risk_lines)
+
+
+def format_electron_table(rows: list[dict]) -> str:
+    """Format Query 03 results: Electron apps with TCC inheritance."""
+    if not rows:
+        return format_no_findings()
+
+    table_rows = []
+    for r in rows:
+        perms = list_or_str(r.get("inherited_permissions", []))
+        table_rows.append([
+            r.get("app_name", "?"),
+            r.get("bundle_id", "?"),
+            perms,
+            str(r.get("permission_count", 0)),
+        ])
+
+    headers = ["Electron App", "Bundle ID", "Inherited Permissions", "Count"]
+    return tabulate(table_rows, headers=headers, tablefmt="github")
+
+
+def format_apple_event_table(rows: list[dict]) -> str:
+    """Format Query 05 results: Apple Event TCC cascade."""
+    if not rows:
+        return format_no_findings()
+
+    table_rows = []
+    for r in rows:
+        table_rows.append([
+            r.get("source_app", "?"),
+            r.get("target_app", "?"),
+            r.get("permission_gained", "?"),
+        ])
+
+    headers = ["Source App", "Target App", "Gained Permission"]
+    return tabulate(table_rows, headers=headers, tablefmt="github")
+
+
+def format_tcc_overview_table(rows: list[dict]) -> str:
+    """Format Query 07 section-1 results: TCC grant distribution."""
+    if not rows:
+        return format_no_findings()
+
+    table_rows = []
+    for r in rows:
+        table_rows.append([
+            r.get("permission", "?"),
+            r.get("service", "?"),
+            str(r.get("allowed_count", 0)),
+            str(r.get("denied_count", 0)),
+            str(r.get("total_grants", 0)),
+        ])
+
+    headers = ["Permission", "TCC Service", "Allowed", "Denied", "Total"]
+    return tabulate(table_rows, headers=headers, tablefmt="github")
+
+
+def format_private_entitlement_table(rows: list[dict]) -> str:
+    """Format Query 04 results: private entitlement audit."""
+    if not rows:
+        return format_no_findings()
+
+    table_rows = []
+    for r in rows:
+        ents = list_or_str(r.get("private_entitlements", []))
+        injectable = "Yes" if r.get("is_injectable") else "No"
+        table_rows.append([
+            r.get("app_name", "?"),
+            ents,
+            injectable,
+        ])
+
+    headers = ["App", "Private Entitlements", "Injectable?"]
+    return tabulate(table_rows, headers=headers, tablefmt="github")
+
+
+def format_executive_summary(
+    critical_count: int,
+    high_count: int,
+    top_paths: list[str],
+    tier_counts: dict[str, int] | None = None,
+    icloud_exposure_count: int = 0,
+    certificate_risk_count: int = 0,
+) -> str:
+    """Format the Executive Summary section."""
+    lines = [
+        f"- **Critical findings:** {critical_count}",
+        f"- **High-risk findings:** {high_count}",
+    ]
+
+    if tier_counts:
+        lines.append(
+            f"- **Tier classification:** "
+            f"{tier_counts.get('Tier 0', 0)} Tier 0, "
+            f"{tier_counts.get('Tier 1', 0)} Tier 1, "
+            f"{tier_counts.get('Tier 2', 0)} Tier 2"
+        )
+
+    if icloud_exposure_count:
+        lines.append(f"- **iCloud exposure:** {icloud_exposure_count} injectable app(s) with iCloud entitlements")
+
+    if certificate_risk_count:
+        lines.append(f"- **Certificate risk:** {certificate_risk_count} app(s) with expired/ad-hoc/non-Apple CA certs")
+
+    lines.append("")
+    lines.append("**Top Attack Paths:**")
+
+    if top_paths:
+        for i, path in enumerate(top_paths[:3], 1):
+            lines.append(f"{i}. {path}")
+    else:
+        lines.append("_No attack paths discovered._")
+
+    return "\n".join(lines)
+
+
+# ── Vulnerability & ATT&CK Summary ──────────────────────────────────────────
+
+def format_vulnerability_summary(contexts: list) -> str:
+    """
+    Render CVE reference and ATT&CK technique tables from a list of AttackContext objects.
+
+    Only includes CVEs and techniques that are relevant to the scanned host's active
+    finding categories. Deduplicates across categories.
+    """
+    from cve_reference import AttackContext  # deferred to avoid circular import
+
+    if not contexts:
+        return "_No CVE or ATT&CK references applicable to findings on this host._"
+
+    # ── CVE table (deduplicated, sorted by CVSS descending) ──────────────
+    seen_cves: set[str] = set()
+    cve_rows: list[list[str]] = []
+    # Collect priority per CVE from whichever context references it
+    cve_priority: dict[str, str] = {}
+    for ctx in contexts:
+        assert isinstance(ctx, AttackContext)
+        for cve in ctx.cves:
+            if cve.cve_id not in cve_priority:
+                cve_priority[cve.cve_id] = ctx.remediation_priority
+
+    all_cves = []
+    for ctx in contexts:
+        for cve in ctx.cves:
+            if cve.cve_id not in seen_cves:
+                seen_cves.add(cve.cve_id)
+                all_cves.append(cve)
+
+    all_cves.sort(key=lambda c: c.cvss_score, reverse=True)
+
+    for cve in all_cves:
+        cve_rows.append([
+            cve.cve_id,
+            str(cve.cvss_score),
+            cve.title,
+            cve.affected_versions,
+            cve.patched_version or "—",
+            cve_priority.get(cve.cve_id, "—"),
+        ])
+
+    parts: list[str] = []
+
+    if cve_rows:
+        cve_headers = ["CVE ID", "CVSS", "Title", "Affected", "Patched", "Priority"]
+        parts.append("### CVE Reference")
+        parts.append(tabulate(cve_rows, headers=cve_headers, tablefmt="github"))
+        parts.append("")
+
+    # ── ATT&CK techniques table (deduplicated) ──────────────────────────
+    seen_techniques: set[str] = set()
+    technique_rows: list[list[str]] = []
+    technique_categories: dict[str, list[str]] = {}
+
+    for ctx in contexts:
+        for tech in ctx.techniques:
+            if tech.technique_id not in technique_categories:
+                technique_categories[tech.technique_id] = []
+            technique_categories[tech.technique_id].append(ctx.category)
+
+    for ctx in contexts:
+        for tech in ctx.techniques:
+            if tech.technique_id not in seen_techniques:
+                seen_techniques.add(tech.technique_id)
+                categories = technique_categories.get(tech.technique_id, [])
+                technique_rows.append([
+                    tech.technique_id,
+                    tech.name,
+                    tech.tactic,
+                    ", ".join(sorted(set(categories))),
+                ])
+
+    if technique_rows:
+        tech_headers = ["ID", "Technique", "Tactic", "Relevant Findings"]
+        parts.append("### MITRE ATT&CK Techniques")
+        parts.append(tabulate(technique_rows, headers=tech_headers, tablefmt="github"))
+        parts.append("")
+
+    return "\n".join(parts) if parts else "_No CVE or ATT&CK references applicable._"

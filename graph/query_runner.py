@@ -38,7 +38,7 @@ from utils import first_cypher_statement, list_or_str, run_query
 QUERIES_DIR = Path(__file__).parent / "queries"
 
 _HEADER_RE = re.compile(
-    r"^//\s*(?P<key>Name|Purpose|Category|Severity|Parameters|Attack|Use case)\s*:\s*(?P<value>.+)$",
+    r"^//\s*(?P<key>Name|Purpose|Category|Severity|Parameters|Attack|Use case|CVE|ATT&CK)\s*:\s*(?P<value>.+)$",
     re.IGNORECASE,
 )
 
@@ -95,6 +95,8 @@ def discover_queries() -> list[dict]:
             "category": meta.get("category", "Unknown"),
             "severity": meta.get("severity", "Unknown"),
             "parameters": meta.get("parameters", "none"),
+            "cve": meta.get("cve", ""),
+            "mitre_attack": meta.get("att&ck", ""),
         })
     return queries
 
@@ -249,6 +251,10 @@ def cmd_run(
             print(f"    Category: {q['category']}  |  Severity: {q['severity']}")
             if q["purpose"]:
                 print(f"    {q['purpose']}")
+            if q.get("cve"):
+                print(f"    CVE: {q['cve']}")
+            if q.get("mitre_attack"):
+                print(f"    ATT&CK: {q['mitre_attack']}")
             print(f"{'─' * 60}")
 
             stmt = first_cypher_statement(load_cypher(q))

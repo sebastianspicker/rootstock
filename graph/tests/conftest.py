@@ -61,7 +61,7 @@ ALL_NODE_LABELS = [
     "CertificateAuthority", "BluetoothDevice",
     "KerberosArtifact", "ADGroup",
     "Vulnerability", "AttackTechnique",
-    "SandboxProfile",
+    "SandboxProfile", "ADUser",
 ]
 
 

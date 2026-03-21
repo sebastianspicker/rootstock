@@ -43,6 +43,7 @@ CONSTRAINTS = [
     ("vuln_cve_unique",          "Vulnerability",        "v.cve_id"),
     ("technique_id_unique",      "AttackTechnique",      "t.technique_id"),
     ("sandbox_bundle_unique",    "SandboxProfile",       "sp.bundle_id"),
+    ("ad_user_sid_unique",       "ADUser",               "u.object_id"),
 ]
 
 # Composite uniqueness constraint (Keychain items keyed by label + kind)

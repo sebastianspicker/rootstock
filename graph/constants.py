@@ -45,4 +45,5 @@ NODE_KEY_PROPERTY: dict[str, str] = {
     "Vulnerability": "cve_id",
     "AttackTechnique": "technique_id",
     "SandboxProfile": "bundle_id",
+    "ADUser": "object_id",
 }

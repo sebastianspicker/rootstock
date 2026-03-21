@@ -56,7 +56,7 @@ class TestQueryEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        assert len(data) == 89
+        assert len(data) == 91
         # Each query should have required fields
         for q in data:
             assert "id" in q
@@ -64,10 +64,10 @@ class TestQueryEndpoints:
             assert "category" in q
             assert "severity" in q
 
-    def test_list_queries_has_89(self, client):
-        """Should discover exactly 89 queries."""
+    def test_list_queries_has_91(self, client):
+        """Should discover exactly 91 queries."""
         response = client.get("/api/queries")
-        assert len(response.json()) == 89
+        assert len(response.json()) == 91
 
     def test_query_79_in_list(self, client):
         """Query 79 (stale keytab detection) should appear in the list."""

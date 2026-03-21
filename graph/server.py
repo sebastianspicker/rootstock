@@ -20,12 +20,13 @@ import argparse
 import html as html_mod
 import json
 import sys
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -49,6 +50,8 @@ from mark_owned import mark_by_bundle_id, mark_by_username, mark_by_label_key, l
 from clear_owned import clear_all, clear_by_bundle_id, clear_by_username
 from tier_classification import classify_tier0, classify_tier1, classify_tier2
 from viewer_layout import compute_layout
+from cve_enrichment import enrich_registry, fetch_and_cache, get_enrichment_status
+from bloodhound_import import import_all as bloodhound_import_all
 
 
 # ── Request/Response models ─────────────────────────────────────────────────
@@ -143,22 +146,8 @@ def serve_viewer(request: Request):
     safe_json = json.dumps(data).replace("</", "<\\/")
     title = f"{hostname} Attack Graph"
 
-    html = template.replace("{{VIEWER_TITLE}}", title).replace(
-        "{{VIEWER_DATA}}", safe_json
-    )
-
-    # Inject live mode flag before the closing </script> tag
+    # Inject live mode flag and replace template placeholders
     live_inject = "const __ROOTSTOCK_LIVE__ = true;\nconst API_BASE = '';\n"
-    html = html.replace(
-        "const DATA = {{VIEWER_DATA}}",
-        live_inject + "const DATA = " + safe_json,
-        1,
-    )
-    # The template replacement above already injected VIEWER_DATA into the
-    # live_inject line. Fix by doing a clean replacement.
-    # Actually let's do this properly: replace the original DATA line.
-    # Re-read the template and do it cleanly.
-    template = template_path.read_text()
     html = template.replace("{{VIEWER_TITLE}}", html_mod.escape(title))
     html = html.replace(
         "const DATA = {{VIEWER_DATA}};",
@@ -314,6 +303,97 @@ def tier_classify_endpoint(session=Depends(get_session)):
         "tier2": t2,
         "total": t0 + t1 + t2,
     }
+
+
+# ── Vulnerability endpoints ──────────────────────────────────────────────
+
+@app.get("/api/vulnerabilities")
+def list_vulnerabilities(session=Depends(get_session)):
+    """List all Vulnerability nodes with EPSS/KEV data."""
+    result = session.run(
+        """
+        MATCH (v:Vulnerability)
+        OPTIONAL MATCH (app:Application)-[:AFFECTED_BY]->(v)
+        RETURN v.cve_id AS cve_id,
+               v.title AS title,
+               v.cvss_score AS cvss_score,
+               v.epss_score AS epss_score,
+               v.epss_percentile AS epss_percentile,
+               v.in_kev AS in_kev,
+               v.kev_date_added AS kev_date_added,
+               v.exploitation_status AS exploitation_status,
+               v.cwe_ids AS cwe_ids,
+               collect(DISTINCT app.name) AS affected_apps
+        ORDER BY v.epss_score DESC NULLS LAST, v.cvss_score DESC
+        """
+    )
+    return [dict(record) for record in result]
+
+
+@app.get("/api/vulnerabilities/{cve_id}")
+def get_vulnerability(cve_id: str, session=Depends(get_session)):
+    """Single CVE lookup with affected apps."""
+    result = session.run(
+        """
+        MATCH (v:Vulnerability {cve_id: $cve_id})
+        OPTIONAL MATCH (app:Application)-[:AFFECTED_BY]->(v)
+        OPTIONAL MATCH (v)-[:MAPS_TO_TECHNIQUE]->(t:AttackTechnique)
+        RETURN v,
+               collect(DISTINCT {name: app.name, bundle_id: app.bundle_id, tier: app.tier}) AS affected_apps,
+               collect(DISTINCT {id: t.technique_id, name: t.name, tactic: t.tactic}) AS techniques
+        """,
+        cve_id=cve_id,
+    )
+    row = result.single()
+    if not row or not row["v"]:
+        raise HTTPException(status_code=404, detail=f"CVE '{cve_id}' not found")
+
+    vuln_props = dict(row["v"])
+    return {
+        "vulnerability": vuln_props,
+        "affected_apps": [a for a in row["affected_apps"] if a.get("name")],
+        "techniques": [t for t in row["techniques"] if t.get("id")],
+    }
+
+
+@app.post("/api/enrichment/refresh")
+def refresh_enrichment():
+    """Trigger EPSS/KEV re-fetch."""
+    try:
+        fetch_and_cache(force=True)
+        status = get_enrichment_status()
+        return {"status": "ok", "enrichment": status}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── BloodHound import endpoint ──────────────────────────────────────────
+
+@app.post("/api/import-bloodhound")
+async def import_bloodhound(file: UploadFile, session=Depends(get_session)):
+    """Import a SharpHound ZIP archive into the Rootstock graph.
+
+    Creates ADUser nodes and links them to existing Rootstock User nodes
+    via SAME_IDENTITY edges, enabling cross-domain attack path analysis.
+    """
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a .zip archive")
+
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        content = await file.read()
+        tmp.write(content)
+        tmp_path = tmp.name
+
+    try:
+        counts = bloodhound_import_all(session, tmp_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    return counts
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────

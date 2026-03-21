@@ -353,6 +353,23 @@ def enrich_registry() -> dict[str, EnrichedCveEntry]:
     return result
 
 
+# ── Temporal scoring ─────────────────────────────────────────────────────
+
+def temporal_score(cvss: float, epss: float | None, years_since_disclosure: float) -> float:
+    """Compute a temporal priority score combining CVSS, EPSS, and age decay.
+
+    Score = (CVSS/10 * 0.4) + (EPSS * 0.4) + (age_decay * 0.2)
+    where age_decay = max(0, 1 - years_since_disclosure / 5)
+
+    Returns 0.0-1.0 (higher = more urgent).
+    """
+    cvss_component = (cvss / 10.0) * 0.4
+    epss_component = (epss if epss is not None else 0.0) * 0.4
+    age_decay = max(0.0, 1.0 - years_since_disclosure / 5.0)
+    age_component = age_decay * 0.2
+    return min(1.0, max(0.0, cvss_component + epss_component + age_component))
+
+
 # ── Status ───────────────────────────────────────────────────────────────
 
 def get_enrichment_status() -> dict:

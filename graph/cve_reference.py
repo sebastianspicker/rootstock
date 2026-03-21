@@ -51,6 +51,15 @@ class AttackTechnique:
 
 
 @dataclass(frozen=True)
+class ThreatGroup:
+    """A MITRE ATT&CK threat group / APT actor."""
+
+    group_id: str              # "G0096"
+    name: str                  # "APT41"
+    aliases: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class AttackContext:
     """Full attack context for a Rootstock finding category."""
 
@@ -930,6 +939,37 @@ _REGISTRY: dict[str, AttackContext] = {
         cves=[_CVE_2022_42821, _CVE_2024_44175],
         remediation_priority="High",
     ),
+}
+
+
+# ── Threat Group Registry ────────────────────────────────────────────────────
+
+_GROUP_REGISTRY: dict[str, ThreatGroup] = {
+    "G0096": ThreatGroup("G0096", "APT41", aliases=("Winnti", "Barium")),
+    "G0032": ThreatGroup("G0032", "Lazarus Group", aliases=("Hidden Cobra", "ZINC")),
+    "G0050": ThreatGroup("G0050", "OceanLotus", aliases=("APT32",)),
+    "G0046": ThreatGroup("G0046", "FIN7", aliases=("Carbanak",)),
+    "G0010": ThreatGroup("G0010", "Turla", aliases=("Snake", "Venomous Bear")),
+    "G0016": ThreatGroup("G0016", "APT29", aliases=("Cozy Bear", "Nobelium")),
+    "G0007": ThreatGroup("G0007", "APT28", aliases=("Fancy Bear", "Sofacy")),
+    "G0094": ThreatGroup("G0094", "Kimsuky", aliases=("Velvet Chollima",)),
+    "G9001": ThreatGroup("G9001", "Operation Triangulation", aliases=()),
+    "G9002": ThreatGroup("G9002", "NSO Group (Pegasus)", aliases=("Pegasus",)),
+}
+
+# Maps each group to the ATT&CK techniques it is known to use (from the
+# techniques already defined above).
+_GROUP_TECHNIQUE_MAP: dict[str, list[str]] = {
+    "G0096": ["T1574.006", "T1068", "T1059.007"],           # APT41
+    "G0032": ["T1574.006", "T1068"],                         # Lazarus
+    "G0050": ["T1574.006", "T1059.002", "T1547.011"],        # OceanLotus
+    "G0046": ["T1059.007", "T1574.006"],                     # FIN7
+    "G0010": ["T1574.006", "T1543.004", "T1059.002"],        # Turla
+    "G0016": ["T1574.006", "T1555.001", "T1098"],            # APT29
+    "G0007": ["T1068", "T1190", "T1059.007"],                # APT28
+    "G0094": ["T1059.002", "T1547.011"],                     # Kimsuky
+    "G9001": ["T1068"],                                       # Operation Triangulation
+    "G9002": ["T1068", "T1200"],                              # NSO Group / Pegasus
 }
 
 

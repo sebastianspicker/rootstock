@@ -22,8 +22,8 @@ import argparse
 import sys
 
 from neo4j_connection import add_neo4j_args, connect_from_args
-from cve_reference import _REGISTRY, AttackContext, CveEntry
-from cve_enrichment import enrich_registry, EnrichedCveEntry
+from cve_reference import _REGISTRY, _GROUP_REGISTRY, _GROUP_TECHNIQUE_MAP, AttackContext, CveEntry
+from cve_enrichment import enrich_registry, EnrichedCveEntry, temporal_score
 from version_matcher import (
     extract_macos_max_version,
     is_affected,
@@ -166,6 +166,33 @@ _CATEGORY_MATCH: dict[str, str] = {
 
 # ── Import functions ─────────────────────────────────────────────────────
 
+def _estimate_years_since_disclosure(entry: EnrichedCveEntry) -> float:
+    """Estimate years since CVE disclosure from KEV date or patched_version hints."""
+    from datetime import datetime, timezone
+
+    # Try KEV date_added first (most reliable timestamp we have)
+    if entry.kev_date_added:
+        try:
+            added = datetime.strptime(entry.kev_date_added, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - added
+            return max(0.0, delta.days / 365.25)
+        except (ValueError, TypeError):
+            pass
+
+    # Try extracting year from patched_version string (e.g. "macOS 15.2")
+    # or from affected_versions (e.g. "macOS 15.1 and earlier")
+    import re
+    cve = entry.base
+    year_match = re.search(r"CVE-(\d{4})-", cve.cve_id)
+    if year_match:
+        cve_year = int(year_match.group(1))
+        current_year = datetime.now(timezone.utc).year
+        return max(0.0, float(current_year - cve_year))
+
+    # Default: assume 1 year old
+    return 1.0
+
+
 def import_vulnerability_nodes(session) -> int:
     """MERGE Vulnerability nodes from the enriched CVE registry."""
     enriched = enrich_registry()
@@ -173,6 +200,9 @@ def import_vulnerability_nodes(session) -> int:
     count = 0
     for entry in enriched.values():
         cve = entry.base
+        years = _estimate_years_since_disclosure(entry)
+        tp = temporal_score(cve.cvss_score, entry.epss_score, years)
+
         result = session.run(
             """
             MERGE (v:Vulnerability {cve_id: $cve_id})
@@ -190,7 +220,8 @@ def import_vulnerability_nodes(session) -> int:
                 v.reference_url = $reference_url,
                 v.kev_ransomware = $kev_ransomware,
                 v.cwe_ids = $cwe_ids,
-                v.cvss_vector = $cvss_vector
+                v.cvss_vector = $cvss_vector,
+                v.temporal_priority = $temporal_priority
             RETURN count(v) AS n
             """,
             cve_id=cve.cve_id,
@@ -209,6 +240,7 @@ def import_vulnerability_nodes(session) -> int:
             kev_ransomware=entry.kev_ransomware,
             cwe_ids=list(cve.cwe_ids),
             cvss_vector=entry.cvss_vector,
+            temporal_priority=round(tp, 4),
         )
         count += result.single()["n"]
 
@@ -409,6 +441,44 @@ def import_affected_by_edges(session) -> int:
     return count
 
 
+def import_threat_group_nodes(session) -> int:
+    """MERGE ThreatGroup nodes from the registry."""
+    count = 0
+    for group in _GROUP_REGISTRY.values():
+        result = session.run(
+            """
+            MERGE (g:ThreatGroup {group_id: $group_id})
+            SET g.name = $name,
+                g.aliases = $aliases
+            RETURN count(g) AS n
+            """,
+            group_id=group.group_id,
+            name=group.name,
+            aliases=list(group.aliases),
+        )
+        count += result.single()["n"]
+    return count
+
+
+def import_group_technique_edges(session) -> int:
+    """Create (:ThreatGroup)-[:USES_TECHNIQUE]->(:AttackTechnique) edges."""
+    count = 0
+    for group_id, technique_ids in _GROUP_TECHNIQUE_MAP.items():
+        for tid in technique_ids:
+            result = session.run(
+                """
+                MATCH (g:ThreatGroup {group_id: $gid})
+                MATCH (t:AttackTechnique {technique_id: $tid})
+                MERGE (g)-[:USES_TECHNIQUE]->(t)
+                RETURN count(*) AS n
+                """,
+                gid=group_id,
+                tid=tid,
+            )
+            count += result.single()["n"]
+    return count
+
+
 def import_all(session) -> dict[str, int]:
     """Run the full vulnerability import pipeline."""
     vuln_count = import_vulnerability_nodes(session)
@@ -416,6 +486,8 @@ def import_all(session) -> dict[str, int]:
     maps_count = import_technique_edges(session)
     precise_count = import_precise_affected_by_edges(session)
     category_count = import_affected_by_edges(session)
+    group_count = import_threat_group_nodes(session)
+    group_edge_count = import_group_technique_edges(session)
 
     return {
         "vulnerabilities": vuln_count,
@@ -424,6 +496,8 @@ def import_all(session) -> dict[str, int]:
         "affected_by_precise": precise_count,
         "affected_by_category": category_count,
         "affected_by": precise_count + category_count,
+        "threat_groups": group_count,
+        "uses_technique": group_edge_count,
     }
 
 
@@ -450,6 +524,8 @@ def main() -> int:
     print(f"  AFFECTED_BY edges (precise): {counts['affected_by_precise']}")
     print(f"  AFFECTED_BY edges (category): {counts['affected_by_category']}")
     print(f"  AFFECTED_BY edges (total): {counts['affected_by']}")
+    print(f"  ThreatGroup nodes: {counts['threat_groups']}")
+    print(f"  USES_TECHNIQUE edges: {counts['uses_technique']}")
     return 0
 
 

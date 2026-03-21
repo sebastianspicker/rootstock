@@ -525,6 +525,17 @@ def assemble_report(
         sections.append(vuln_section)
         sections.append("")
 
+    # ── Threat Landscape: APT Group Exposure ─────────────────────────────
+    threat_rows = get_rows("92-apt-group-exposure.cypher")
+    if threat_rows:
+        sections.append("## Threat Landscape: APT Group Exposure")
+        sections.append(
+            "> APT groups whose techniques are relevant to vulnerabilities found on this host."
+        )
+        sections.append("")
+        sections.append(format_generic_table(threat_rows))
+        sections.append("")
+
     # ── Recommendations ───────────────────────────────────────────────────────
     sections.append("## Recommendations")
 

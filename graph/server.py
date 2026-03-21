@@ -367,6 +367,23 @@ def refresh_enrichment():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Threat Group endpoints ────────────────────────────────────────────
+
+@app.get("/api/threat-groups")
+def get_threat_groups(session=Depends(get_session)):
+    """List all ThreatGroup nodes with technique counts."""
+    result = session.run(
+        """
+        MATCH (g:ThreatGroup)
+        OPTIONAL MATCH (g)-[:USES_TECHNIQUE]->(t:AttackTechnique)
+        RETURN g.group_id AS group_id, g.name AS name, g.aliases AS aliases,
+               count(t) AS technique_count
+        ORDER BY technique_count DESC
+        """
+    )
+    return [dict(r) for r in result]
+
+
 # ── BloodHound import endpoint ──────────────────────────────────────────
 
 @app.post("/api/import-bloodhound")

@@ -44,6 +44,7 @@ CONSTRAINTS = [
     ("technique_id_unique",      "AttackTechnique",      "t.technique_id"),
     ("sandbox_bundle_unique",    "SandboxProfile",       "sp.bundle_id"),
     ("ad_user_sid_unique",       "ADUser",               "u.object_id"),
+    ("threat_group_id_unique",   "ThreatGroup",          "g.group_id"),
 ]
 
 # Composite uniqueness constraint (Keychain items keyed by label + kind)

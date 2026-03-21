@@ -75,7 +75,7 @@ Extract security-relevant metadata from the local macOS system and serialize it 
 - **Language:** Swift 5.9+
 - **Build system:** Swift Package Manager
 - **Target:** Single static binary, no runtime dependencies beyond macOS system frameworks
-- **Entry point:** `collector/Sources/CLI/main.swift`
+- **Entry point:** `collector/Sources/RootstockCLI/main.swift`
 
 ### Module Boundaries
 
@@ -101,20 +101,33 @@ This abstraction serves three purposes:
 3. **Extensibility:** New data sources (MDM profiles, ESF events, etc.) plug in without
    modifying existing code.
 
-### Data Sources — Priority Order
+### Data Sources (23 Modules)
 
-| Priority | Module | Data Source | Requires Elevation? |
-|----------|--------|-------------|---------------------|
-| P0 | TCC | User TCC.db (`~/Library/Application Support/com.apple.TCC/TCC.db`) | No |
-| P0 | TCC | System TCC.db (`/Library/Application Support/com.apple.TCC/TCC.db`) | Yes (FDA) |
-| P0 | Entitlements | `codesign -d --entitlements` for all installed apps | No |
-| P0 | CodeSigning | Hardened runtime, library validation, team ID per app | No |
-| P1 | Persistence | LaunchDaemons, LaunchAgents, login items | Partial |
-| P1 | XPC | XPC service plists and Mach port configurations | No |
-| P2 | Keychain | Keychain item ACLs (metadata only, no secrets) | Partial |
-| P2 | MDM | Installed configuration profiles | No |
-
-P0 = Phase 1 (MVP), P1 = Phase 2, P2 = Phase 3
+| Module | Data Source | Requires Elevation? |
+|--------|-------------|---------------------|
+| TCC | User + System TCC.db | System: FDA |
+| Entitlements | `codesign` / Security.framework entitlement extraction | No |
+| CodeSigning | Hardened runtime, library validation, certificate chain | No |
+| XPCServices | XPC service plists and Mach port configurations | No |
+| Persistence | LaunchDaemons, LaunchAgents, login items, cron | Partial |
+| Keychain | Keychain item ACLs (metadata only, no secrets) | Partial |
+| MDM | Installed configuration profiles + PPPC policies | No |
+| Groups | Local groups + user details | No |
+| RemoteAccess | SSH, VNC, ARD service detection | No |
+| Firewall | Application firewall policy and rules | No |
+| LoginSession | Active login sessions (console, SSH, screen sharing) | No |
+| AuthorizationDB | Authorization rights database | No |
+| AuthorizationPlugins | Security agent plugins in `/Library/Security/` | No |
+| SystemExtensions | Network/endpoint security/driver extensions | No |
+| Sudoers | Sudoers NOPASSWD rules | Yes |
+| ProcessSnapshot | Running process enumeration | No |
+| FileACLs | Critical file ACL auditing (TCC.db, sudoers, etc.) | No |
+| ShellHooks | Shell config injection points (.zshrc, .bashrc) | No |
+| PhysicalSecurity | Bluetooth, screen lock, Thunderbolt, FileVault posture | No |
+| ActiveDirectory | AD binding detection, user/group discovery | No |
+| KerberosArtifacts | ccache, keytab, krb5.conf scanning | No |
+| Sandbox | Sandbox SBPL profile deep parsing | No |
+| Quarantine | Gatekeeper quarantine xattr reader | No |
 
 ---
 
@@ -125,12 +138,14 @@ Parse collector JSON, validate it, and create/update nodes and relationships in 
 
 ### Language & Dependencies
 - **Language:** Python 3.10+
-- **Dependencies:** `neo4j` (official driver), `pydantic` (validation)
+- **Dependencies:** `neo4j` (official driver), `pydantic` (validation), `fastapi` + `uvicorn` (API server), `tabulate` (report formatting), `requests` (CVE enrichment), `python-multipart` (file uploads)
 
 ### Import Behavior
 - **Idempotent:** Re-importing the same scan updates existing nodes (MERGE, not CREATE).
 - **Scan-tagged:** Each import is tagged with a scan ID and timestamp, enabling
   comparison of before/after states.
+- **Batched UNWIND:** All imports use `UNWIND $batch AS row` for performance (not N+1 individual queries).
+- **Pydantic validation:** Collector JSON is validated via Pydantic v2 models with `extra="forbid"` to catch schema drift.
 - **Relationship inference:** Some relationships are explicit in the JSON (e.g., app → TCC
   grant). Others are inferred during import (e.g., `CAN_INJECT_INTO` is computed by
   checking whether target app lacks hardened runtime + library validation).
@@ -338,7 +353,7 @@ These relationships don't exist in the raw collector JSON but are derived:
 }
 ```
 
-See `docs/design-docs/collector-output-schema.md` for the full JSON Schema definition.
+See `collector/schema/scan-result.schema.json` for the full JSON Schema definition (1400+ lines, Draft 2020-12).
 
 ---
 
@@ -415,3 +430,8 @@ grant — a real attack pattern that Rootstock surfaces automatically.
 | MERGE (not CREATE) in Neo4j | Idempotent re-imports; safe to re-scan and re-import without duplicates | §Component: Graph Import |
 | Inferred relationships | Cross-boundary attack paths (injection, inheritance) can't be read from a single data source — they emerge from correlating multiple sources | §Inferred Relationships |
 | Bounded parallelism (max 8) | Prevents overwhelming Security.framework with concurrent code signing queries | `collector/Sources/Entitlements/EntitlementDataSource.swift` |
+| Batched UNWIND imports | All Neo4j imports use `UNWIND $batch` instead of N+1 individual `session.run()` calls — 10-50x faster | `graph/import_vulnerabilities.py`, `graph/utils.py` |
+| Pydantic `extra="forbid"` | Typos in collector JSON are caught immediately instead of silently ignored | `graph/models.py` |
+| Read-only Cypher validation | Ad-hoc Cypher queries via the API are validated against a keyword blocklist before execution | `graph/utils.py`, `graph/server.py` |
+| Offline-first CVE enrichment | Static CVE registry works without network; live EPSS/KEV enrichment is optional with 24h cache | `graph/cve_reference.py`, `graph/cve_enrichment.py` |
+| `async let` enrichment | Sandbox and quarantine enrichment run concurrently in the collector via structured concurrency | `collector/Sources/RootstockCLI/ScanOrchestrator.swift` |

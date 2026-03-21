@@ -26,7 +26,7 @@ rootstock/
 ├── CLAUDE.md                 # ← You are here. Start with this file.
 ├── AGENTS.md                 # Role definitions for Claude Code tasks
 ├── ARCHITECTURE.md           # System architecture and component boundaries
-├── ROADMAP.md                # Full development roadmap (6 phases, 24 weeks)
+├── ROADMAP.md                # Full development roadmap (7 phases)
 ├── README.md                 # Public-facing project README
 │
 ├── collector/                # Swift-based macOS collector (23 modules)

@@ -13,10 +13,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Parse optional Neo4j args (pass through to pipeline and tools)
-NEO4J_URI="bolt://localhost:7687"
-NEO4J_USER="neo4j"
-NEO4J_PASS="rootstock"
+# Parse optional Neo4j args (env vars override defaults, CLI args override env vars)
+NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
+NEO4J_USER="${NEO4J_USER:-neo4j}"
+NEO4J_PASS="${NEO4J_PASSWORD:-rootstock}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

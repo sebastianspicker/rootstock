@@ -81,7 +81,9 @@
         "dyld_insert_via_entitlement",
         "missing_library_validation"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Slack",
@@ -168,7 +170,9 @@
         "missing_library_validation",
         "electron_env_var"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Visual Studio Code",
@@ -243,7 +247,9 @@
         "missing_library_validation",
         "electron_env_var"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "zoom.us",
@@ -314,7 +320,9 @@
         }
       ],
       "injection_methods": [],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "OmniGraffle",
@@ -381,7 +389,9 @@
       "injection_methods": [
         "missing_library_validation"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Firefox",
@@ -448,7 +458,9 @@
       "injection_methods": [
         "missing_library_validation"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Acme Backup",
@@ -521,7 +533,9 @@
       "injection_methods": [
         "missing_library_validation"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Acme VPN",
@@ -586,7 +600,9 @@
         }
       ],
       "injection_methods": [],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Acme Launcher",
@@ -645,7 +661,9 @@
         }
       ],
       "injection_methods": [],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Acme Analytics",
@@ -681,7 +699,9 @@
       "injection_methods": [
         "missing_library_validation"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Finder",
@@ -721,7 +741,9 @@
         }
       ],
       "injection_methods": [],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Terminal",
@@ -761,7 +783,9 @@
         }
       ],
       "injection_methods": [],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "System Settings",
@@ -801,7 +825,9 @@
         }
       ],
       "injection_methods": [],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "1Password",
@@ -882,7 +908,9 @@
         "missing_library_validation",
         "electron_env_var"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     },
     {
       "name": "Acme Shell Helper",
@@ -950,7 +978,9 @@
         "dyld_insert_via_entitlement",
         "missing_library_validation"
       ],
-      "launch_constraint_category": null
+      "launch_constraint_category": null,
+      "sandbox_profile": null,
+      "quarantine_info": null
     }
   ],
   "tcc_grants": [
@@ -1420,7 +1450,8 @@
       "identifier": "com.acmecorp.vpn.tunnel",
       "team_id": "ACME123456",
       "extension_type": "network",
-      "enabled": true
+      "enabled": true,
+      "subscribed_events": []
     }
   ],
   "sudoers_rules": [
@@ -1590,6 +1621,7 @@
       "is_forwardable": true
     }
   ],
+  "sandbox_profiles": [],
   "gatekeeper_enabled": true,
   "sip_enabled": true,
   "filevault_enabled": false,

@@ -14,8 +14,12 @@ Rootstock is a graph-based attack path discovery tool for macOS security boundar
 
 - **TCC grants** — which apps have camera, microphone, full disk access, etc.
 - **Entitlements** — code-signing privileges that weaken security boundaries
-- **Code signing** — hardened runtime, library validation, team identifiers
+- **Code signing** — hardened runtime, library validation, team identifiers, certificate chain analysis
 - **Injection vectors** — per-app assessment of DYLD injection viability
+- **Vulnerability correlation** — CVE/EPSS/KEV enrichment with ATT&CK technique mapping
+- **Risk scoring** — composite 0-100 risk score per application with tier classification
+- **Enterprise integration** — Active Directory binding, Kerberos artifacts, BloodHound interop
+- **ESF monitoring** — Endpoint Security Framework event coverage gap analysis
 
 ## Preview
 
@@ -88,17 +92,21 @@ pie title Asset Tier Distribution
 | Output | Description |
 |--------|-------------|
 | [`demo-scan.json`](examples/demo-scan.json) | Synthetic scan data (15 apps, 15 TCC grants, 5 XPC services) |
-| [`demo-report.md`](examples/demo-report.md) | Full attack path report with findings and Mermaid diagrams |
-| [`demo-viewer.html`](examples/demo-viewer.html) | Interactive graph viewer (download and open in browser) |
 
-> To regenerate demo outputs (requires Neo4j): `bash examples/regenerate.sh`
+> To generate report and viewer outputs (requires Neo4j): `bash examples/regenerate.sh`
+> This produces `demo-report.md` (attack path report) and `demo-viewer.html` (interactive graph viewer).
 
 ## Quick Start
 
 ### Requirements
 
+**Collector** (runs on the Mac being scanned):
 - macOS 14 (Sonoma) or later
 - Swift 5.9+ (Xcode 15+)
+
+**Graph pipeline** (runs on analysis workstation):
+- Python 3.10+
+- Neo4j 5.0+ (Docker recommended: `docker run -p7474:7474 -p7687:7687 neo4j:5`)
 
 ### Build
 
@@ -173,6 +181,34 @@ python3 scripts/validate-scan.py scan.json
   "errors": []
 }
 ```
+
+### Graph Pipeline
+
+```bash
+# Install Python dependencies
+pip install -e graph/
+
+# Run the full pipeline (schema → import → infer → classify → report)
+bash graph/pipeline.sh scan.json
+
+# Or start the API server with interactive viewer
+bash graph/pipeline.sh scan.json --serve 8000
+# Open http://localhost:8000 for the interactive graph viewer
+```
+
+Environment variables for Neo4j connection: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
+
+## Feature Matrix
+
+| Category | Count | Details |
+|----------|-------|---------|
+| Collector modules | 23 | TCC, entitlements, code signing, XPC, persistence, keychain, MDM, groups, remote access, firewall, login sessions, authorization DB/plugins, system extensions, sudoers, processes, file ACLs, shell hooks, physical security, AD, Kerberos, sandbox, quarantine |
+| Graph node types | 29 | Application, TCC_Permission, Entitlement, User, XPC_Service, LaunchItem, Keychain_Item, MDM_Profile, Computer, Vulnerability, CWE, AttackTechnique, ThreatGroup, ADUser, Recommendation, and more |
+| Inference engines | 18 | Injection assessment, TCC inheritance, Apple Events, accessibility, Kerberos, automation, Finder FDA, ESF monitoring, risk scoring, recommendations, and more |
+| Cypher queries | 101 | 10 categories: Red Team, Blue Team, Forensic |
+| Python tests | 424 | Unit tests, integration tests, edge case coverage |
+| API endpoints | 15 | REST API with OpenAPI docs, interactive viewer, Cypher console |
+| CVE registry | 30+ | Curated macOS CVEs with EPSS/KEV/NVD live enrichment |
 
 ## Performance
 
@@ -287,6 +323,8 @@ scripts/
 
 docs/
 ├── THREAT_MODEL.md        Assumptions, limitations, ethical framework
+├── design-docs/           Architecture decisions (AD/Kerberos, risk scoring, vuln intel, etc.)
+├── references/            Entitlement categories, macOS security reference
 ├── benchmarks/            Performance measurements
 ├── research/              macOS security research notes
 └── paper/                 Academic paper skeleton + references

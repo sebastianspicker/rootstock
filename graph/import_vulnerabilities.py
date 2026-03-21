@@ -301,7 +301,7 @@ def import_precise_affected_by_edges(session) -> int:
         cypher = """
             MATCH (app:Application)
             WHERE app.bundle_id IN $bundle_ids
-            OPTIONAL MATCH (app)-[:SCANNED_BY]->(c:Computer)
+            OPTIONAL MATCH (app)-[:INSTALLED_ON]->(c:Computer)
             RETURN app.bundle_id AS bundle_id,
                    app.version AS app_version,
                    c.macos_version AS macos_version,
@@ -322,14 +322,20 @@ def import_precise_affected_by_edges(session) -> int:
             macos_version = record["macos_version"]
             app_id = record["app_id"]
 
-            # Use max_affected_version if set, otherwise parse from affected_versions
-            affected = is_affected(
-                app_version=app_version,
-                affected_versions=cve.affected_versions,
-                patched_version=cve.patched_version,
-                is_macos_cve=is_macos,
-                macos_version=macos_version,
-            )
+            # Use max_affected_version for direct version ceiling if set
+            if cve.max_affected_version and app_version and not is_macos:
+                from version_matcher import parse_version_tuple, version_lte
+                app_v = parse_version_tuple(app_version)
+                max_v = parse_version_tuple(cve.max_affected_version)
+                affected = app_v is not None and max_v is not None and version_lte(app_v, max_v)
+            else:
+                affected = is_affected(
+                    app_version=app_version,
+                    affected_versions=cve.affected_versions,
+                    patched_version=cve.patched_version,
+                    is_macos_cve=is_macos,
+                    macos_version=macos_version,
+                )
 
             if affected:
                 try:

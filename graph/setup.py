@@ -3,12 +3,13 @@
 setup.py — Initialize the Rootstock Neo4j schema.
 
 Usage:
-    python3 graph/setup.py [--uri bolt://localhost:7687] [--user neo4j] [--password rootstock]
+    python3 graph/setup.py [--uri bolt://localhost:7687] [--user neo4j] [--password PASS]
 
 Idempotent: safe to run multiple times.
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -48,7 +49,14 @@ def run_cypher_file(session, path: Path) -> int:
     return len(statements)
 
 
+from constants import NODE_KEY_PROPERTY  # noqa: E402
+
+_ALLOWED_LABELS = frozenset(NODE_KEY_PROPERTY) | {"TCC_Permission"}
+
+
 def count_nodes(session, label: str) -> int:
+    if label not in _ALLOWED_LABELS:
+        raise ValueError(f"Unknown label: {label}")
     result = session.run(f"MATCH (n:{label}) RETURN count(n) AS n")
     return result.single()["n"]
 
@@ -70,12 +78,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Initialize Rootstock Neo4j schema")
     parser.add_argument("--uri", default="bolt://localhost:7687")
     parser.add_argument("--user", default="neo4j")
-    parser.add_argument("--password", default="rootstock")
+    parser.add_argument("--password", default=None, help="Neo4j password (or set NEO4J_PASSWORD)")
     args = parser.parse_args()
+
+    password = args.password or os.environ.get("NEO4J_PASSWORD")
+    if not password:
+        print("ERROR: Neo4j password required via --password or NEO4J_PASSWORD env var", file=sys.stderr)
+        return 1
 
     print(f"Connecting to Neo4j at {args.uri}...")
     try:
-        driver = GraphDatabase.driver(args.uri, auth=(args.user, args.password))
+        driver = GraphDatabase.driver(args.uri, auth=(args.user, password))
         driver.verify_connectivity()
     except ServiceUnavailable:
         print(f"ERROR: Cannot connect to Neo4j at {args.uri}. Is it running?", file=sys.stderr)

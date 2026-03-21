@@ -317,7 +317,7 @@ def diff_vulnerabilities(before: ScanResult, after: ScanResult) -> Vulnerability
     """
     try:
         from cve_enrichment import enrich_registry
-        from cve_reference import _REGISTRY
+        from cve_reference import _REGISTRY  # noqa: F401
     except ImportError:
         return VulnerabilityDiff()
 

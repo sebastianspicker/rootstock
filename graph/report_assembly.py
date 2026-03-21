@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html as html_mod
 import socket
 from datetime import datetime, timezone
 
@@ -271,7 +272,7 @@ def assemble_report(
 
     # ── Vulnerability Intelligence subsection ────────────────────────────────
     try:
-        from cve_enrichment import enrich_registry, get_enrichment_status
+        from cve_enrichment import enrich_registry
         enriched = enrich_registry()
         if enriched:
             kev_cves = [e for e in enriched.values() if e.in_kev]
@@ -454,7 +455,7 @@ def assemble_report(
     sections.append("")
 
     # ── NEW Section 8: Tier Classification Overview ───────────────────────────
-    tier_rows_57 = get_rows("57-tier0-inbound-control.cypher")
+    get_rows("57-tier0-inbound-control.cypher")
     sections.append("## Tier Classification Overview")
     sections.append(
         "> Tier 0 assets are the crown jewels — apps with Full Disk Access, "
@@ -639,15 +640,15 @@ def markdown_to_html(md: str) -> str:
         lines = []
         for line in md.split("\n"):
             if line.startswith("# "):
-                lines.append(f"<h1>{line[2:]}</h1>")
+                lines.append(f"<h1>{html_mod.escape(line[2:])}</h1>")
             elif line.startswith("## "):
-                lines.append(f"<h2>{line[3:]}</h2>")
+                lines.append(f"<h2>{html_mod.escape(line[3:])}</h2>")
             elif line.startswith("### "):
-                lines.append(f"<h3>{line[4:]}</h3>")
+                lines.append(f"<h3>{html_mod.escape(line[4:])}</h3>")
             elif line.startswith("- "):
-                lines.append(f"<li>{line[2:]}</li>")
+                lines.append(f"<li>{html_mod.escape(line[2:])}</li>")
             elif line.strip():
-                lines.append(f"<p>{line}</p>")
+                lines.append(f"<p>{html_mod.escape(line)}</p>")
         body = "\n".join(lines)
 
     return f"""<!DOCTYPE html>

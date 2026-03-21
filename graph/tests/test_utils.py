@@ -203,7 +203,7 @@ def test_validate_load_csv_case_insensitive():
 
 # ── safe_count ────────────────────────────────────────────────────────────
 
-from utils import safe_count
+from utils import safe_count  # noqa: E402
 
 
 def test_safe_count_normal():

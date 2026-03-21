@@ -8,8 +8,7 @@ from datetime import datetime, timezone
 from neo4j import Session
 
 from models import (
-    ApplicationData, TCCGrantData, ComputerData, CertificateDetailData,
-    SandboxProfileData,
+    ApplicationData, TCCGrantData, ComputerData, SandboxProfileData,
 )
 
 logger = logging.getLogger(__name__)

@@ -22,7 +22,6 @@ import argparse
 import json
 import socket
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from query_runner import discover_queries, load_cypher

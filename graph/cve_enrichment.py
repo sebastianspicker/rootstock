@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from cve_reference import CveEntry, get_all_critical_cves, _REGISTRY
+from cve_reference import CveEntry, _REGISTRY
 
 try:
     import requests
@@ -448,7 +448,7 @@ def main() -> int:
         if entry.kev_date_added:
             print(f"  KEV Added: {entry.kev_date_added}")
         if entry.kev_ransomware:
-            print(f"  Ransomware: Yes")
+            print("  Ransomware: Yes")
         print(f"  Status:    {entry.base.exploitation_status}")
 
     return 0

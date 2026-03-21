@@ -224,7 +224,6 @@ def format_vulnerability_summary(contexts: list) -> str:
 
     all_cves.sort(key=_sort_key, reverse=True)
 
-    has_enrichment = bool(enriched_map)
     cve_rows: list[list[str]] = []
 
     for cve in all_cves:

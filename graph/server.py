@@ -19,6 +19,8 @@ from __future__ import annotations
 import argparse
 import html as html_mod
 import json
+import logging
+import os
 import sys
 import tempfile
 from contextlib import asynccontextmanager
@@ -28,9 +30,9 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, READ_ACCESS
 from neo4j.exceptions import ServiceUnavailable, AuthError
 
 # ── Imports from existing Rootstock modules ─────────────────────────────────
@@ -45,13 +47,13 @@ from utils import first_cypher_statement, run_query, validate_read_only_cypher
 _import_mod = importlib.import_module("import")
 query_stats = _import_mod.query_stats
 
-from opengraph_export import build_opengraph
-from mark_owned import mark_by_bundle_id, mark_by_username, mark_by_label_key, list_owned
-from clear_owned import clear_all, clear_by_bundle_id, clear_by_username
-from tier_classification import classify_tier0, classify_tier1, classify_tier2
-from viewer_layout import compute_layout
-from cve_enrichment import enrich_registry, fetch_and_cache, get_enrichment_status
-from bloodhound_import import import_all as bloodhound_import_all
+from opengraph_export import build_opengraph  # noqa: E402
+from mark_owned import mark_by_bundle_id, mark_by_username, mark_by_label_key, list_owned  # noqa: E402
+from clear_owned import clear_all, clear_by_bundle_id, clear_by_username  # noqa: E402
+from tier_classification import classify_tier0, classify_tier1, classify_tier2  # noqa: E402
+from viewer_layout import compute_layout  # noqa: E402
+from cve_enrichment import fetch_and_cache, get_enrichment_status  # noqa: E402
+from bloodhound_import import import_all as bloodhound_import_all  # noqa: E402
 
 
 # ── Request/Response models ─────────────────────────────────────────────────
@@ -122,9 +124,20 @@ app.add_middleware(
 
 # ── Dependencies ────────────────────────────────────────────────────────────
 
+logger = logging.getLogger("rootstock.api")
+
+
 def get_session(request: Request):
     """Yield a Neo4j session from the app-level driver."""
     with request.app.state.driver.session() as session:
+        yield session
+
+
+def get_read_session(request: Request):
+    """Yield a read-only Neo4j session — Neo4j rejects writes at the driver level."""
+    with request.app.state.driver.session(
+        default_access_mode=READ_ACCESS
+    ) as session:
         yield session
 
 
@@ -197,7 +210,8 @@ def run_query_endpoint(
     try:
         rows = run_query(session, cypher, params or {})
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("Query %s failed: %s", query_id, e)
+        raise HTTPException(status_code=400, detail="Query execution failed")
 
     return {
         "query": {
@@ -369,7 +383,8 @@ def refresh_enrichment():
         status = get_enrichment_status()
         return {"status": "ok", "enrichment": status}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning("Enrichment refresh failed: %s", e)
+        raise HTTPException(status_code=500, detail="Enrichment refresh failed")
 
 
 # ── Threat Group endpoints ────────────────────────────────────────────
@@ -415,7 +430,8 @@ async def import_bloodhound(file: UploadFile, session=Depends(get_session)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning("BloodHound import failed: %s", e)
+        raise HTTPException(status_code=500, detail="Import failed — check ZIP format")
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -425,7 +441,7 @@ async def import_bloodhound(file: UploadFile, session=Depends(get_session)):
 # ── Ad-hoc Cypher endpoint ─────────────────────────────────────────────────
 
 @app.post("/api/cypher")
-def run_cypher_endpoint(body: CypherRequest, session=Depends(get_session)):
+def run_cypher_endpoint(body: CypherRequest, session=Depends(get_read_session)):
     """Execute an ad-hoc Cypher query (read-only).
 
     Accepts {"cypher": "MATCH ...", "params": {}}.
@@ -442,7 +458,8 @@ def run_cypher_endpoint(body: CypherRequest, session=Depends(get_session)):
         columns = list(records[0].keys()) if records else []
         rows = [dict(r) for r in records]
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.warning("Ad-hoc Cypher failed: %s", e)
+        raise HTTPException(status_code=400, detail="Query execution failed")
 
     return {
         "columns": columns,
@@ -478,12 +495,17 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--neo4j", default="bolt://localhost:7687", help="Neo4j bolt URI")
     parser.add_argument("--neo4j-user", default="neo4j", help="Neo4j username")
-    parser.add_argument("--neo4j-password", default="rootstock", help="Neo4j password")
+    parser.add_argument("--neo4j-password", default=None, help="Neo4j password (or set NEO4J_PASSWORD)")
     args = parser.parse_args()
+
+    password = args.neo4j_password or os.environ.get("NEO4J_PASSWORD")
+    if not password:
+        print("ERROR: Neo4j password required via --neo4j-password or NEO4J_PASSWORD env var", file=sys.stderr)
+        sys.exit(1)
 
     app.state.neo4j_uri = args.neo4j
     app.state.neo4j_user = args.neo4j_user
-    app.state.neo4j_password = args.neo4j_password
+    app.state.neo4j_password = password
 
     import uvicorn
     print(f"Starting Rootstock API server on {args.host}:{args.port}")

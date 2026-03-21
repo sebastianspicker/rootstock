@@ -6,9 +6,7 @@ Pure unit tests — no network calls, no Neo4j required.
 
 from __future__ import annotations
 
-import json
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -19,8 +17,6 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cve_enrichment import (
-    EPSS_TTL_SECONDS,
-    KEV_TTL_SECONDS,
     EnrichedCveEntry,
     _all_registry_cve_ids,
     _cache_age_seconds,
@@ -189,7 +185,7 @@ class TestFetchKev:
         _write_cache(tmp_cache_dir / "kev.json", fresh_cache)
 
         with patch("cve_enrichment.requests") as mock_requests:
-            result = fetch_kev(force=False)
+            _result = fetch_kev(force=False)
             mock_requests.get.assert_not_called()
 
 
@@ -293,5 +289,5 @@ class TestEpssBatch:
         with patch("cve_enrichment.requests") as mock_requests:
             mock_requests.get.return_value = mock_resp
             # All registry CVEs fit in one batch (< 100), so just one call
-            result = fetch_epss(force=True)
+            _result = fetch_epss(force=True)
             assert mock_requests.get.call_count >= 1

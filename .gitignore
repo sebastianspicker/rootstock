@@ -6,3 +6,11 @@ xcuserdata/
 DerivedData/
 .claude/
 __pycache__/
+.superpowers/
+.worktrees/
+
+# Real scan data (machine-specific, never commit)
+scan.json
+graph.json
+rootstock-viewer.html
+rootstock-report.md

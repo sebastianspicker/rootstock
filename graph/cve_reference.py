@@ -527,6 +527,8 @@ _CVE_2025_24201 = CveEntry(
     exploitation_status="actively_exploited",
     attack_complexity="high",
     cwe_ids=("CWE-787",),  # Out-of-bounds Write
+    affected_bundle_ids=("com.apple.Safari",),
+    max_affected_version="17.3.2",
 )
 
 _CVE_2023_32364 = CveEntry(
@@ -543,6 +545,7 @@ _CVE_2023_32364 = CveEntry(
     reference_url="https://support.apple.com/en-us/118695",
     exploitation_status="poc_available",
     cwe_ids=("CWE-22",),  # Path Traversal
+    affected_bundle_ids=("com.apple.Terminal",),
 )
 
 _CVE_2024_44301 = CveEntry(

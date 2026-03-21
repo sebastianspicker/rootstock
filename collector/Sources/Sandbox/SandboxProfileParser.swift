@@ -1,5 +1,4 @@
 import Foundation
-import Models
 
 /// Parses sandbox profile text (SBPL — Sandbox Profile Language) into
 /// structured rules grouped by category.

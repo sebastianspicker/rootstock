@@ -17,6 +17,82 @@ Rootstock is a graph-based attack path discovery tool for macOS security boundar
 - **Code signing** — hardened runtime, library validation, team identifiers
 - **Injection vectors** — per-app assessment of DYLD injection viability
 
+## Preview
+
+Rootstock discovers attack paths that span multiple macOS security boundaries. Below are examples from the [demo scan](examples/demo-scan.json) — synthetic data representing a typical corporate MacBook.
+
+### Injectable App to Full Disk Access
+
+The highest-impact finding: an app with DYLD injection vulnerabilities that also holds Full Disk Access.
+
+```mermaid
+graph LR
+    A["Attacker<br/>(local user)"] -->|DYLD_INSERT_LIBRARIES| B["iTerm2<br/>injectable, no lib validation"]
+    B -->|inherits TCC grant| C["Full Disk Access<br/>kTCCServiceSystemPolicyAllFiles"]
+    C -->|read/write| D["TCC.db<br/>system + user databases"]
+    C -->|read| E["Keychain metadata<br/>ACLs, trusted apps"]
+
+    style A fill:#e74c3c,color:#fff
+    style B fill:#e67e22,color:#fff
+    style C fill:#c0392b,color:#fff
+    style D fill:#8e44ad,color:#fff
+    style E fill:#8e44ad,color:#fff
+```
+
+### Electron TCC Inheritance
+
+Electron apps are injectable via `ELECTRON_RUN_AS_NODE`. If they hold TCC grants, those grants are inherited.
+
+```mermaid
+graph LR
+    A["Attacker"] -->|ELECTRON_RUN_AS_NODE| B["Slack<br/>Electron, injectable"]
+    B -->|inherits| C["Camera"]
+    B -->|inherits| D["Microphone"]
+    B -->|inherits| E["Screen Recording"]
+
+    style A fill:#e74c3c,color:#fff
+    style B fill:#e67e22,color:#fff
+    style C fill:#2ecc71,color:#fff
+    style D fill:#2ecc71,color:#fff
+    style E fill:#2ecc71,color:#fff
+```
+
+### Transitive FDA via Finder Automation
+
+An app with Apple Events automation permission to Finder can transitively access Finder's Full Disk Access.
+
+```mermaid
+graph LR
+    A["OmniGraffle<br/>injectable, Apple Events TCC"] -->|automates| B["Finder<br/>SIP-protected, implicit FDA"]
+    B -->|has| C["Full Disk Access"]
+
+    style A fill:#e67e22,color:#fff
+    style B fill:#3498db,color:#fff
+    style C fill:#c0392b,color:#fff
+```
+
+### Asset Tier Classification
+
+Rootstock classifies all assets into security tiers based on their privilege level and exposure.
+
+```mermaid
+pie title Asset Tier Distribution
+    "Tier 0 — Crown Jewels" : 3
+    "Tier 1 — High Value" : 4
+    "Tier 2 — Standard" : 5
+    "Tier 3 — Low Privilege" : 3
+```
+
+### Demo Outputs
+
+| Output | Description |
+|--------|-------------|
+| [`demo-scan.json`](examples/demo-scan.json) | Synthetic scan data (15 apps, 15 TCC grants, 5 XPC services) |
+| [`demo-report.md`](examples/demo-report.md) | Full attack path report with findings and Mermaid diagrams |
+| [`demo-viewer.html`](examples/demo-viewer.html) | Interactive graph viewer (download and open in browser) |
+
+> To regenerate demo outputs (requires Neo4j): `bash examples/regenerate.sh`
+
 ## Quick Start
 
 ### Requirements

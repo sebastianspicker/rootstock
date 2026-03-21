@@ -276,7 +276,7 @@ def cmd_run(
 
 # ── CLI Entry Point ───────────────────────────────────────────────────────────
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Rootstock Query Runner — execute Cypher queries against a Neo4j graph",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -315,27 +315,27 @@ examples:
 
     if not args.list and not args.run:
         parser.print_help()
-        sys.exit(0)
+        return 0
 
     queries = discover_queries()
     if not queries:
         print(f"No .cypher files found in {QUERIES_DIR}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     if args.list:
         cmd_list(queries, use_colour=not args.no_color)
         if not args.run:
-            sys.exit(0)
+            return 0
 
     if args.run:
         from neo4j_connection import connect
-        driver = connect(args.uri, args.username, args.password)
+        driver = connect(args.uri, args.neo4j_user, args.neo4j_password)
 
         params = _parse_params(args.param)
         exit_code = cmd_run(driver, queries, args.run, params, args.format)
         driver.close()
-        sys.exit(exit_code)
+        return exit_code
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -15,13 +15,28 @@ struct InjectionAssessment {
     static let disableLibraryValidationEntitlement = "com.apple.security.cs.disable-library-validation"
 
     /// Assess injection methods and effective library validation for the given app.
+    ///
+    /// SIP-protected apps cannot be injected — returns empty methods immediately.
     func assess(
         signingInfo: CodeSigningInfo,
         entitlements: [EntitlementInfo],
-        isElectron: Bool
+        isElectron: Bool,
+        isSipProtected: Bool = false
     ) -> InjectionAssessmentResult {
-        var methods: [InjectionMethod] = []
         let names = Set(entitlements.map(\.name))
+
+        // Library validation: CS_REQUIRE_LV flag OR
+        // (hardened runtime AND no disable-library-validation entitlement).
+        let hasDisableLV = names.contains(Self.disableLibraryValidationEntitlement)
+        let effectiveLV = signingInfo.libraryValidationFlag
+            || (signingInfo.hardenedRuntime && !hasDisableLV)
+
+        // SIP-protected apps are immune to all injection methods.
+        if isSipProtected {
+            return InjectionAssessmentResult(methods: [], effectiveLibraryValidation: effectiveLV)
+        }
+
+        var methods: [InjectionMethod] = []
 
         // DYLD_INSERT_LIBRARIES injection
         if !signingInfo.hardenedRuntime {
@@ -30,11 +45,6 @@ struct InjectionAssessment {
             methods.append(.dyldInsertViaEntitlement)
         }
 
-        // Library validation: CS_REQUIRE_LV flag OR
-        // (hardened runtime AND no disable-library-validation entitlement).
-        let hasDisableLV = names.contains(Self.disableLibraryValidationEntitlement)
-        let effectiveLV = signingInfo.libraryValidationFlag
-            || (signingInfo.hardenedRuntime && !hasDisableLV)
         if !effectiveLV {
             methods.append(.missingLibraryValidation)
         }

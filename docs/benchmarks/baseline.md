@@ -43,13 +43,31 @@ Generated with `scripts/benchmark.sh`.
 Total: 5.28s
 ```
 
+**Updated after gap features (Groups, RemoteAccess, Firewall):**
+
+```
+[TCC]          completed in 0.03s  (0 grants, 2 errors)
+[Entitlements] completed in 0.23s  (184 apps)
+[CodeSigning]  completed in 0.23s  (184 apps)
+[XPC]          completed in 5.23s  (440 services, 3 errors)
+[Persistence]  completed in 0.04s  (440 items, 4 errors)
+[Keychain]     completed in 0.10s  (234 items, 0 errors)
+[MDM]          completed in 0.07s  (1 profiles, 0 errors)
+[Groups]       completed in 0.13s  (8 groups, 0 errors)
+[RemoteAccess] completed in 0.02s  (2 services, 0 errors)
+[Firewall]     completed in 0.00s  (1 policies, 1 errors)
+Total: 5.23s
+```
+
+New modules add **0.15s combined** (~3% of total). No regression.
+
 ### Bottleneck Analysis
 
-The dominant cost is **XPC enumeration (4.83s)** — reading and parsing ~440 launchd plist
+The dominant cost is **XPC enumeration (~5s)** — reading and parsing ~440 launchd plist
 files from `/Library/LaunchAgents`, `/Library/LaunchDaemons`, and per-user equivalents.
 This is I/O-bound (disk reads + XML parsing). The `Security.framework` calls in
 Entitlements and CodeSigning are already parallelized (TaskGroup, max 8 concurrent) and
-together take only 0.36s for 184 apps.
+together take only ~0.46s for 184 apps.
 
 **Future optimization opportunity (TD-008):** XPC scanning can be parallelized using the
 same TaskGroup pattern applied to app entitlement scanning. Expected speedup: ~2–3x.

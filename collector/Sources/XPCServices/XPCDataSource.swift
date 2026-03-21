@@ -60,7 +60,8 @@ public struct XPCDataSource: DataSource {
             runAtLoad: entry.runAtLoad,
             keepAlive: entry.keepAlive,
             machServices: entry.machServices,
-            entitlements: entitlementKeys
+            entitlements: entitlementKeys,
+            hasClientVerification: entry.hasAuthorizedClients
         )
     }
 

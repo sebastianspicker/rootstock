@@ -23,17 +23,18 @@ def list_or_str(value: Any, none_placeholder: str = "—") -> str:
 def first_cypher_statement(cypher: str) -> str:
     """
     Extract the first executable Cypher statement from a multi-statement file.
-    Statements are delimited by semicolons. Comment-only content is skipped.
+    Strips comment lines first, then splits on semicolons.
     """
-    for stmt in cypher.split(";"):
+    non_comment_lines = [
+        line for line in cypher.splitlines()
+        if not line.strip().startswith("//")
+    ]
+    cleaned = "\n".join(non_comment_lines)
+    for stmt in cleaned.split(";"):
         stripped = stmt.strip()
-        non_comment = "\n".join(
-            line for line in stripped.splitlines()
-            if not line.strip().startswith("//")
-        ).strip()
-        if non_comment:
+        if stripped:
             return stripped
-    return cypher.strip()
+    return cleaned.strip()
 
 
 def run_query(session, cypher: str, params: dict | None = None) -> list[dict]:

@@ -148,15 +148,88 @@ final class CodeSigningTests: XCTestCase {
         XCTAssertFalse(apps[0].signed, "Unanalyzable app should have signed=false")
     }
 
+    // MARK: - Certificate chain tests
+
+    func testCertificateChainExtraction() throws {
+        // Safari.app is a platform binary — should be analyzable.
+        let safariPath = "/Applications/Safari.app"
+        guard FileManager.default.fileExists(atPath: safariPath) else {
+            throw XCTSkip("Safari.app not found — skipping cert chain test")
+        }
+        let info = analyzer.analyze(appPath: safariPath)
+        XCTAssertFalse(info.analysisError)
+        // Platform binaries may or may not have cert chains depending on OS version,
+        // but the extraction should not error.
+        if !info.certificateChain.isEmpty {
+            let leaf = info.certificateChain[0]
+            XCTAssertFalse(leaf.sha256.isEmpty, "Leaf cert should have a SHA-256 fingerprint")
+        }
+    }
+
+    func testCertificateChainForSignedThirdPartyApp() throws {
+        // Try iTerm2 or 1Password as third-party signed apps with full chains.
+        let candidates = ["/Applications/iTerm.app", "/Applications/1Password.app"]
+        var foundPath: String?
+        for path in candidates {
+            if FileManager.default.fileExists(atPath: path) {
+                foundPath = path
+                break
+            }
+        }
+        guard let appPath = foundPath else {
+            throw XCTSkip("No third-party signed app found for cert chain test")
+        }
+        let info = analyzer.analyze(appPath: appPath)
+        XCTAssertFalse(info.analysisError)
+        XCTAssertFalse(info.isAdhoc, "Third-party signed app should not be ad-hoc")
+        XCTAssertGreaterThanOrEqual(info.certificateChain.count, 1, "Should have at least a leaf cert")
+
+        let leaf = info.certificateChain[0]
+        XCTAssertNotNil(leaf.commonName, "Leaf cert should have a common name")
+        XCTAssertFalse(leaf.sha256.isEmpty, "Leaf cert should have a SHA-256 fingerprint")
+        XCTAssertEqual(leaf.sha256.count, 64, "SHA-256 should be 64 hex chars")
+    }
+
+    func testAdhocDetectionViaCodeFlags() {
+        // Ad-hoc is tested via the makeInfo helper since crafting real ad-hoc binaries in tests is impractical.
+        let info = makeInfo(signed: true, hardenedRuntime: false, lvFlag: false, isAdhoc: true)
+        XCTAssertTrue(info.isAdhoc, "Should detect ad-hoc flag")
+        XCTAssertTrue(info.certificateChain.isEmpty, "Ad-hoc signed apps have no cert chain")
+    }
+
+    func testCertificateDetailEncoding() throws {
+        let detail = CertificateDetail(
+            commonName: "Developer ID Application: Test",
+            organization: "Test Org",
+            sha256: "aabbccdd00112233445566778899aabbccddeeff00112233445566778899aabb",
+            validFrom: "2022-01-01T00:00:00Z",
+            validTo: "2027-01-01T00:00:00Z",
+            isRoot: false
+        )
+
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(detail)
+        let decoder = JSONDecoder()
+        let decoded = try decoder.decode(CertificateDetail.self, from: data)
+
+        XCTAssertEqual(decoded.commonName, detail.commonName)
+        XCTAssertEqual(decoded.organization, detail.organization)
+        XCTAssertEqual(decoded.sha256, detail.sha256)
+        XCTAssertEqual(decoded.validFrom, detail.validFrom)
+        XCTAssertEqual(decoded.validTo, detail.validTo)
+        XCTAssertEqual(decoded.isRoot, detail.isRoot)
+    }
+
     // MARK: - Helpers
 
     private func makeInfo(
-        signed: Bool, hardenedRuntime: Bool, lvFlag: Bool
+        signed: Bool, hardenedRuntime: Bool, lvFlag: Bool, isAdhoc: Bool = false,
+        certificateChain: [CertificateDetail] = []
     ) -> CodeSigningInfo {
         CodeSigningInfo(
             signed: signed, teamId: nil, signingIdentifier: nil,
             hardenedRuntime: hardenedRuntime, libraryValidationFlag: lvFlag,
-            analysisError: false
+            analysisError: false, isAdhoc: isAdhoc, certificateChain: certificateChain
         )
     }
 }

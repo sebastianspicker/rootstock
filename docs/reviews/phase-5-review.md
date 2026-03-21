@@ -14,7 +14,7 @@ All four sub-phases of Phase 5 are complete. Engineering quality (5.1–5.3) is 
 - Graph pipeline with tests: **5/5** (import, infer, queries, report, report_diagrams)
 - Integration test: **exists** (`tests/integration/test_full_pipeline.sh`)
 - CI: **configured** (`.github/workflows/test.yml` — Swift on macOS-14, pytest on Ubuntu, ruff lint)
-- Total tests: **100 Swift + 87 Python = 187 tests**
+- Total tests: **100 Swift + 140 Python = 240 tests**
 - Estimated line coverage: ~70–80% (strong model/parser coverage; real-system tests optional via graceful degradation)
 
 ## Results by Sub-Phase
@@ -30,11 +30,11 @@ All four sub-phases of Phase 5 are complete. Engineering quality (5.1–5.3) is 
 | JSON round-trip test | ✅ | `testRoundTripPreservesApplicationData`, `testRoundTripPreservesTCCGrant`, `testRoundTripPreservesElevationInfo`, `testRoundTripEmptyScanResult` |
 | Graph import tests + idempotency | ✅ | 39 import tests including `test_idempotency` for all node types |
 | Inference tests | ✅ | 11 tests: `test_can_inject_into_*`, `test_child_inherits_tcc_*`, `test_can_send_apple_event` |
-| Query syntax tests | ✅ | `test_all_queries_parse` validates all 23 .cypher files via EXPLAIN |
+| Query syntax tests | ✅ | `test_all_queries_parse` validates all 76 .cypher files via EXPLAIN |
 | Integration test (pipeline) | ✅ | `test_full_pipeline.sh`: import → infer → query, with cleanup |
 | No test uses real TCC.db | ✅ | All TCC tests use synthetic fixture databases in `/tmp/` |
 | CI configuration | ✅ | `.github/workflows/test.yml` with 3 jobs: swift-tests, python-tests, python-lint |
-| Test pass rate 100% | ✅ | 100/100 Swift, Python tests pass (Neo4j-dependent tests auto-skip in CI) |
+| Test pass rate 100% | ✅ | 100/100 Swift, 140/140 Python tests pass (Neo4j-dependent tests auto-skip in CI) |
 
 **Note:** Some tests (CodeSigning, Keychain, Persistence) _do_ touch real system state (Safari.app, Terminal.app, real keychain) but degrade gracefully when those targets are missing. This is a pragmatic choice — the core assertion logic uses fixtures, while the real-system tests act as integration-level smoke tests.
 
@@ -97,19 +97,26 @@ All four sub-phases of Phase 5 are complete. Engineering quality (5.1–5.3) is 
 
 2. **Single macOS version tested.** All live testing was on macOS 26.3 Tahoe. macOS 14 Sonoma and 15 Sequoia compatibility is validated only via fixture databases. This is documented and acceptable for a research project, but a CI matrix with multiple macOS versions would increase confidence.
 
-3. **Tech debt TD-006** (SIP-protected apps reporting false injection positives for Terminal.app/Safari.app) is still open. This could affect academic claims about injection surface area. Recommend fixing before paper submission.
+3. ~~**Tech debt TD-006** (SIP-protected apps reporting false injection positives for Terminal.app/Safari.app) is still open.~~ **Resolved** — `is_sip_protected` check added in CodeSigningAnalyzer; `infer_injection.py` excludes SIP-protected targets from `CAN_INJECT_INTO` edges.
 
 4. **Paper [DATA] markers** in `paper-skeleton.md` require multi-system evaluation scans to fill in. This is expected — the skeleton is ready for writing once evaluation data is collected.
 
+### Resolved Deferred Issues (BloodHound Parity Assessment)
+
+Four code quality issues identified during the BloodHound feature comparison deep inspection were resolved:
+
+1. **P2-4 test cleanup** — `conftest.py` now uses orphan-based scoping to avoid fixture leakage across test sessions.
+2. **chr() obfuscation** — `report_diagrams.py` replaced `chr(34)`/`chr(39)` with readable string literals.
+3. **Redundant .map() spread** — `viewer.py` removed unnecessary `.map()` + spread pattern.
+4. **Keychain edge directionality** — `infer_keychain_groups.py` now documents the bidirectional convention for `SHARES_KEYCHAIN_GROUP` edges.
+
 ## Recommendations
 
-1. **Fix TD-006** (SIP false positives) before paper submission — add `is_sip_protected` check for `/System/` apps to suppress false DYLD injection positives.
+1. **Consider a CI macOS matrix** (macOS-14 + macOS-15 runners) for cross-version regression testing.
 
-2. **Consider a CI macOS matrix** (macOS-14 + macOS-15 runners) for cross-version regression testing.
+2. **Collect evaluation data** from multiple macOS systems (different versions, enterprise vs. personal) to fill in [DATA] markers in the paper skeleton.
 
-3. **Collect evaluation data** from multiple macOS systems (different versions, enterprise vs. personal) to fill in [DATA] markers in the paper skeleton.
-
-4. **Submit to OBTS first** — the audience is perfectly aligned for a BloodHound-for-macOS tool presentation.
+3. **Submit to OBTS first** — the audience is perfectly aligned for a BloodHound-for-macOS tool presentation.
 
 ## Meilenstein M5 Status
 
@@ -117,11 +124,11 @@ All four sub-phases of Phase 5 are complete. Engineering quality (5.1–5.3) is 
 
 | Criterion | Status |
 |---|---|
-| Tests pass | ✅ yes — 100/100 Swift, 87 Python |
+| Tests pass | ✅ yes — 100/100 Swift, 140/140 Python |
 | Multi-version tested | ✅ yes (Tahoe live + Sonoma/Sequoia via fixtures, documented) |
 | Performance documented | ✅ yes — 5.64s average, 45 MB peak, benchmarks in `docs/benchmarks/` |
 | Academic paper skeleton exists | ✅ yes — 7 sections, 21 references, target venues |
 | Threat model exists | ✅ yes — `docs/THREAT_MODEL.md` with assumptions, limitations, BloodHound comparison |
 | README enables first-time use | ✅ yes — Quick Start tested and working, badges, BibTeX entry |
 
-**Phase 5 is complete.** The project is publication-ready pending evaluation data collection and TD-006 fix.
+**Phase 5 is complete.** The project is publication-ready pending evaluation data collection.

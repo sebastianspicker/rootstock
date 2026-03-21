@@ -72,14 +72,46 @@ public struct PersistenceDataSource: DataSource {
     }
 
     private func launchItemFrom(_ entry: LaunchdPlistParser.ParsedEntry, type: LaunchItem.ItemType) -> LaunchItem {
-        LaunchItem(
+        let plistOwnership = fileOwnership(at: entry.plistPath)
+        let programOwnership = entry.program.map { fileOwnership(at: $0) }
+
+        return LaunchItem(
             label: entry.label,
             path: entry.plistPath,
             type: type,
             program: entry.program,
             runAtLoad: entry.runAtLoad,
-            user: entry.user
+            user: entry.user,
+            plistOwner: plistOwnership.owner,
+            programOwner: programOwnership?.owner,
+            plistWritableByNonRoot: plistOwnership.writableByNonRoot,
+            programWritableByNonRoot: programOwnership?.writableByNonRoot ?? false
         )
+    }
+
+    // MARK: - File ownership
+
+    private struct FileOwnership {
+        let owner: String?
+        let writableByNonRoot: Bool
+    }
+
+    private static let rootEquivalentGroups: Set<String> = ["wheel", "admin", "daemon"]
+
+    private func fileOwnership(at path: String) -> FileOwnership {
+        let fm = FileManager.default
+        guard let attrs = try? fm.attributesOfItem(atPath: path) else {
+            return FileOwnership(owner: nil, writableByNonRoot: false)
+        }
+        let owner = attrs[.ownerAccountName] as? String
+        let group = attrs[.groupOwnerAccountName] as? String
+        let posix = (attrs[.posixPermissions] as? Int) ?? 0
+        // Other-writable (0o002) is always non-root writable.
+        // Group-writable (0o020) only counts if the group is not root-equivalent.
+        let otherWritable = (posix & 0o002) != 0
+        let groupWritable = (posix & 0o020) != 0
+            && !Self.rootEquivalentGroups.contains(group ?? "wheel")
+        return FileOwnership(owner: owner, writableByNonRoot: otherWritable || groupWritable)
     }
 
     // MARK: - Login Items (BTM)
@@ -89,24 +121,89 @@ public struct PersistenceDataSource: DataSource {
             + "/Library/Application Support/com.apple.backgroundtaskmanagementagent/backgrounditems.btm"
 
         let fm = FileManager.default
-        guard fm.fileExists(atPath: btmPath) else { return ([], []) }
+        guard fm.fileExists(atPath: btmPath) else {
+            // No BTM file — try sfltool fallback (Sequoia+)
+            return collectLoginItemsViaSfltool()
+        }
         guard let data = fm.contents(atPath: btmPath) else {
-            return ([], ["Cannot read BTM file: \(btmPath)"])
+            return collectLoginItemsViaSfltool()
         }
 
         // BTM is a binary plist on older macOS; attempt plist deserialization
-        var format = PropertyListSerialization.PropertyListFormat.xml
-        guard let plist = try? PropertyListSerialization.propertyList(
-            from: data, options: [], format: &format
-        ) as? [String: Any] else {
-            // BTM format on newer macOS is a custom binary — not parseable as plist
-            return ([], ["BTM file format not parseable as plist (newer macOS): \(btmPath)"])
+        guard let plist = Shell.parsePlistDict(from: data) else {
+            // BTM format on newer macOS is a custom binary — fall back to sfltool
+            let (sfltoolItems, sfltoolErrors) = collectLoginItemsViaSfltool()
+            if sfltoolItems.isEmpty {
+                return ([], ["BTM file format not parseable as plist (newer macOS): \(btmPath)"] + sfltoolErrors)
+            }
+            return (sfltoolItems, sfltoolErrors)
         }
 
         // Extract login items from whatever structure we find
         var items: [LaunchItem] = []
         extractLoginItemsFromPlist(plist, path: btmPath, into: &items)
         return (items, [])
+    }
+
+    private func collectLoginItemsViaSfltool() -> ([LaunchItem], [String]) {
+        guard let output = Shell.run("/usr/bin/sfltool", ["dumpbtm"]) else {
+            return ([], [])
+        }
+        return (Self.parseSfltoolOutput(output), [])
+    }
+
+    /// Parse `sfltool dumpbtm` output to extract login items.
+    /// Format is semi-structured text with entries like:
+    ///   Type: login item
+    ///   Name: AppName
+    ///   Identifier: com.example.app
+    ///   URL: file:///Applications/App.app
+    ///   Developer: TeamID
+    internal static func parseSfltoolOutput(_ output: String) -> [LaunchItem] {
+        var items: [LaunchItem] = []
+        var currentIdentifier: String?
+        var currentURL: String?
+        var currentType: String?
+
+        let flushItem = { () -> Void in
+            guard let identifier = currentIdentifier else { return }
+            let path = currentURL.flatMap { urlString -> String? in
+                guard urlString.hasPrefix("file://") else { return urlString }
+                return URL(string: urlString)?.path
+            }
+            guard let resolvedPath = path else { return }  // skip entries with no parseable path
+            items.append(LaunchItem(
+                label: identifier,
+                path: resolvedPath,
+                type: currentType == "login item" ? .loginItem : .agent,
+                program: resolvedPath,
+                runAtLoad: true,
+                user: nil
+            ))
+        }
+
+        for line in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.isEmpty || trimmed.hasPrefix("===") || trimmed.hasPrefix("---") {
+                flushItem()
+                currentIdentifier = nil
+                currentURL = nil
+                currentType = nil
+                continue
+            }
+
+            if let range = trimmed.range(of: "Identifier:") {
+                currentIdentifier = String(trimmed[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            } else if let range = trimmed.range(of: "URL:") {
+                currentURL = String(trimmed[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            } else if let range = trimmed.range(of: "Type:") {
+                currentType = String(trimmed[range.upperBound...]).trimmingCharacters(in: .whitespaces).lowercased()
+            }
+        }
+
+        flushItem()
+        return items
     }
 
     private func extractLoginItemsFromPlist(

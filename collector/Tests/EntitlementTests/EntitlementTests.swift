@@ -59,6 +59,21 @@ final class EntitlementTests: XCTestCase {
         XCTAssertEqual(result.first?.category, "keychain")
     }
 
+    func testClassifyICloudEntitlements() {
+        let keys = [
+            "com.apple.developer.icloud-container-identifiers",
+            "com.apple.developer.icloud-container-environment",
+            "com.apple.developer.ubiquity-container-identifiers",
+            "com.apple.developer.ubiquity-kvstore-identifier",
+            "com.apple.developer.cloudkit-container",
+        ]
+        for key in keys {
+            let result = classifier.classify([key: true])
+            XCTAssertEqual(result.first?.category, "icloud", "\(key) should be icloud")
+            XCTAssertFalse(result.first?.isSecurityCritical == true, "\(key) should not be security critical")
+        }
+    }
+
     func testClassifyOtherEntitlement() {
         let result = classifier.classify(["com.apple.developer.something": true])
         XCTAssertEqual(result.first?.category, "other")

@@ -172,22 +172,40 @@ def format_executive_summary(
 
 # ── Vulnerability & ATT&CK Summary ──────────────────────────────────────────
 
+
+def _exploitation_icon(status: str) -> str:
+    """Return a visual indicator for exploitation status in the CVE table."""
+    if status == "actively_exploited":
+        return "!!!"
+    if status == "poc_available":
+        return "!!"
+    return ""
+
 def format_vulnerability_summary(contexts: list) -> str:
     """
     Render CVE reference and ATT&CK technique tables from a list of AttackContext objects.
 
     Only includes CVEs and techniques that are relevant to the scanned host's active
     finding categories. Deduplicates across categories.
+
+    When live enrichment data (EPSS + CISA KEV) is available, includes EPSS score
+    and KEV status columns and sorts by EPSS descending (more actionable than CVSS).
     """
     from cve_reference import AttackContext  # deferred to avoid circular import
 
     if not contexts:
         return "_No CVE or ATT&CK references applicable to findings on this host._"
 
-    # ── CVE table (deduplicated, sorted by CVSS descending) ──────────────
+    # Try to load enrichment data (graceful if unavailable)
+    enriched_map: dict = {}
+    try:
+        from cve_enrichment import enrich_registry
+        enriched_map = enrich_registry()
+    except Exception:
+        pass
+
+    # ── CVE table (deduplicated, sorted by EPSS desc then CVSS desc) ─────
     seen_cves: set[str] = set()
-    cve_rows: list[list[str]] = []
-    # Collect priority per CVE from whichever context references it
     cve_priority: dict[str, str] = {}
     for ctx in contexts:
         assert isinstance(ctx, AttackContext)
@@ -202,14 +220,29 @@ def format_vulnerability_summary(contexts: list) -> str:
                 seen_cves.add(cve.cve_id)
                 all_cves.append(cve)
 
-    all_cves.sort(key=lambda c: c.cvss_score, reverse=True)
+    # Sort by EPSS descending (when available), then CVSS descending
+    def _sort_key(cve):
+        enriched = enriched_map.get(cve.cve_id)
+        epss = getattr(enriched, "epss_score", None) if enriched else None
+        return (epss if epss is not None else -1, cve.cvss_score)
+
+    all_cves.sort(key=_sort_key, reverse=True)
+
+    has_enrichment = bool(enriched_map)
+    cve_rows: list[list[str]] = []
 
     for cve in all_cves:
+        enriched = enriched_map.get(cve.cve_id)
+        epss_str = f"{enriched.epss_score:.2f}" if enriched and enriched.epss_score is not None else "—"
+        kev_str = "KEV" if enriched and enriched.in_kev else ""
+
         cve_rows.append([
             cve.cve_id,
             str(cve.cvss_score),
+            epss_str,
+            kev_str,
+            _exploitation_icon(getattr(cve, "exploitation_status", "theoretical")),
             cve.title,
-            cve.affected_versions,
             cve.patched_version or "—",
             cve_priority.get(cve.cve_id, "—"),
         ])
@@ -217,7 +250,7 @@ def format_vulnerability_summary(contexts: list) -> str:
     parts: list[str] = []
 
     if cve_rows:
-        cve_headers = ["CVE ID", "CVSS", "Title", "Affected", "Patched", "Priority"]
+        cve_headers = ["CVE ID", "CVSS", "EPSS", "KEV", "Exploited", "Title", "Patched", "Priority"]
         parts.append("### CVE Reference")
         parts.append(tabulate(cve_rows, headers=cve_headers, tablefmt="github"))
         parts.append("")

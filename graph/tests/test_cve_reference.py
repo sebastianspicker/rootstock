@@ -23,8 +23,10 @@ from cve_reference import (
     get_context,
     get_contexts_for_query,
     _REGISTRY,
+    _VALID_EXPLOITATION_STATUSES,
+    _VALID_ATTACK_COMPLEXITIES,
 )
-from report_formatters import format_vulnerability_summary
+from report_formatters import format_vulnerability_summary, _exploitation_icon
 
 
 _CVE_ID_RE = re.compile(r"^CVE-\d{4}-\d+$")
@@ -191,3 +193,113 @@ class TestFormatVulnerabilitySummary:
         assert "Technique" in result
         # Check pipe-delimited table format (github tablefmt)
         assert "|" in result
+
+
+# ── Exploitation Status ──────────────────────────────────────────────────────
+
+class TestExploitationStatus:
+    def test_all_statuses_are_valid(self):
+        """Every CVE in the registry has a valid exploitation_status."""
+        bad = []
+        for ctx in _REGISTRY.values():
+            for cve in ctx.cves:
+                status = getattr(cve, "exploitation_status", "theoretical")
+                if status not in _VALID_EXPLOITATION_STATUSES:
+                    bad.append(f"{cve.cve_id}: {status}")
+        assert not bad, f"Invalid exploitation statuses: {bad}"
+
+    def test_all_complexities_are_valid(self):
+        """Every CVE in the registry has a valid attack_complexity."""
+        bad = []
+        for ctx in _REGISTRY.values():
+            for cve in ctx.cves:
+                complexity = getattr(cve, "attack_complexity", "medium")
+                if complexity not in _VALID_ATTACK_COMPLEXITIES:
+                    bad.append(f"{cve.cve_id}: {complexity}")
+        assert not bad, f"Invalid attack complexities: {bad}"
+
+    def test_at_least_three_actively_exploited(self):
+        """Registry should contain at least 3 actively exploited CVEs."""
+        exploited = set()
+        for ctx in _REGISTRY.values():
+            for cve in ctx.cves:
+                if getattr(cve, "exploitation_status", "theoretical") == "actively_exploited":
+                    exploited.add(cve.cve_id)
+        assert len(exploited) >= 3, f"Only {len(exploited)} actively exploited CVEs: {exploited}"
+
+    def test_exploitation_icon_values(self):
+        assert _exploitation_icon("actively_exploited") == "!!!"
+        assert _exploitation_icon("poc_available") == "!!"
+        assert _exploitation_icon("theoretical") == ""
+        assert _exploitation_icon("unknown") == ""
+
+
+# ── New Categories ───────────────────────────────────────────────────────────
+
+_NEW_CATEGORIES = [
+    "certificate_hygiene",
+    "shell_hooks",
+    "file_acl_escalation",
+    "esf_bypass",
+    "sandbox_escape",
+    "mdm_risk",
+    "lateral_movement",
+    "running_processes",
+    "auth_plugin_risk",
+    "blastpass_class",
+    "firewall_exposure",
+]
+
+
+class TestNewCategories:
+    @pytest.mark.parametrize("category", _NEW_CATEGORIES)
+    def test_new_category_exists(self, category: str):
+        ctx = get_context(category)
+        assert ctx is not None, f"Category {category!r} not in registry"
+        assert ctx.category == category
+        assert len(ctx.techniques) >= 1
+
+    def test_registry_has_at_least_23_categories(self):
+        assert len(_REGISTRY) >= 23, f"Only {len(_REGISTRY)} categories in registry"
+
+
+# ── Expanded Coverage ────────────────────────────────────────────────────────
+
+class TestExpandedCoverage:
+    def test_cve_count_at_least_30(self):
+        cves = get_all_critical_cves(min_cvss=0.0)
+        assert len(cves) >= 30, f"Only {len(cves)} CVEs in registry"
+
+    def test_formatter_shows_exploited_column(self):
+        ctx = get_context("kernel_escalation")
+        assert ctx is not None
+        result = format_vulnerability_summary([ctx])
+        assert "Exploited" in result
+
+    def test_actively_exploited_shows_triple_bang(self):
+        ctx = get_context("kernel_escalation")
+        assert ctx is not None
+        result = format_vulnerability_summary([ctx])
+        assert "!!!" in result
+
+    def test_poc_available_shows_double_bang(self):
+        ctx = get_context("file_acl_escalation")
+        assert ctx is not None
+        result = format_vulnerability_summary([ctx])
+        assert "!!" in result
+
+    def test_new_cves_reachable_via_get_all_critical(self):
+        """New high-CVSS CVEs should appear in the critical list."""
+        cves = get_all_critical_cves(min_cvss=8.0)
+        cve_ids = {c.cve_id for c in cves}
+        # BLASTPASS and Operation Triangulation entries should be present
+        assert "CVE-2023-38606" in cve_ids
+        assert "CVE-2025-24201" in cve_ids
+
+    def test_technique_count_at_least_25(self):
+        """Registry should reference at least 25 unique techniques."""
+        techniques = set()
+        for ctx in _REGISTRY.values():
+            for tech in ctx.techniques:
+                techniques.add(tech.technique_id)
+        assert len(techniques) >= 25, f"Only {len(techniques)} unique techniques"

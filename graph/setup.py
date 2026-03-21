@@ -66,7 +66,7 @@ def count_indexes(session) -> int:
     return len(result.data())
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Initialize Rootstock Neo4j schema")
     parser.add_argument("--uri", default="bolt://localhost:7687")
     parser.add_argument("--user", default="neo4j")
@@ -79,10 +79,10 @@ def main():
         driver.verify_connectivity()
     except ServiceUnavailable:
         print(f"ERROR: Cannot connect to Neo4j at {args.uri}. Is it running?", file=sys.stderr)
-        sys.exit(1)
+        return 1
     except AuthError:
         print("ERROR: Authentication failed. Check --user / --password.", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     with driver.session() as session:
         print("Applying schema constraints and indexes...")
@@ -100,7 +100,8 @@ def main():
         f"Schema initialized with {n_constraints} constraints, "
         f"{n_indexes} indexes, {n_tcc} TCC services"
     )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

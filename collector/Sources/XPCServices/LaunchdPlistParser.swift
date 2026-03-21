@@ -13,6 +13,7 @@ public struct LaunchdPlistParser {
         public let runAtLoad: Bool
         public let keepAlive: Bool
         public let machServices: [String]
+        public let hasAuthorizedClients: Bool
     }
 
     public init() {}
@@ -46,6 +47,14 @@ public struct LaunchdPlistParser {
             machServices = []
         }
 
+        // SMAuthorizedClients is an array of code signing requirement strings
+        let hasAuthorizedClients: Bool
+        if let clients = plist["SMAuthorizedClients"] as? [String] {
+            hasAuthorizedClients = !clients.isEmpty
+        } else {
+            hasAuthorizedClients = false
+        }
+
         return ParsedEntry(
             label: label,
             plistPath: path,
@@ -53,7 +62,8 @@ public struct LaunchdPlistParser {
             user: plist["UserName"] as? String,
             runAtLoad: plist["RunAtLoad"] as? Bool ?? false,
             keepAlive: resolveKeepAlive(plist["KeepAlive"]),
-            machServices: machServices
+            machServices: machServices,
+            hasAuthorizedClients: hasAuthorizedClients
         )
     }
 

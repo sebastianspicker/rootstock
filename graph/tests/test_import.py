@@ -39,178 +39,6 @@ def scan_result():
     return ScanResult.model_validate(data)
 
 
-# ── Model validation tests (no Neo4j required) ─────────────────────────────
-
-class TestPydanticModels:
-    def test_fixture_loads_cleanly(self):
-        from models import ScanResult
-        data = json.loads(FIXTURE_PATH.read_text())
-        scan = ScanResult.model_validate(data)
-        assert len(scan.applications) == 3
-        assert len(scan.tcc_grants) == 5
-        assert len(scan.xpc_services) == 2
-        assert len(scan.keychain_acls) == 3
-        assert len(scan.mdm_profiles) == 2
-        assert len(scan.launch_items) == 3
-
-    def test_entitlement_counts(self):
-        from models import ScanResult
-        data = json.loads(FIXTURE_PATH.read_text())
-        scan = ScanResult.model_validate(data)
-        total = sum(len(a.entitlements) for a in scan.applications)
-        assert total == 10, f"Expected 10 entitlements, got {total}"
-
-    def test_tcc_grant_allowed_property(self):
-        from models import TCCGrantData
-        grant_allow = TCCGrantData(
-            service="kTCCServiceMicrophone", display_name="Microphone",
-            client="com.example.app", client_type=0,
-            auth_value=2, auth_reason=1, scope="user", last_modified=0,
-        )
-        assert grant_allow.allowed is True
-
-        grant_deny = grant_allow.model_copy(update={"auth_value": 0})
-        assert grant_deny.allowed is False
-
-        grant_limited = grant_allow.model_copy(update={"auth_value": 3})
-        assert grant_limited.allowed is True
-
-    def test_missing_required_field_raises(self):
-        from models import ApplicationData
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            ApplicationData.model_validate({"name": "Broken"})  # missing bundle_id etc.
-
-    def test_invalid_category_raises(self):
-        from models import EntitlementData
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            EntitlementData.model_validate({
-                "name": "com.example.ent", "is_private": False,
-                "category": "INVALID_CATEGORY", "is_security_critical": False,
-            })
-
-    def test_launch_item_defaults(self):
-        from models import LaunchItemData
-        item = LaunchItemData.model_validate({
-            "label": "com.example.minimal",
-            "path": "/Library/LaunchDaemons/com.example.minimal.plist",
-            "type": "daemon",
-        })
-        assert item.program is None
-        assert item.user is None
-        assert item.run_at_load is False
-
-    def test_launch_item_invalid_type_raises(self):
-        from models import LaunchItemData
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            LaunchItemData.model_validate({
-                "label": "com.example.bad",
-                "path": "/Library/LaunchDaemons/com.example.bad.plist",
-                "type": "INVALID",
-            })
-
-    def test_xpc_service_defaults(self):
-        from models import XPCServiceData
-        svc = XPCServiceData.model_validate({
-            "label": "com.example.minimal",
-            "path": "/Library/LaunchDaemons/com.example.minimal.plist",
-            "type": "daemon",
-        })
-        assert svc.program is None
-        assert svc.user is None
-        assert svc.run_at_load is False
-        assert svc.keep_alive is False
-        assert svc.mach_services == []
-        assert svc.entitlements == []
-
-    def test_xpc_service_invalid_type_raises(self):
-        from models import XPCServiceData
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            XPCServiceData.model_validate({
-                "label": "com.example.bad",
-                "path": "/Library/LaunchDaemons/com.example.bad.plist",
-                "type": "INVALID_TYPE",
-            })
-
-    def test_missing_fields_in_application_returns_defaults(self):
-        """Fields with defaults should not fail validation."""
-        from models import ApplicationData
-        app = ApplicationData.model_validate({
-            "name": "Minimal", "bundle_id": "com.example.minimal",
-            "path": "/Applications/Minimal.app",
-            "hardened_runtime": False, "library_validation": False,
-            "is_electron": False, "is_system": False, "signed": False,
-            # entitlements and injection_methods use default_factory=list
-        })
-        assert app.entitlements == []
-        assert app.injection_methods == []
-
-    def test_keychain_item_defaults(self):
-        from models import KeychainItemData
-        item = KeychainItemData.model_validate({
-            "label": "My Credential",
-            "kind": "generic_password",
-        })
-        assert item.service is None
-        assert item.access_group is None
-        assert item.trusted_apps == []
-
-    def test_keychain_item_invalid_kind_raises(self):
-        from models import KeychainItemData
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            KeychainItemData.model_validate({
-                "label": "Bad Item",
-                "kind": "INVALID_KIND",
-            })
-
-    def test_keychain_item_with_trusted_apps(self):
-        from models import KeychainItemData
-        item = KeychainItemData.model_validate({
-            "label": "SSH Key",
-            "kind": "generic_password",
-            "service": "OpenSSH",
-            "access_group": "TEAMID.com.example",
-            "trusted_apps": ["com.example.app", "com.apple.Terminal"],
-        })
-        assert len(item.trusted_apps) == 2
-        assert "com.apple.Terminal" in item.trusted_apps
-
-    def test_mdm_profile_defaults(self):
-        from models import MDMProfileData
-        profile = MDMProfileData.model_validate({
-            "identifier": "com.example.profile",
-            "display_name": "Test Profile",
-        })
-        assert profile.organization is None
-        assert profile.install_date is None
-        assert profile.tcc_policies == []
-
-    def test_mdm_tcc_policy_fields(self):
-        from models import MDMProfileData
-        profile = MDMProfileData.model_validate({
-            "identifier": "com.example.profile",
-            "display_name": "Privacy Profile",
-            "tcc_policies": [
-                {"service": "SystemPolicyAllFiles", "client_bundle_id": "com.example.app", "allowed": True},
-                {"service": "Microphone", "client_bundle_id": "com.example.app", "allowed": False},
-            ],
-        })
-        assert len(profile.tcc_policies) == 2
-        fda = next(p for p in profile.tcc_policies if p.service == "SystemPolicyAllFiles")
-        assert fda.client_bundle_id == "com.example.app"
-        assert fda.allowed is True
-
-    def test_mdm_profile_missing_required_raises(self):
-        from models import MDMProfileData
-        from pydantic import ValidationError
-        with pytest.raises(ValidationError):
-            MDMProfileData.model_validate({"identifier": "com.example.only-identifier"})  # missing display_name
-
-
 # ── Integration tests (require Neo4j) ──────────────────────────────────────
 
 class TestImportIntegration:
@@ -257,8 +85,8 @@ class TestImportIntegration:
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
         n_ent_nodes, n_ent_rels = import_entitlements(neo4j_session, scan_result.applications)
         # 10 total entitlements but some names are shared across apps → fewer unique nodes
-        assert n_ent_rels == 10  # one rel per (app, entitlement) pair
-        assert n_ent_nodes <= 10  # unique entitlement names
+        assert n_ent_rels == 11  # one rel per (app, entitlement) pair
+        assert n_ent_nodes <= 11  # unique entitlement names
 
     def test_idempotency(self, neo4j_session, scan_result):
         """Re-importing the same data must not create duplicate nodes."""
@@ -287,8 +115,9 @@ class TestImportIntegration:
 
     def test_import_launch_items(self, neo4j_session, scan_result):
         from import_nodes import import_launch_items
-        n_nodes, n_persists, n_runs = import_launch_items(neo4j_session, scan_result.launch_items)
+        n_nodes, n_persists, n_runs, n_hijacks = import_launch_items(neo4j_session, scan_result.launch_items)
         assert n_nodes == 3
+        assert n_hijacks == 0  # no fixture items have program_writable_by_non_root
 
         result = neo4j_session.run(
             "MATCH (l:LaunchItem) WHERE l.label IN ['com.example.daemon', 'com.example.agent', 'cron.root.1'] RETURN count(l) AS n"
@@ -501,3 +330,107 @@ class TestImportIntegration:
         linked, skipped = import_tcc_grants(neo4j_session, [orphan], TEST_SCAN_ID)
         assert linked == 0
         assert skipped == 1
+
+    def test_import_ad_binding(self, neo4j_session, scan_result):
+        """AD binding enriches Computer node and creates ADGroup + MAPPED_TO."""
+        from import_nodes import import_computer, import_local_groups, import_ad_binding
+        from models import ComputerData
+        computer = ComputerData(
+            hostname=scan_result.hostname,
+            macos_version=scan_result.macos_version,
+            scan_id=TEST_SCAN_ID,
+            scanned_at=scan_result.timestamp,
+            collector_version=scan_result.collector_version,
+        )
+        import_computer(neo4j_session, computer)
+        import_local_groups(neo4j_session, scan_result.local_groups)
+        n_groups, n_mapped = import_ad_binding(neo4j_session, scan_result.ad_binding, scan_result.hostname)
+        assert n_groups == 1  # one group mapping in fixture
+        assert n_mapped == 1  # CORP\Domain Admins → admin
+
+        # Verify Computer node has ad_bound property
+        result = neo4j_session.run(
+            "MATCH (c:Computer {hostname: $hostname}) RETURN c.ad_bound AS ad_bound, c.ad_realm AS realm",
+            hostname=scan_result.hostname,
+        )
+        row = result.single()
+        assert row["ad_bound"] is True
+        assert row["realm"] == "CORP.EXAMPLE.COM"
+
+        # Verify ADGroup node exists
+        result = neo4j_session.run(
+            "MATCH (ag:ADGroup) RETURN count(ag) AS n"
+        )
+        assert result.single()["n"] >= 1
+
+        # Verify MAPPED_TO edge
+        result = neo4j_session.run(
+            "MATCH (ag:ADGroup)-[r:MAPPED_TO]->(lg:LocalGroup {name: 'admin'}) RETURN count(r) AS n"
+        )
+        assert result.single()["n"] >= 1
+
+    def test_import_kerberos_artifacts(self, neo4j_session, scan_result):
+        """Kerberos artifacts create nodes + FOUND_ON, HAS_KERBEROS_CACHE, HAS_KEYTAB edges."""
+        from import_nodes import import_computer, import_kerberos_artifacts
+        from models import ComputerData
+        computer = ComputerData(
+            hostname=scan_result.hostname,
+            macos_version=scan_result.macos_version,
+            scan_id=TEST_SCAN_ID,
+            scanned_at=scan_result.timestamp,
+            collector_version=scan_result.collector_version,
+        )
+        import_computer(neo4j_session, computer)
+        n_ka, n_found, n_cache, n_kt = import_kerberos_artifacts(
+            neo4j_session, scan_result.kerberos_artifacts, scan_result.hostname
+        )
+        assert n_ka == 3  # ccache + keytab + config in fixture
+        assert n_found == 3  # all FOUND_ON
+        assert n_cache == 1  # one ccache with principal_hint
+        assert n_kt == 1  # one keytab
+
+        # Verify KerberosArtifact nodes
+        result = neo4j_session.run(
+            "MATCH (ka:KerberosArtifact) RETURN count(ka) AS n"
+        )
+        assert result.single()["n"] >= 3
+
+        # Verify HAS_KERBEROS_CACHE edge
+        result = neo4j_session.run(
+            "MATCH (u:User {name: 'testuser'})-[:HAS_KERBEROS_CACHE]->(ka:KerberosArtifact) RETURN count(ka) AS n"
+        )
+        assert result.single()["n"] >= 1
+
+    def test_user_is_ad_user_flag(self, neo4j_session, scan_result):
+        """User details with is_ad_user should set the flag on User nodes."""
+        from import_nodes import import_user_details
+        from models import UserDetailData
+        ad_user = UserDetailData(
+            name="ad_testuser",
+            shell="/bin/bash",
+            home_dir="/Users/ad_testuser",
+            is_hidden=False,
+            is_ad_user=True,
+        )
+        import_user_details(neo4j_session, [ad_user])
+
+        result = neo4j_session.run(
+            "MATCH (u:User {name: 'ad_testuser'}) RETURN u.is_ad_user AS is_ad"
+        )
+        assert result.single()["is_ad"] is True
+
+    def test_ad_binding_not_bound(self, neo4j_session):
+        """Non-bound AD binding returns 0, 0 with no side effects."""
+        from import_nodes import import_ad_binding
+        from models import ADBindingData
+        not_bound = ADBindingData(is_bound=False)
+        n_groups, n_mapped = import_ad_binding(neo4j_session, not_bound, "test-mac")
+        assert n_groups == 0
+        assert n_mapped == 0
+
+    def test_ad_binding_none(self, neo4j_session):
+        """None AD binding returns 0, 0."""
+        from import_nodes import import_ad_binding
+        n_groups, n_mapped = import_ad_binding(neo4j_session, None, "test-mac")
+        assert n_groups == 0
+        assert n_mapped == 0

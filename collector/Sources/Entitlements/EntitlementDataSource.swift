@@ -56,7 +56,15 @@ public struct EntitlementDataSource: DataSource {
             }
         }
 
-        return DataSourceResult(nodes: applications, errors: [])
+        var errors: [CollectionError] = []
+        if !applications.isEmpty && applications.allSatisfy({ $0.entitlements.isEmpty }) {
+            errors.append(CollectionError(
+                source: name,
+                message: "All \(applications.count) apps returned zero entitlements — codesign may not be working",
+                recoverable: true
+            ))
+        }
+        return DataSourceResult(nodes: applications, errors: errors)
     }
 
     private static func processApp(
@@ -66,6 +74,7 @@ public struct EntitlementDataSource: DataSource {
     ) -> Application {
         let entitlementDict = extractor.extract(from: URL(fileURLWithPath: app.executablePath))
         let entitlements = classifier.classify(entitlementDict)
+        let sandbox = classifier.analyzeSandbox(entitlementDict)
         return Application(
             name: app.name,
             bundleId: app.bundleId,
@@ -76,7 +85,9 @@ public struct EntitlementDataSource: DataSource {
             libraryValidation: false,
             isElectron: app.isElectron,
             isSystem: app.isSystem,
-            signed: !entitlementDict.isEmpty,
+            signed: false,  // pessimistic default; CodeSigningDataSource.enrich() sets the real value
+            isSandboxed: sandbox.isSandboxed,
+            sandboxExceptions: sandbox.exceptions,
             entitlements: entitlements,
             injectionMethods: []  // populated by CodeSigningDataSource
         )

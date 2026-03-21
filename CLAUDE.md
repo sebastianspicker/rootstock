@@ -43,10 +43,14 @@ rootstock/
 │       ├── Models/           # Shared data models (Codable structs)
 │       └── Export/           # JSON serialization
 │
-├── graph/                    # Python-based Neo4j import + query engine (planned — Phase 2)
-│   ├── import.py
+├── graph/                    # Python-based Neo4j import, inference, query engine & API
+│   ├── import.py             # Scan JSON → Neo4j importer
+│   ├── infer.py              # Inference engine orchestrator (13 modules)
+│   ├── server.py             # FastAPI REST API server
 │   ├── models.py             # Graph node/edge type definitions
-│   ├── queries/              # Pre-built Cypher queries (.cypher files)
+│   ├── queries/              # Pre-built Cypher queries (76 .cypher files)
+│   ├── viewer_template.html  # Interactive Canvas-based graph viewer
+│   ├── pipeline.sh           # One-command pipeline (schema → import → infer → classify → report)
 │   └── requirements.txt
 │
 ├── docs/                     # Harness engineering documentation

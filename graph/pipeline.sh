@@ -77,34 +77,46 @@ echo ""
 
 # ── Step 1: Schema ──────────────────────────────────────────────────────────
 
-echo "── Step 1/5: Setting up schema ──"
+echo "── Step 1/7: Setting up schema ──"
 python3 "$SCRIPT_DIR/setup_schema.py" "${NEO4J_ARGS[@]}"
+echo ""
+
+# ── Step 1.5: CVE Enrichment (offline-safe) ─────────────────────────────────
+
+echo "── Step 1.5/7: Enriching CVE data ──"
+python3 "$SCRIPT_DIR/cve_enrichment.py" --fetch || echo "  ⚠ CVE enrichment skipped (offline?)"
 echo ""
 
 # ── Step 2: Import ──────────────────────────────────────────────────────────
 
-echo "── Step 2/5: Importing scan data ──"
+echo "── Step 2/7: Importing scan data ──"
 python3 "$SCRIPT_DIR/import.py" --input "$SCAN_FILE" "${NEO4J_ARGS[@]}"
 echo ""
 
 # ── Step 3: Inference ───────────────────────────────────────────────────────
 
-echo "── Step 3/5: Running inference engine ──"
+echo "── Step 3/7: Running inference engine ──"
 python3 "$SCRIPT_DIR/infer.py" "${NEO4J_ARGS[@]}"
+echo ""
+
+# ── Step 3.5: Vulnerability import ──────────────────────────────────────────
+
+echo "── Step 3.5/7: Importing vulnerability data ──"
+python3 "$SCRIPT_DIR/import_vulnerabilities.py" "${NEO4J_ARGS[@]}"
 echo ""
 
 # ── Step 4: Tier classification ─────────────────────────────────────────────
 
-echo "── Step 4/5: Classifying tiers ──"
+echo "── Step 4/7: Classifying tiers ──"
 python3 "$SCRIPT_DIR/tier_classification.py" "${NEO4J_ARGS[@]}"
 echo ""
 
 # ── Step 5: Report (optional) ──────────────────────────────────────────────
 
 if [[ "$SKIP_REPORT" = true ]]; then
-    echo "── Step 5/5: Report generation skipped ──"
+    echo "── Step 5/7: Report generation skipped ──"
 else
-    echo "── Step 5/5: Generating report ──"
+    echo "── Step 5/7: Generating report ──"
     if [[ -f "$SCRIPT_DIR/report.py" ]]; then
         # Default report output path if not specified
         if [[ -z "$REPORT_FILE" ]]; then

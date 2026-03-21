@@ -22,6 +22,18 @@ public struct LaunchItem: GraphNode {
     /// User account this item runs as (nil = inherits from context).
     public let user: String?
 
+    /// Owner of the plist configuration file (e.g., "root").
+    public let plistOwner: String?
+
+    /// Owner of the program binary (e.g., "root").
+    public let programOwner: String?
+
+    /// Whether the plist file is writable by a non-root user.
+    public let plistWritableByNonRoot: Bool
+
+    /// Whether the program binary is writable by a non-root user.
+    public let programWritableByNonRoot: Bool
+
     public enum ItemType: String, Codable, Sendable {
         case daemon
         case agent
@@ -36,7 +48,11 @@ public struct LaunchItem: GraphNode {
         type: ItemType,
         program: String?,
         runAtLoad: Bool,
-        user: String?
+        user: String?,
+        plistOwner: String? = nil,
+        programOwner: String? = nil,
+        plistWritableByNonRoot: Bool = false,
+        programWritableByNonRoot: Bool = false
     ) {
         self.label = label
         self.path = path
@@ -44,6 +60,10 @@ public struct LaunchItem: GraphNode {
         self.program = program
         self.runAtLoad = runAtLoad
         self.user = user
+        self.plistOwner = plistOwner
+        self.programOwner = programOwner
+        self.plistWritableByNonRoot = plistWritableByNonRoot
+        self.programWritableByNonRoot = programWritableByNonRoot
     }
 
     enum CodingKeys: String, CodingKey {
@@ -53,5 +73,9 @@ public struct LaunchItem: GraphNode {
         case program
         case runAtLoad = "run_at_load"
         case user
+        case plistOwner = "plist_owner"
+        case programOwner = "program_owner"
+        case plistWritableByNonRoot = "plist_writable_by_non_root"
+        case programWritableByNonRoot = "program_writable_by_non_root"
     }
 }

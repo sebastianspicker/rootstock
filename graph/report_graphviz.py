@@ -45,7 +45,14 @@ NODE_COLORS: dict[str, str] = {
 }
 
 # Relationships inferred at import time (always rendered dashed)
-INFERRED_RELS = {"CAN_INJECT_INTO", "CHILD_INHERITS_TCC", "CAN_SEND_APPLE_EVENT"}
+INFERRED_RELS = {
+    "CAN_INJECT_INTO", "CHILD_INHERITS_TCC", "CAN_SEND_APPLE_EVENT",
+    "HAS_TRANSITIVE_FDA", "MDM_OVERGRANT", "SHARES_KEYCHAIN_GROUP",
+    "CAN_WRITE", "PROTECTS", "CAN_MODIFY_TCC", "CAN_INJECT_SHELL",
+    "CAN_CONTROL_VIA_A11Y", "CAN_BLIND_MONITORING", "CAN_DEBUG",
+    "CAN_CHANGE_PASSWORD",
+    "CAN_READ_KERBEROS",
+}
 
 MAX_LABEL_LEN = 35
 
@@ -198,7 +205,7 @@ def render_dot(dot_path: Path, output_format: str = "png") -> Path:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(
         description="Export Rootstock graph to Graphviz DOT format"
     )
@@ -226,7 +233,7 @@ def main() -> None:
         driver.verify_connectivity()
     except Exception as e:
         print(f"Cannot connect to Neo4j at {args.neo4j}: {e}", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     print(f"Fetching graph data from {args.neo4j}…", file=sys.stderr)
     nodes, edges = fetch_graph_data(driver, args.node_limit, args.edge_limit)
@@ -243,6 +250,8 @@ def main() -> None:
         rendered = render_dot(out_path, args.render)
         print(f"Rendered to {rendered}", file=sys.stderr)
 
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

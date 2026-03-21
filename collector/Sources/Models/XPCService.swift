@@ -31,6 +31,9 @@ public struct XPCService: GraphNode {
     /// Entitlement keys present in the service binary (empty if binary is inaccessible).
     public let entitlements: [String]
 
+    /// Whether the service plist declares SMAuthorizedClients (client verification).
+    public let hasClientVerification: Bool
+
     public enum ServiceType: String, Codable, Sendable {
         case daemon
         case agent
@@ -45,7 +48,8 @@ public struct XPCService: GraphNode {
         runAtLoad: Bool,
         keepAlive: Bool,
         machServices: [String],
-        entitlements: [String]
+        entitlements: [String],
+        hasClientVerification: Bool = false
     ) {
         self.label = label
         self.path = path
@@ -56,6 +60,7 @@ public struct XPCService: GraphNode {
         self.keepAlive = keepAlive
         self.machServices = machServices
         self.entitlements = entitlements
+        self.hasClientVerification = hasClientVerification
     }
 
     enum CodingKeys: String, CodingKey {
@@ -68,5 +73,6 @@ public struct XPCService: GraphNode {
         case keepAlive = "keep_alive"
         case machServices = "mach_services"
         case entitlements
+        case hasClientVerification = "has_client_verification"
     }
 }

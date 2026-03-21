@@ -128,6 +128,52 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(json["type"] as? String, "login_item")
     }
 
+    // MARK: - sfltool output parsing
+
+    func testSfltoolOutputSkipsEntriesWithoutURL() {
+        let output = """
+        === Login Items ===
+        Identifier: com.example.nourl
+        Type: login item
+        ---
+        Identifier: com.example.withurl
+        URL: file:///Applications/Example.app
+        Type: login item
+        ---
+        """
+        let items = PersistenceDataSource.parseSfltoolOutput(output)
+        XCTAssertEqual(items.count, 1)
+        XCTAssertEqual(items[0].label, "com.example.withurl")
+        XCTAssertEqual(items[0].path, "/Applications/Example.app")
+        XCTAssertEqual(items[0].type, .loginItem)
+    }
+
+    func testSfltoolOutputNoSentinelPaths() {
+        let output = """
+        Identifier: com.example.app1
+        Type: login item
+        """
+        let items = PersistenceDataSource.parseSfltoolOutput(output)
+        // Entry has no URL, should be skipped entirely (no "sfltool" sentinel path)
+        XCTAssertTrue(items.isEmpty)
+    }
+
+    func testSfltoolOutputMultipleValidEntries() {
+        let output = """
+        Identifier: com.example.app1
+        URL: file:///Applications/App1.app
+        Type: login item
+        ---
+        Identifier: com.example.app2
+        URL: file:///Applications/App2.app
+        Type: agent
+        """
+        let items = PersistenceDataSource.parseSfltoolOutput(output)
+        XCTAssertEqual(items.count, 2)
+        XCTAssertEqual(items[0].type, .loginItem)
+        XCTAssertEqual(items[1].type, .agent)
+    }
+
     // MARK: - PersistenceDataSource integration
 
     func testPersistenceDataSourceMetadata() {

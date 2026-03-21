@@ -1,3 +1,6 @@
 neo4j>=5.0
 pydantic>=2.0
 tabulate>=0.9
+fastapi>=0.110
+uvicorn>=0.27
+requests>=2.28

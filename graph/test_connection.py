@@ -19,7 +19,7 @@ except ImportError:
     sys.exit(1)
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description="Test Rootstock Neo4j connection")
     parser.add_argument("--uri", default="bolt://localhost:7687")
     parser.add_argument("--user", default="neo4j")
@@ -31,10 +31,10 @@ def main():
         driver.verify_connectivity()
     except ServiceUnavailable:
         print(f"FAIL: Cannot connect to Neo4j at {args.uri}", file=sys.stderr)
-        sys.exit(1)
+        return 1
     except AuthError:
         print("FAIL: Authentication failed.", file=sys.stderr)
-        sys.exit(1)
+        return 1
 
     with driver.session() as session:
         # Basic connectivity
@@ -49,10 +49,11 @@ def main():
 
     if n_tcc == 0:
         print("WARN: Connected to Neo4j but no TCC_Permission nodes found. Run: python3 graph/setup.py")
-        sys.exit(1)
+        return 1
 
     print(f"Connected to Neo4j. Schema OK. Found {n_tcc} TCC_Permission nodes.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

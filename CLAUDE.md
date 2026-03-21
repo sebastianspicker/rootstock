@@ -14,13 +14,11 @@ Think: BloodHound for macOS-native security boundaries.
 
 ## Project Phase
 
-**Current phase:** Phase 1 — Collector PoC
-**Focus:** Building the Swift CLI collector that extracts TCC databases, app entitlements,
-and code signing metadata from a macOS endpoint and outputs structured JSON.
+**Current phase:** Post-Phase 6 — SOTA Differentiation & Intelligence
+**Status:** All 6 phases complete. Collector has 23 data source modules, graph pipeline
+has 16 inference engines, 94 Cypher queries, 27 node types, and 397 Python tests.
 
 ## Repository Layout
-
-> Items marked *(planned)* do not exist yet. They will be created as each phase begins.
 
 ```
 rootstock/
@@ -28,43 +26,65 @@ rootstock/
 ├── AGENTS.md                 # Role definitions for Claude Code tasks
 ├── ARCHITECTURE.md           # System architecture and component boundaries
 ├── ROADMAP.md                # Full development roadmap (6 phases, 24 weeks)
-├── README.md                 # Public-facing project README (planned)
-├── LICENSE                   # GPLv3 (planned)
+├── README.md                 # Public-facing project README
 │
-├── collector/                # Swift-based macOS collector (planned — Phase 1)
+├── collector/                # Swift-based macOS collector (23 modules)
 │   ├── Package.swift
 │   └── Sources/
-│       ├── CLI/              # Command-line interface entry point
+│       ├── RootstockCLI/     # CLI entry point + ScanOrchestrator
+│       ├── Models/           # Shared data models (30+ Codable structs)
 │       ├── TCC/              # TCC database parser
 │       ├── Entitlements/     # codesign / entitlement extraction
-│       ├── CodeSigning/      # Hardened runtime, library validation checks
-│       ├── XPC/              # XPC service enumeration
+│       ├── CodeSigning/      # Hardened runtime, library validation, certificates
+│       ├── XPCServices/      # XPC service enumeration
+│       ├── Persistence/      # LaunchDaemon/Agent/LoginItem discovery
 │       ├── Keychain/         # Keychain ACL metadata reader
-│       ├── Models/           # Shared data models (Codable structs)
+│       ├── MDM/              # MDM profile + PPPC policy extraction
+│       ├── Groups/           # Local groups + user details
+│       ├── RemoteAccess/     # SSH, VNC, ARD service detection
+│       ├── Firewall/         # Application firewall policy
+│       ├── LoginSession/     # Active login sessions
+│       ├── AuthorizationDB/  # Authorization rights database
+│       ├── AuthorizationPlugins/ # Security agent plugins
+│       ├── SystemExtensions/ # System/network extensions
+│       ├── Sudoers/          # Sudoers NOPASSWD rules
+│       ├── ProcessSnapshot/  # Running process enumeration
+│       ├── FileACLs/         # Critical file ACL auditing
+│       ├── ShellHooks/       # Shell config injection points
+│       ├── PhysicalSecurity/ # Bluetooth, screen lock, Thunderbolt posture
+│       ├── ActiveDirectory/  # AD binding + user/group discovery
+│       ├── KerberosArtifacts/ # ccache, keytab, krb5.conf
+│       ├── Sandbox/          # Sandbox profile deep parsing (SBPL rules)
+│       ├── Quarantine/       # Gatekeeper quarantine xattr reader
 │       └── Export/           # JSON serialization
 │
 ├── graph/                    # Python-based Neo4j import, inference, query engine & API
-│   ├── import.py             # Scan JSON → Neo4j importer
-│   ├── infer.py              # Inference engine orchestrator (13 modules)
+│   ├── import.py             # Scan JSON → Neo4j importer (orchestrator)
+│   ├── import_nodes_core.py  # Core node imports (apps, TCC, entitlements, certs)
+│   ├── import_nodes_services.py   # Services (XPC, persistence, keychain)
+│   ├── import_nodes_security.py   # Security nodes (groups, firewall, auth, sudoers)
+│   ├── import_nodes_security_enterprise.py  # Enterprise (AD, Kerberos, process, file ACL)
+│   ├── import_nodes_enrichment.py # Enrichment (physical, iCloud, bluetooth)
+│   ├── import_vulnerabilities.py  # CVE/ATT&CK/ThreatGroup import + version matching
+│   ├── infer.py              # Inference engine orchestrator (16 modules)
 │   ├── server.py             # FastAPI REST API server
-│   ├── models.py             # Graph node/edge type definitions
-│   ├── queries/              # Pre-built Cypher queries (76 .cypher files)
+│   ├── models.py             # Pydantic v2 graph node/edge type definitions
+│   ├── queries/              # Pre-built Cypher queries (94 .cypher files)
+│   ├── bloodhound_import.py  # SharpHound ZIP → ADUser/SAME_IDENTITY import
+│   ├── cve_reference.py      # CVE + ATT&CK + ThreatGroup registry
+│   ├── cve_enrichment.py     # Live EPSS + KEV + NVD enrichment with caching
+│   ├── version_matcher.py    # Version-aware CVE matching
+│   ├── opengraph_export.py   # BloodHound OpenGraph JSON export
 │   ├── viewer_template.html  # Interactive Canvas-based graph viewer
 │   ├── pipeline.sh           # One-command pipeline (schema → import → infer → classify → report)
 │   └── requirements.txt
 │
-├── docs/                     # Harness engineering documentation
+├── docs/                     # Engineering documentation
 │   ├── design-docs/          # Architecture decisions and rationale
-│   ├── exec-plans/           # Execution plans for phases
 │   ├── research/             # macOS security research notes
-│   ├── references/           # LLM-optimized reference material
-│   └── product-specs/        # Feature specifications
+│   └── references/           # LLM-optimized reference material
 │
-├── ralph-prompts/            # Phase-based execution prompts for ralph-loop
-│
-└── tests/                    # (planned — Phase 1+)
-    ├── fixtures/             # Sample TCC.db, entitlement plists, etc.
-    └── collector/            # Swift test targets
+└── examples/                 # Demo scan data + generation scripts
 ```
 
 ## Key Conventions
@@ -101,12 +121,11 @@ example:  [collector] add TCC database parser for user-level db
 
 ## How to Use This Harness
 
-1. **Starting a task:** Read CLAUDE.md (this file), then AGENTS.md for the role, then
-   the relevant exec-plan in `docs/exec-plans/active/`.
+1. **Starting a task:** Read CLAUDE.md (this file), then AGENTS.md for the role.
 2. **Architecture questions:** See ARCHITECTURE.md and `docs/design-docs/`.
 3. **macOS internals:** See `docs/research/` and `docs/references/`.
-4. **What to build next:** See `docs/exec-plans/active/` for current phase plans.
-5. **Quality checks:** See `docs/QUALITY.md` for standards and review criteria.
+4. **Running the pipeline:** `cd graph && bash pipeline.sh <scan.json>`
+5. **Running tests:** Swift: `cd collector && swift test` / Python: `cd graph && python3 -m pytest tests/`
 
 ## Critical Context
 

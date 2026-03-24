@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from tabulate import tabulate
+
+logger = logging.getLogger(__name__)
 
 from utils import list_or_str
 
@@ -197,8 +201,8 @@ def format_vulnerability_summary(contexts: list) -> str:
     try:
         from cve_enrichment import enrich_registry
         enriched_map = enrich_registry()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.info("CVE enrichment unavailable, continuing without it: %s", exc)
 
     # ── CVE table (deduplicated, sorted by EPSS desc then CVSS desc) ─────
     seen_cves: set[str] = set()

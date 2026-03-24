@@ -19,7 +19,10 @@ Exit code 0 on success, 1 on failure.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 from neo4j_connection import add_neo4j_args, connect_from_args
 from cve_reference import _REGISTRY, _GROUP_REGISTRY, _GROUP_TECHNIQUE_MAP, CveEntry, CWE_REGISTRY, REGISTRY_VERSION
@@ -181,8 +184,8 @@ def _estimate_years_since_disclosure(entry: EnrichedCveEntry) -> float:
             added = datetime.strptime(entry.kev_date_added, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             delta = datetime.now(timezone.utc) - added
             return max(0.0, delta.days / 365.25)
-        except (ValueError, TypeError):
-            pass
+        except (ValueError, TypeError) as exc:
+            logger.debug("Could not parse KEV date for %s: %s", entry.base.cve_id, exc)
 
     # Try extracting year from patched_version string (e.g. "macOS 15.2")
     # or from affected_versions (e.g. "macOS 15.1 and earlier")

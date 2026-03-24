@@ -11,7 +11,11 @@ for recommendations that map to ATT&CK techniques.
 
 from __future__ import annotations
 
+import logging
+
 from neo4j import Session
+
+logger = logging.getLogger(__name__)
 
 
 # ── Recommendation definitions ───────────────────────────────────────────────
@@ -218,8 +222,7 @@ def infer(session: Session) -> int:
         try:
             result = session.run(cypher, key=key)
             total_edges += result.single()["n"]
-        except Exception:
-            # Skip conditions that fail (e.g., missing edge types)
-            pass
+        except Exception as exc:
+            logger.debug("Skipping recommendation edge for key=%s: %s", key, exc)
 
     return total_edges

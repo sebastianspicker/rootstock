@@ -152,35 +152,7 @@ public struct SandboxDataSource {
         var count = 0
         for i in result.indices {
             if let profile = buildProfile(for: result[i]) {
-                result[i] = Application(
-                    name: result[i].name,
-                    bundleId: result[i].bundleId,
-                    path: result[i].path,
-                    version: result[i].version,
-                    teamId: result[i].teamId,
-                    hardenedRuntime: result[i].hardenedRuntime,
-                    libraryValidation: result[i].libraryValidation,
-                    isElectron: result[i].isElectron,
-                    isSystem: result[i].isSystem,
-                    signed: result[i].signed,
-                    isSipProtected: result[i].isSipProtected,
-                    isSandboxed: result[i].isSandboxed,
-                    sandboxExceptions: result[i].sandboxExceptions,
-                    isNotarized: result[i].isNotarized,
-                    isAdhocSigned: result[i].isAdhocSigned,
-                    signingCertificateCN: result[i].signingCertificateCN,
-                    signingCertificateSHA256: result[i].signingCertificateSHA256,
-                    certificateExpires: result[i].certificateExpires,
-                    isCertificateExpired: result[i].isCertificateExpired,
-                    certificateChainLength: result[i].certificateChainLength,
-                    certificateTrustValid: result[i].certificateTrustValid,
-                    certificateChain: result[i].certificateChain,
-                    entitlements: result[i].entitlements,
-                    injectionMethods: result[i].injectionMethods,
-                    launchConstraintCategory: result[i].launchConstraintCategory,
-                    sandboxProfile: profile,
-                    quarantineInfo: result[i].quarantineInfo
-                )
+                result[i] = result[i].with(sandboxProfile: profile)
                 count += 1
             }
         }

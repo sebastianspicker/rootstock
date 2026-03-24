@@ -124,9 +124,10 @@ struct KeychainScanner {
     /// Only reads metadata — no secret values are accessed.
     /// Falls back gracefully for Data Protection Keychain items and locked keychains.
     private func extractTrustedApps(from ref: Any) -> ([String], String?) {
-        // CF types share the same opaque base type, so the cast always succeeds at the
-        // Swift level. SecKeychainItemCopyAccess returns errSecParam for Data Protection
-        // Keychain items (which don't use the legacy ACL model) — handled by the guard below.
+        // CF types share the same opaque base type — the compiler confirms this cast
+        // always succeeds (conditional `as?` is a compile error here). SecKeychainItemCopyAccess
+        // returns errSecParam for Data Protection Keychain items — handled by the guard below.
+        // swiftlint:disable:next force_cast
         let keychainItem = ref as! SecKeychainItem
 
         var access: SecAccess?

@@ -182,35 +182,7 @@ struct ScanOrchestrator {
                 // Start from sandbox results and overlay quarantine data.
                 applications = sandboxApps
                 for i in applications.indices {
-                    applications[i] = Application(
-                        name: applications[i].name,
-                        bundleId: applications[i].bundleId,
-                        path: applications[i].path,
-                        version: applications[i].version,
-                        teamId: applications[i].teamId,
-                        hardenedRuntime: applications[i].hardenedRuntime,
-                        libraryValidation: applications[i].libraryValidation,
-                        isElectron: applications[i].isElectron,
-                        isSystem: applications[i].isSystem,
-                        signed: applications[i].signed,
-                        isSipProtected: applications[i].isSipProtected,
-                        isSandboxed: applications[i].isSandboxed,
-                        sandboxExceptions: applications[i].sandboxExceptions,
-                        isNotarized: applications[i].isNotarized,
-                        isAdhocSigned: applications[i].isAdhocSigned,
-                        signingCertificateCN: applications[i].signingCertificateCN,
-                        signingCertificateSHA256: applications[i].signingCertificateSHA256,
-                        certificateExpires: applications[i].certificateExpires,
-                        isCertificateExpired: applications[i].isCertificateExpired,
-                        certificateChainLength: applications[i].certificateChainLength,
-                        certificateTrustValid: applications[i].certificateTrustValid,
-                        certificateChain: applications[i].certificateChain,
-                        entitlements: applications[i].entitlements,
-                        injectionMethods: applications[i].injectionMethods,
-                        launchConstraintCategory: applications[i].launchConstraintCategory,
-                        sandboxProfile: applications[i].sandboxProfile,
-                        quarantineInfo: quarantineApps[i].quarantineInfo
-                    )
+                    applications[i] = applications[i].with(quarantineInfo: quarantineApps[i].quarantineInfo)
                 }
 
                 let elapsed = Date().timeIntervalSince(enrichStart)

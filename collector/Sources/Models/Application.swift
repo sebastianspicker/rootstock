@@ -120,3 +120,53 @@ public struct Application: Codable, Sendable, GraphNode {
         case quarantineInfo = "quarantine_info"
     }
 }
+
+// MARK: - Builder methods for single-field enrichment
+
+extension Application {
+    /// Returns a copy with a different sandboxProfile, preserving all other fields.
+    public func with(sandboxProfile newProfile: SandboxProfile?) -> Application {
+        Application(
+            name: name, bundleId: bundleId, path: path, version: version,
+            teamId: teamId, hardenedRuntime: hardenedRuntime,
+            libraryValidation: libraryValidation, isElectron: isElectron,
+            isSystem: isSystem, signed: signed, isSipProtected: isSipProtected,
+            isSandboxed: isSandboxed, sandboxExceptions: sandboxExceptions,
+            isNotarized: isNotarized, isAdhocSigned: isAdhocSigned,
+            signingCertificateCN: signingCertificateCN,
+            signingCertificateSHA256: signingCertificateSHA256,
+            certificateExpires: certificateExpires,
+            isCertificateExpired: isCertificateExpired,
+            certificateChainLength: certificateChainLength,
+            certificateTrustValid: certificateTrustValid,
+            certificateChain: certificateChain, entitlements: entitlements,
+            injectionMethods: injectionMethods,
+            launchConstraintCategory: launchConstraintCategory,
+            sandboxProfile: newProfile,
+            quarantineInfo: quarantineInfo
+        )
+    }
+
+    /// Returns a copy with different quarantineInfo, preserving all other fields.
+    public func with(quarantineInfo newInfo: QuarantineInfo?) -> Application {
+        Application(
+            name: name, bundleId: bundleId, path: path, version: version,
+            teamId: teamId, hardenedRuntime: hardenedRuntime,
+            libraryValidation: libraryValidation, isElectron: isElectron,
+            isSystem: isSystem, signed: signed, isSipProtected: isSipProtected,
+            isSandboxed: isSandboxed, sandboxExceptions: sandboxExceptions,
+            isNotarized: isNotarized, isAdhocSigned: isAdhocSigned,
+            signingCertificateCN: signingCertificateCN,
+            signingCertificateSHA256: signingCertificateSHA256,
+            certificateExpires: certificateExpires,
+            isCertificateExpired: isCertificateExpired,
+            certificateChainLength: certificateChainLength,
+            certificateTrustValid: certificateTrustValid,
+            certificateChain: certificateChain, entitlements: entitlements,
+            injectionMethods: injectionMethods,
+            launchConstraintCategory: launchConstraintCategory,
+            sandboxProfile: sandboxProfile,
+            quarantineInfo: newInfo
+        )
+    }
+}

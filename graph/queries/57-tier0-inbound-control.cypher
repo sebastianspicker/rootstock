@@ -3,6 +3,7 @@
 // Category: Blue Team
 // Severity: Critical
 // Parameters: none
+// Prerequisites: import.py + infer.py + tier_classification.py must have run
 // Forensic: Systematic "who can reach my crown jewels?" — the key blue team posture question
 
 MATCH (target:Application {tier: 0})

@@ -3,6 +3,7 @@
 // Category: Blue Team
 // Severity: High
 // Parameters: none
+// Prerequisites: import.py must have run
 // ATT&CK: T1546.004, T1547.011
 //
 // Finds third-party LaunchDaemons and LaunchAgents that:

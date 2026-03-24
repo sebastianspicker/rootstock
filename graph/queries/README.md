@@ -19,7 +19,7 @@ python3 infer.py              # compute inferred relationships
 ## Quick Start (CLI)
 
 ```bash
-# List all 23 queries with category and severity
+# List all 101 queries with category and severity
 python3 query_runner.py --list
 
 # Run a single query
@@ -36,43 +36,155 @@ python3 query_runner.py --run all --format csv > results.csv
 
 ## Query Index
 
-### Red Team — Attack Path Discovery
+### Red Team — Injection & Escalation
 
-| # | File | Name | Severity | Parameters |
-|---|------|------|----------|------------|
-| 01 | `01-injectable-fda-apps.cypher` | Injectable FDA Apps | **Critical** | none |
-| 02 | `02-shortest-path-to-fda.cypher` | Shortest Path to FDA | **Critical** | none |
-| 03 | `03-electron-tcc-inheritance.cypher` | Electron TCC Inheritance | **High** | none |
-| 04 | `04-private-entitlement-audit.cypher` | Private Entitlement Audit | **High** | none |
-| 05 | `05-appleevent-tcc-cascade.cypher` | Apple Event TCC Cascade | **High** | none |
-| 06 | `06-injection-chain.cypher` | Multi-hop Injection Chain | **Critical** | none |
-| 11 | `11-multi-hop-injection-chain.cypher` | Multi-hop Injection + Apple Event | **Critical** | `$target_service` |
-| 12 | `12-tcc-db-write-path.cypher` | TCC Database Write Path | **Critical** | none |
-| 13 | `13-keychain-via-injection.cypher` | Keychain Access via Injection | **Critical** | none |
-| 14 | `14-persistence-as-root.cypher` | Persistent Root Exec via Injection | **Critical** | none |
-| 15 | `15-xpc-privilege-escalation.cypher` | XPC Privilege Escalation | **High** | none |
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 01 | Injectable Full Disk Access Apps | **Critical** | Apps with FDA that can be injected with attacker code |
+| 02 | Shortest Attack Path to Full Disk Access | **Critical** | Minimum hops from attacker node to FDA |
+| 03 | Electron App TCC Permission Inheritance | **High** | Electron apps passing TCC permissions to child processes |
+| 04 | Private Apple Entitlement Audit | **High** | Third-party apps with private Apple entitlements |
+| 05 | Apple Event TCC Permission Cascade | **High** | Apps gaining TCC access transitively via Apple Event automation |
+| 06 | Multi-hop Injection Chain | **Critical** | Chains of injectable apps leading to high-value TCC permissions |
+| 11 | Multi-hop Injection + Apple Event Privilege Escalation | **Critical** | Inject App A, App A automates App B, App B has FDA |
+| 12 | TCC Database Write Path (Complete TCC Takeover) | **Critical** | Injectable apps with FDA granting write access to TCC.db |
+| 13 | Keychain Credential Access via Injection | **Critical** | Injectable apps with silent Keychain read access |
+| 14 | Persistent Root Code Execution via Injectable Apps | **Critical** | Injectable apps whose LaunchDaemons run as root |
+| 15 | XPC Service Privilege Escalation | **High** | XPC services with elevated entitlements reachable from injectable apps |
+| 24 | Admin Group Privilege Escalation | **High** | Admin-group users owning injectable apps — sudo escalation path |
+| 25 | Remote Access Attack Surface | **High** | SSH/Screen Sharing with injectable apps accessible by remote users |
+| 27 | Unsandboxed Injectable Apps | **High** | Injectable apps not sandboxed — higher severity injection targets |
+| 28 | Firewall-Exposed Injectable Apps | **High** | Injectable apps with firewall allowing inbound connections |
+| 29 | Hijackable Launch Daemons | **Critical** | Root LaunchDaemons whose binary is writable by non-root users |
+| 30 | XPC Services Without Client Verification | **High** | XPC services lacking SMAuthorizedClients — any process can connect |
+| 31 | Transitive FDA via Apple Events / Finder Automation | **Critical** | Apps that can script Finder to gain transitive Full Disk Access |
+| 32 | Active Sessions on Injectable Apps | **High** | Users with active sessions who have injectable apps with TCC grants |
+| 36 | Sudoers NOPASSWD Rules | **High** | Sudoers rules allowing password-less privilege escalation |
+| 38 | Running Injectable Apps with TCC Grants | **Critical** | Currently running injectable apps with valuable TCC permissions |
+| 40 | Injectable Apps Sharing Keychain Groups | **High** | Injectable apps sharing Keychain access groups with other apps |
+| 41 | Shortest Path from Owned Nodes to Full Disk Access | **Critical** | From any owned node, shortest path to FDA |
+| 42 | Reachable High-Value Assets from Owned Nodes | **Critical** | All TCC/keychain/XPC reachable from owned nodes within N hops |
+| 43 | User-Centric Access Enumeration | **High** | Given a username, show all reachable TCC, keychain, and apps |
+| 44 | All Inbound Paths to Target Asset | **Critical** | All inbound paths from owned nodes to a target bundle_id |
+| 45 | Owned Node Blast Radius Ranking | **Critical** | Rank each owned node by count of reachable high-value assets |
+| 47 | Shortest Paths from Owned Nodes to Tier 0 Assets | **Critical** | Shortest escalation paths from owned nodes to crown jewels |
+| 49 | File Permission Escalation Chains | **Critical** | User can write critical file, modify security policy, gain access |
+| 50 | Shell Hook Injection Paths | **High** | Writable shell hooks enabling credential theft and code injection |
+| 51 | Unconstrained Injectable Applications | **Critical** | Injectable apps without launch constraints — easiest targets |
+| 52 | Cross-Host User Presence (Lateral Movement) | **High** | Users present on multiple hosts — lateral movement paths |
+| 53 | Cross-Host Injection Chain (SSH + Injectable FDA) | **Critical** | SSH access to remote host enabling injection of FDA apps |
+| 54 | Accessibility API Abuse | **Critical** | Injectable apps with Accessibility permission for GUI control |
+| 55 | Injectable Endpoint Security Framework Clients | **Critical** | Injectable ESF apps that could blind security monitoring |
+| 56 | Injectable Network Extension Apps | **Critical** | Injectable apps with VPN/content-filter entitlements |
+| 58 | Group-Based Capability Escalation | **High** | Users with debugger or remote access via group membership |
+| 61 | Ad-Hoc Signed Apps with TCC Grants | **Critical** | Apps signed without real certificate (CS_ADHOC) holding TCC |
+| 65 | Bluetooth Attack Surface | **High** | Paired BT devices with injectable apps holding Bluetooth TCC grants |
+| 68 | Injectable Apps with iCloud Sync | **High** | Injectable apps with iCloud container entitlements — data exfil risk |
+| 69 | CloudKit Container Injection | **High** | Injectable apps with CloudKit entitlements — cloud data access |
+| 70 | iCloud Keychain Sync Exposure | **Critical** | Injectable apps with keychain read on hosts with iCloud sync |
+| 71 | Password Change Attack Paths | **Critical** | Admin users who can change passwords of users owning privileged apps |
+| 86 | Sandbox Escape Vectors via Mach-Lookup | **Critical** | Sandboxed apps with mach-lookup exceptions to privileged XPC |
+| 89 | Quarantine Bypass Apps with TCC Grants | **Critical** | Unquarantined apps holding TCC grants — Gatekeeper bypass |
+| 95 | High-Risk Applications | **Critical** | Applications with graph-native risk_score >= 7.0 |
+| 98 | Memory Safety Risk | **Critical** | Apps affected by memory safety CWEs with injection paths |
 
-### Blue Team — Security Audit
+### Red Team — Vulnerability & CVE
 
-| # | File | Name | Severity | Parameters |
-|---|------|------|----------|------------|
-| 07 | `07-tcc-grant-overview.cypher` | TCC Grant Overview | **Info** | none |
-| 08 | `08-persistence-audit.cypher` | Persistence Audit | **High** | none |
-| 09 | `09-keychain-acl-audit.cypher` | Keychain ACL Audit | **High** | none |
-| 10 | `10-mdm-managed-tcc.cypher` | MDM-Managed TCC Permissions | **Info** | none |
-| 16 | `16-tcc-grant-audit.cypher` | Full TCC Grant Inventory | **Info** | `$scope` |
-| 17 | `17-overprivileged-apps.cypher` | Over-privileged Applications | **High** | `$min_permissions` |
-| 18 | `18-unsigned-or-unhardened-with-grants.cypher` | Unsigned/Unhardened with Grants | **High** | none |
-| 19 | `19-stale-tcc-grants.cypher` | Stale TCC Grants | **High** | none |
-| 20 | `20-mdm-vs-user-grants.cypher` | MDM vs User Grants Comparison | **Info** | none |
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 72 | AD-Bound Mac Attack Surface | **Critical** | AD-bound hosts with injectable apps that can access Kerberos tickets |
+| 73 | Kerberos Ticket Theft via Injectable Apps | **Critical** | Injectable app reads ccache to impersonate AD user |
+| 80 | CVE-Affected Applications | **Informational** | All applications with known CVE associations |
+| 81 | CISA KEV + Full Disk Access Applications | **Critical** | FDA apps with CISA Known Exploited Vulnerabilities |
+| 82 | High-EPSS Injectable Applications | **Critical** | Injectable apps with high exploitation probability (EPSS > 0.3) |
+| 83 | Vulnerability-Enriched Attack Chains | **Critical** | Attack paths where the target app has known CVE associations |
+| 84 | Running Injectable Processes with CVEs | **Critical** | Currently running, injectable processes with known CVEs |
+| 85 | Version-Matched Vulnerabilities | **Critical** | Applications with version-confirmed CVE matches (precise tier) |
+| 92 | APT Group Exposure | **Critical** | APT groups whose techniques map to CVEs affecting this host |
 
-### Forensic — Investigation & Mapping
+### Blue Team — TCC & Entitlements
 
-| # | File | Name | Severity | Parameters |
-|---|------|------|----------|------------|
-| 21 | `21-high-value-targets.cypher` | High-Value Target Ranking | **Info** | none |
-| 22 | `22-trust-boundary-map.cypher` | Trust Boundary Map | **Info** | `$app_name` |
-| 23 | `23-full-attack-surface.cypher` | Full Attack Surface Map | **Info** | none |
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 07 | TCC Grant Overview | **Informational** | Summary of all TCC grants for security audits and baselines |
+| 10 | MDM-Managed TCC Permissions | **Informational** | TCC grants silently enforced via MDM profiles |
+| 16 | Full TCC Grant Inventory | **Informational** | Complete audit of all TCC grants — service, app, grant method, age |
+| 17 | Over-privileged Applications | **High** | Apps with more TCC permissions than typical threshold |
+| 18 | Unsigned or Unhardened Apps with TCC Grants | **High** | Apps lacking code signing protections that hold TCC grants |
+| 19 | Stale TCC Grants (Orphaned Permissions) | **High** | TCC grants for apps no longer installed on the system |
+| 20 | MDM-Managed vs User-Granted TCC Comparison | **Informational** | Compliance comparison of MDM vs user-granted TCC permissions |
+| 37 | Unnotarized Apps with TCC Grants | **High** | Apps not notarized by Apple but holding TCC privacy grants |
+| 39 | MDM Overgrant to Scripting Interpreters | **Critical** | MDM profiles granting sensitive TCC to scripting interpreters |
+
+### Blue Team — Infrastructure & Hardening
+
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 08 | Persistence Audit | **High** | Third-party LaunchDaemons/Agents running as root or injectable |
+| 09 | Keychain ACL Audit | **High** | Apps with direct Keychain read access via ACL trusted-app list |
+| 26 | SIP-Corrected Injection Audit | **Informational** | Apps excluded from injection analysis by SIP protection |
+| 33 | Weak Authorization Rights | **High** | Authorization database rights with weakened security settings |
+| 34 | Non-Apple Authorization Plugins | **High** | Third-party SecurityAgent plugins that could intercept auth |
+| 35 | Non-Apple System Extensions | **High** | Third-party system extensions (network filters, ESF, drivers) |
+| 46 | Tier Classification Summary | **Informational** | Classified Application nodes grouped by tier |
+| 48 | Critical File Write Access Audit | **Critical** | Users who can write to TCC databases, sudoers, sshd_config |
+| 57 | Tier 0 Inbound Control Audit | **Critical** | All inbound attack paths to Tier 0 crown jewel assets |
+| 59 | Keychain Crown Jewels | **High** | High-sensitivity keychain items (SSH keys, certs) and who can access them |
+| 62 | Apps Signed by Non-Apple Certificate Authorities | **High** | Apps whose signing chain terminates at a non-Apple root CA |
+| 63 | Certificate Authority Hierarchy | **Informational** | Complete CA trust chain visualization across all applications |
+| 87 | Sandbox Exception Audit | **High** | Sandboxed apps with unconstrained network or file access exceptions |
+| 88 | Unquarantined Non-System Applications | **High** | Non-system apps missing quarantine xattr — Gatekeeper bypass |
+| 93 | Temporal Priority Vulnerabilities | **High** | CVEs ranked by temporal urgency combining CVSS, EPSS, and age decay |
+| 97 | CWE Weakness Class Heatmap | **High** | CWE weakness classes ranked by number of affected applications |
+| 99 | ESF Monitoring Gaps | **High** | Critical ESF event types with no active SystemExtension monitoring |
+| 100 | Top Recommendations by Affected App Count | **High** | Recommendations ranked by number of applicable applications |
+| 101 | Application Remediation Plan | **Informational** | All recommendations for a specific application by bundle_id |
+
+### Blue Team — Enterprise (AD/Kerberos)
+
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 74 | AD Group to Local Admin Mapping | **Critical** | AD groups mapped to local admin on every AD-bound Mac |
+| 75 | Machine Keytab Exposure | **High** | World-readable or injectable keytabs — machine account impersonation |
+| 76 | AD Users with Injectable FDA Apps | **Critical** | AD user sessions with injectable FDA apps — FDA + Kerberos tickets |
+| 77 | AD Users in Non-Admin Capability Groups | **High** | AD users in capability-granting groups (_developer, wheel) |
+| 78 | Weak Kerberos Encryption Defaults | **High** | krb5.conf permitting weak encryption (DES, RC4) |
+| 79 | Stale Keytab Detection | **Informational** | Keytabs not rotated in over 1 year |
+| 90 | AD to macOS Identity Map | **High** | AD users mapped to macOS local users via SAME_IDENTITY |
+| 91 | AD Group Transitive macOS Access | **Critical** | AD group membership reaching macOS TCC grants — cross-domain paths |
+| 94 | APT Technique Coverage | **Informational** | Which APT techniques are mitigated by existing controls vs exposed |
+
+### Blue Team — Certificates & Physical
+
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 60 | Expired Signing Certificates with Active TCC Grants | **High** | Apps signed with expired certificates holding active permissions |
+| 64 | Weak Physical Security Posture | **High** | Hosts lacking lockdown mode, BT discoverable, no screen lock |
+| 66 | Physical + Remote Combined Risk | **Critical** | Weak physical posture AND enabled remote access — maximum exposure |
+| 67 | Physical Security Overview | **Informational** | Complete physical posture inventory per host with all BT devices |
+
+### Forensic — Risk & Remediation
+
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 21 | High-Value Target Ranking (Attack Value Score) | **Informational** | All apps ranked by weighted attack value score |
+| 22 | Trust Boundary Map | **Informational** | All trust relationships between apps (team, automation, XPC) |
+| 23 | Full Attack Surface Map | **Informational** | Every inferred attack edge — complete attack surface enumeration |
+| 96 | Risk Score Distribution | **Informational** | Histogram of risk levels across all Application nodes |
+
+### Ownership & Tier
+
+| # | Name | Severity | Description |
+|---|------|----------|-------------|
+| 41 | Shortest Path from Owned Nodes to FDA | **Critical** | From any owned node, shortest escalation path to FDA |
+| 42 | Reachable High-Value Assets from Owned Nodes | **Critical** | All TCC/keychain/XPC reachable from owned nodes within N hops |
+| 44 | All Inbound Paths to Target Asset | **Critical** | All inbound paths from owned nodes to a target bundle_id |
+| 45 | Owned Node Blast Radius Ranking | **Critical** | Rank each owned node by count of reachable high-value assets |
+| 46 | Tier Classification Summary | **Informational** | Classified Application nodes grouped by tier |
+| 47 | Shortest Paths from Owned Nodes to Tier 0 Assets | **Critical** | Shortest escalation paths from owned to crown jewels |
+| 57 | Tier 0 Inbound Control Audit | **Critical** | All inbound attack paths to Tier 0 assets |
+
+Queries 24--101 are documented in their `.cypher` file headers. Run `python3 query_runner.py --describe <number>` for details.
 
 ---
 

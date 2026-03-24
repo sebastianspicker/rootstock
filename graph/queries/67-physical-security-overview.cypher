@@ -3,6 +3,7 @@
 // Category: Blue Team
 // Severity: Informational
 // Parameters: none
+// Prerequisites: import.py must have run
 
 MATCH (c:Computer)
 OPTIONAL MATCH (bt:BluetoothDevice)-[:PAIRED_WITH]->(c)

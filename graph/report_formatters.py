@@ -6,9 +6,9 @@ import logging
 
 from tabulate import tabulate
 
-logger = logging.getLogger(__name__)
-
 from utils import list_or_str
+
+logger = logging.getLogger(__name__)
 
 
 def format_no_findings() -> str:

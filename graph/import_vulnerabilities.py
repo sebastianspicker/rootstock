@@ -22,8 +22,6 @@ import argparse
 import logging
 import sys
 
-logger = logging.getLogger(__name__)
-
 from neo4j_connection import add_neo4j_args, connect_from_args
 from cve_reference import _REGISTRY, _GROUP_REGISTRY, _GROUP_TECHNIQUE_MAP, CveEntry, CWE_REGISTRY, REGISTRY_VERSION
 from cve_enrichment import enrich_registry, EnrichedCveEntry, temporal_score
@@ -31,6 +29,8 @@ from version_matcher import (
     extract_macos_max_version,
     is_affected,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ── Category -> Cypher match patterns ────────────────────────────────────────

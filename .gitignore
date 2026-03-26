@@ -1,0 +1,21 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+.superpowers/
+.worktrees/
+
+# Real scan data (machine-specific, never commit)
+scan.json
+graph.json
+rootstock-viewer.html
+rootstock-report.md

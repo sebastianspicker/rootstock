@@ -1,4 +1,4 @@
-neo4j>=5.0,<6.0
+neo4j>=5.0,<7.0
 pydantic>=2.0,<3.0
 tabulate>=0.9,<1.0
 fastapi>=0.110,<1.0

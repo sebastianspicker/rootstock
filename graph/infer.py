@@ -43,11 +43,11 @@ def main() -> int:
 
     driver = connect_from_args(args)
 
-    print(f"\n{'=' * 60}")
-    print(f"  ROOTSTOCK INFERENCE ENGINE")
-    print(f"{'=' * 60}")
+    print("\n" + "=" * 60)
+    print("  ROOTSTOCK INFERENCE ENGINE")
+    print("=" * 60)
 
-    print(f"\n--- Attack Path Discovery {'─' * 34}")
+    print("\n--- Attack Path Discovery " + "─" * 34)
     with driver.session() as session:
         n_inject = infer_injection.infer(session)
         print(f"  CAN_INJECT_INTO:       {n_inject:>4} edges")
@@ -61,7 +61,7 @@ def main() -> int:
         n_transitive_fda = infer_finder_fda.infer(session)
         print(f"  HAS_TRANSITIVE_FDA:    {n_transitive_fda:>4} edges")
 
-        print(f"\n--- Escalation & Lateral Movement {'─' * 25}")
+        print("\n--- Escalation & Lateral Movement " + "─" * 25)
 
         n_mdm_overgrant = infer_mdm_overgrant.infer(session)
         print(f"  MDM_OVERGRANT:         {n_mdm_overgrant:>4} edges")
@@ -90,7 +90,7 @@ def main() -> int:
         n_kerberos = infer_kerberos.infer(session)
         print(f"  CAN_READ_KERBEROS:     {n_kerberos:>4} edges")
 
-        print(f"\n--- Sandbox & Gatekeeper {'─' * 36}")
+        print("\n--- Sandbox & Gatekeeper " + "─" * 36)
 
         n_sandbox = infer_sandbox.infer(session)
         print(f"  SANDBOX:               {n_sandbox:>4} edges")
@@ -98,7 +98,7 @@ def main() -> int:
         n_quarantine = infer_quarantine.infer(session)
         print(f"  BYPASSED_GATEKEEPER:   {n_quarantine:>4} edges")
 
-        print(f"\n--- Risk Scoring & Recommendations {'─' * 24}")
+        print("\n--- Risk Scoring & Recommendations " + "─" * 24)
 
         n_risk = infer_risk_score.infer(session)
         print(f"  RISK_SCORE:            {n_risk:>4} apps scored")
@@ -112,13 +112,13 @@ def main() -> int:
              + n_mdm_overgrant + n_keychain_groups + n_file_acl + n_shell_hooks
              + n_a11y + n_esf + n_group_cap + n_password + n_kerberos
              + n_sandbox + n_quarantine + n_recs)
-    print(f"\n{'=' * 60}")
-    print(f"  INFERENCE COMPLETE")
-    print(f"{'=' * 60}")
+    print("\n" + "=" * 60)
+    print("  INFERENCE COMPLETE")
+    print("=" * 60)
     print(f"  Total inferred edges:  {total:>5}")
     print(f"  Apps risk-scored:      {n_risk:>5}")
     print(f"  Recommendations:       {n_recs:>5}")
-    print(f"{'=' * 60}")
+    print("=" * 60)
     if total == 0:
         print("  Note: No inferred edges created.")
         print("  Import scan data first: python3 graph/import.py")

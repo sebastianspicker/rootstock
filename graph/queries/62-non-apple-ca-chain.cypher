@@ -7,7 +7,7 @@
 // ATT&CK: T1553.001
 
 MATCH (a:Application)-[:SIGNED_BY_CA]->(leaf:CertificateAuthority)
-OPTIONAL MATCH path = (leaf)-[:ISSUED_BY*0..]->(root:CertificateAuthority {is_root: true})
+OPTIONAL MATCH path = (leaf)-[:ISSUED_BY*0..10]->(root:CertificateAuthority {is_root: true})
 WITH a, leaf, root
 WHERE root IS NOT NULL
   AND root.common_name IS NOT NULL

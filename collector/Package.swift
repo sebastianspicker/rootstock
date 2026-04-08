@@ -147,6 +147,10 @@ let package = Package(
             dependencies: ["Models"]
         ),
         .testTarget(
+            name: "ModelsTests",
+            dependencies: ["Models"]
+        ),
+        .testTarget(
             name: "TCCTests",
             dependencies: ["TCC", "Models"],
             linkerSettings: [.linkedLibrary("sqlite3")]

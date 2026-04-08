@@ -50,35 +50,48 @@ def neo4j_driver():
     driver.close()
 
 
-# ── Cleanup utility ──────────────────────────────────────────────────────────
-
-ALL_NODE_LABELS = [
-    "Application", "Entitlement", "TCC_Permission", "XPC_Service",
-    "LaunchItem", "Keychain_Item", "MDM_Profile", "User",
-    "LocalGroup", "RemoteAccessService", "FirewallPolicy",
-    "LoginSession", "AuthorizationRight", "AuthorizationPlugin",
-    "SystemExtension", "SudoersRule", "CriticalFile", "Computer",
-    "CertificateAuthority", "BluetoothDevice",
-    "KerberosArtifact", "ADGroup",
-    "Vulnerability", "AttackTechnique",
-    "SandboxProfile", "ADUser", "ThreatGroup",
-    "CWE", "Recommendation",
-]
-
-
 def cleanup_test_nodes(session, scan_id: str) -> None:
-    """Remove test nodes by scan_id, then clean up orphans.
+    """Remove the test subgraph for ``scan_id`` without touching unrelated data.
 
-    1. DETACH DELETE all Application nodes matching the test's scan_id
-       (removes the apps and every edge touching them).
-    2. Sweep non-Application nodes that have no remaining relationships.
-       This removes test-created nodes while preserving any nodes still
-       referenced by other (non-test) data.
+    The cleanup flow is intentionally conservative:
+    1. Capture the ids of nodes within two hops of the test applications.
+    2. Delete the test applications themselves by ``scan_id``.
+    3. Delete only captured nodes whose remaining relationships stay within
+       the captured set.
+
+    This avoids global orphan sweeps, which are unsafe against shared Neo4j
+    databases that may contain unrelated but disconnected nodes.
     """
+    result = session.run(
+        """
+        MATCH (a:Application {scan_id: $scan_id})
+        OPTIONAL MATCH (a)-[*1..2]-(n)
+        RETURN collect(DISTINCT elementId(a)) + collect(DISTINCT elementId(n)) AS node_ids
+        """,
+        scan_id=scan_id,
+    )
+    record = result.single()
+    node_ids = list(dict.fromkeys(record["node_ids"] if record else []))
+
     session.run(
         "MATCH (a:Application {scan_id: $scan_id}) DETACH DELETE a",
         scan_id=scan_id,
     )
-    for label in ALL_NODE_LABELS:
-        if label != "Application":
-            session.run(f"MATCH (n:{label}) WHERE NOT (n)--() DELETE n")
+
+    if not node_ids:
+        return
+
+    session.run(
+        """
+        UNWIND $node_ids AS node_id
+        MATCH (n)
+        WHERE elementId(n) = node_id
+          AND NOT EXISTS {
+              MATCH (n)--(outside)
+              WHERE NOT elementId(outside) IN $node_ids
+          }
+        WITH collect(n) AS doomed
+        FOREACH (n IN doomed | DETACH DELETE n)
+        """,
+        node_ids=node_ids,
+    )

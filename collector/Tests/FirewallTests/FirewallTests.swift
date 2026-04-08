@@ -65,8 +65,8 @@ final class FirewallTests: XCTestCase {
         let status = source.parseALFPlist(plist)
         XCTAssertTrue(status.enabled)
         XCTAssertTrue(status.stealthMode)
-        XCTAssertTrue(status.allowSigned)
-        XCTAssertFalse(status.allowBuiltIn)
+        XCTAssertFalse(status.allowSigned)
+        XCTAssertTrue(status.allowBuiltIn)
         XCTAssertEqual(status.appRules.count, 2)
 
         let allowed = status.appRules.first { $0.bundleId == "com.example.app" }
@@ -74,6 +74,20 @@ final class FirewallTests: XCTestCase {
 
         let blocked = status.appRules.first { $0.bundleId == "com.example.blocked" }
         XCTAssertTrue(blocked?.allowIncoming == false)
+    }
+
+    func testParseALFPlistSignedSoftwareToggles() {
+        let source = FirewallDataSource()
+        let plist: [String: Any] = [
+            "globalstate": 1,
+            "allowsignedenabled": 0,
+            "allowdownloadsignedenabled": 1,
+        ]
+
+        let status = source.parseALFPlist(plist)
+
+        XCTAssertTrue(status.allowSigned)
+        XCTAssertFalse(status.allowBuiltIn)
     }
 
     func testParseALFPlistDisabled() {

@@ -377,12 +377,12 @@ def main() -> int:
 
     total_nodes = sum(node_counts.values())
     total_rels = sum(rel_counts.values())
-    print(f"\n{'=' * 60}")
-    print(f"  IMPORT COMPLETE")
-    print(f"{'=' * 60}")
+    print("\n" + "=" * 60)
+    print("  IMPORT COMPLETE")
+    print("=" * 60)
     print(f"  Total nodes:         {total_nodes:>5}")
     print(f"  Total relationships: {total_rels:>5}")
-    print(f"{'─' * 60}")
+    print("─" * 60)
     print(
         f"  Apps: {node_counts['Application']}  "
         f"Entitlements: {node_counts['Entitlement']}  "
@@ -394,12 +394,12 @@ def main() -> int:
         f"MDM: {node_counts['MDM_Profile']}  "
         f"Groups: {node_counts['LocalGroup']}"
     )
-    print(f"{'─' * 60}")
-    print(f"  Security Summary:")
+    print("─" * 60)
+    print("  Security Summary:")
     print(f"    Full Disk Access apps: {security['fda_apps']}")
     print(f"    Injectable apps:       {security['injectable_apps']}")
     print(f"    Electron apps:         {security['electron_apps']}")
-    print(f"{'=' * 60}")
+    print("=" * 60)
     return 0
 
 

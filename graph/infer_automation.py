@@ -35,8 +35,6 @@ def infer(session: Session) -> int:
         MATCH (a:Application)-[:HAS_TCC_GRANT {allowed: true}]->(:TCC_Permission {service: $service})
         WITH DISTINCT a
         WHERE a.bundle_id <> $attacker_id
-          AND size(a.injection_methods) > 0
-          AND NOT coalesce(a.is_sip_protected, false)
         MATCH (target:Application)-[:HAS_TCC_GRANT {allowed: true}]->(:TCC_Permission)
         WITH DISTINCT a, target
         WHERE a <> target

@@ -17,6 +17,7 @@ Exit code 0 on success, 1 on failure.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html as html_mod
 import json
 import logging
@@ -132,6 +133,9 @@ app.add_middleware(
 # ── Dependencies ────────────────────────────────────────────────────────────
 
 logger = logging.getLogger("rootstock.api")
+_LAYOUT_CACHE_LIMIT = 8
+_LAYOUT_CACHE: dict[str, dict[str, tuple[float, float]]] = {}
+_LAYOUT_CACHE_ORDER: list[str] = []
 
 
 def get_session(request: Request):
@@ -153,16 +157,7 @@ def get_read_session(request: Request):
 def serve_viewer(request: Request):
     """Serve the live interactive viewer with real-time graph data."""
     with request.app.state.driver.session() as session:
-        hostname = _get_hostname(session)
-        data = build_opengraph(session, hostname)
-
-    graph = data.get("graph", {})
-    node_list = graph.get("nodes", [])
-    edge_list = graph.get("edges", [])
-
-    n_nodes = len(node_list)
-    iters = min(300, max(100, 500 - n_nodes // 10))
-    compute_layout(node_list, edge_list, iterations=iters)
+        hostname, data = _build_live_graph(session)
 
     template_path = Path(__file__).parent / "viewer_template.html"
     template = template_path.read_text()
@@ -246,16 +241,7 @@ def get_stats(session=Depends(get_session)):
 @app.get("/api/graph")
 def get_graph(session=Depends(get_session)):
     """Return the full OpenGraph JSON for viewer refresh."""
-    hostname = _get_hostname(session)
-    data = build_opengraph(session, hostname)
-
-    graph = data.get("graph", {})
-    node_list = graph.get("nodes", [])
-    edge_list = graph.get("edges", [])
-    n_nodes = len(node_list)
-    iters = min(300, max(100, 500 - n_nodes // 10))
-    compute_layout(node_list, edge_list, iterations=iters)
-
+    _hostname, data = _build_live_graph(session)
     return data
 
 
@@ -496,6 +482,86 @@ def _get_hostname(session) -> str:
     if row and row["scan_id"]:
         return row["scan_id"][:8]
     return "rootstock"
+
+
+def _build_live_graph(session) -> tuple[str, dict[str, Any]]:
+    """Build the live graph payload and reuse cached layout positions when possible."""
+    hostname = _get_hostname(session)
+    data = build_opengraph(session, hostname)
+    _apply_cached_layout(hostname, data)
+    return hostname, data
+
+
+def _apply_cached_layout(hostname: str, data: dict[str, Any]) -> None:
+    graph = data.get("graph", {})
+    node_list = graph.get("nodes", [])
+    edge_list = graph.get("edges", [])
+    if not node_list:
+        return
+
+    cache_key = _layout_cache_key(hostname, node_list, edge_list)
+    cached_positions = _LAYOUT_CACHE.get(cache_key)
+    if cached_positions is None:
+        n_nodes = len(node_list)
+        iters = min(300, max(100, 500 - n_nodes // 10))
+        compute_layout(node_list, edge_list, iterations=iters)
+        _store_layout_cache(
+            cache_key,
+            {
+                node["id"]: (node["x"], node["y"])
+                for node in node_list
+                if "id" in node and "x" in node and "y" in node
+            },
+        )
+        return
+
+    for node in node_list:
+        position = cached_positions.get(node.get("id"))
+        if position is None:
+            n_nodes = len(node_list)
+            iters = min(300, max(100, 500 - n_nodes // 10))
+            compute_layout(node_list, edge_list, iterations=iters)
+            _store_layout_cache(
+                cache_key,
+                {
+                    current["id"]: (current["x"], current["y"])
+                    for current in node_list
+                    if "id" in current and "x" in current and "y" in current
+                },
+            )
+            return
+        node["x"], node["y"] = position
+
+
+def _layout_cache_key(
+    hostname: str, node_list: list[dict[str, Any]], edge_list: list[dict[str, Any]]
+) -> str:
+    payload = {
+        "hostname": hostname,
+        "nodes": sorted(
+            (str(node.get("id", "")), str(node.get("kind", "")), str(node.get("label", "")))
+            for node in node_list
+        ),
+        "edges": sorted(
+            (
+                str(edge.get("source", "")),
+                str(edge.get("target", "")),
+                str(edge.get("kind", "")),
+            )
+            for edge in edge_list
+        ),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _store_layout_cache(cache_key: str, positions: dict[str, tuple[float, float]]) -> None:
+    if cache_key not in _LAYOUT_CACHE:
+        _LAYOUT_CACHE_ORDER.append(cache_key)
+    _LAYOUT_CACHE[cache_key] = positions
+    while len(_LAYOUT_CACHE_ORDER) > _LAYOUT_CACHE_LIMIT:
+        oldest = _LAYOUT_CACHE_ORDER.pop(0)
+        _LAYOUT_CACHE.pop(oldest, None)
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────

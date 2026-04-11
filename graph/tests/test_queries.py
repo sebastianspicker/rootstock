@@ -23,6 +23,19 @@ from conftest import cleanup_test_nodes
 
 QUERIES_DIR = Path(__file__).parent.parent / "queries"
 EXPECTED_QUERY_COUNT = 101
+_REACHABILITY_QUERY_FILES = [
+    "41-owned-to-fda.cypher",
+    "42-owned-reachable.cypher",
+    "44-paths-to-target.cypher",
+    "45-owned-blast-radius.cypher",
+    "47-owned-to-tier0.cypher",
+    "57-tier0-inbound-control.cypher",
+]
+_REQUIRED_ATTACK_EDGES = {
+    "CAN_CHANGE_PASSWORD",
+    "CAN_READ_KERBEROS",
+    "SHARES_KEYCHAIN_GROUP",
+}
 
 _HEADER_RE = re.compile(
     r"^//\s*(?P<key>Name|Purpose|Category|Severity|Parameters|CVE|ATT&CK):\s*(?P<value>.+)$",
@@ -51,6 +64,10 @@ def _parse_header(path: Path) -> dict[str, str]:
 
 def _all_cypher_files() -> list[Path]:
     return sorted(QUERIES_DIR.glob("*.cypher"))
+
+
+def _query_text(filename: str) -> str:
+    return (QUERIES_DIR / filename).read_text(encoding="utf-8")
 
 
 def _first_statement(cypher: str) -> str:
@@ -251,6 +268,17 @@ class TestQueryFileStructure:
             if not ids:
                 bad.append(f"{path.name}: '{attack_val}' has no valid technique IDs")
         assert not bad, f"Invalid ATT&CK header format: {bad}"
+
+    def test_reachability_queries_include_all_attack_edges(self):
+        for filename in _REACHABILITY_QUERY_FILES:
+            text = _query_text(filename)
+            for edge in _REQUIRED_ATTACK_EDGES:
+                assert edge in text, f"{filename} is missing {edge}"
+
+    def test_query_62_bounds_certificate_chain_depth(self):
+        text = _query_text("62-non-apple-ca-chain.cypher")
+        assert "[:ISSUED_BY*0..10]" in text
+        assert "[:ISSUED_BY*0..]" not in text
 
 
 # ── Layer 2: Syntax validation (Neo4j EXPLAIN) ────────────────────────────────

@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import copy
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -86,6 +87,41 @@ class TestStaticEndpoints:
             q = response.json()[0]
             expected_keys = {"id", "filename", "name", "purpose", "category", "severity", "parameters"}
             assert expected_keys.issubset(set(q.keys()))
+
+    def test_graph_layout_is_cached_for_identical_payloads(self, client):
+        from server import _LAYOUT_CACHE, _LAYOUT_CACHE_ORDER
+
+        _LAYOUT_CACHE.clear()
+        _LAYOUT_CACHE_ORDER.clear()
+
+        graph_payload = {
+            "graph": {
+                "nodes": [
+                    {"id": "n1", "kind": "rs_Application", "label": "App One"},
+                    {"id": "n2", "kind": "rs_TCCPermission", "label": "FDA"},
+                ],
+                "edges": [
+                    {"source": "n1", "target": "n2", "kind": "rs_HasTCCGrant"},
+                ],
+            }
+        }
+
+        def fake_layout(nodes, _edges, iterations):
+            for index, node in enumerate(nodes):
+                node["x"] = float(index)
+                node["y"] = float(iterations + index)
+
+        with patch("server._get_hostname", return_value="cached-host"), patch(
+            "server.build_opengraph",
+            side_effect=lambda *_args, **_kwargs: copy.deepcopy(graph_payload),
+        ), patch("server.compute_layout", side_effect=fake_layout) as mock_layout:
+            first = client.get("/api/graph")
+            second = client.get("/api/graph")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert mock_layout.call_count == 1
+        assert first.json()["graph"]["nodes"] == second.json()["graph"]["nodes"]
 
 
 class TestOwnedEndpoints:

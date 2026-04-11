@@ -34,6 +34,18 @@ jobs:
     name: Python Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      neo4j:
+        image: neo4j:5.26-community
+        env:
+          NEO4J_AUTH: neo4j/rootstock
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "cypher-shell -a bolt://localhost:7687 -u neo4j -p rootstock 'RETURN 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 12
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
@@ -49,8 +61,10 @@ jobs:
 
       - name: pytest (no Neo4j)
         working-directory: graph
-        # Neo4j-dependent tests skip automatically when no server is available.
-        # File-validation and pure-function tests always run.
+        env:
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: rootstock
         run: pytest tests/ -v --tb=short
 
   # ── Python linting ──────────────────────────────────────────────────────

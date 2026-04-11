@@ -160,8 +160,8 @@ def format_executive_summary(
     lines = [
         f"**Overall Risk: {overall}**",
         "",
-        f"| Severity | Count | Indicator |",
-        f"|----------|------:|-----------|",
+        "| Severity | Count | Indicator |",
+        "|----------|------:|-----------|",
         f"| Critical | {critical_count} |{_risk_bar(critical_count)} |",
         f"| High     | {high_count} |{_risk_bar(high_count)} |",
     ]

@@ -59,15 +59,15 @@ final class QuarantineTests: XCTestCase {
     // MARK: - Quarantine hex string parsing tests
 
     func testParseFullQuarantineString() {
-        // Flags: 0x0083, Timestamp: 0x5f3b3c00 (2020-08-17), Agent: com.apple.Safari
-        let raw = "0083;5f3b3c00;com.apple.Safari;12345678-1234-1234-1234-123456789ABC"
+        // Flags: 0x0063 includes both 0x0040 (approved) and 0x0020 (translocated)
+        let raw = "0063;5f3b3c00;com.apple.Safari;12345678-1234-1234-1234-123456789ABC"
         let info = QuarantineDataSource.parseQuarantineString(raw)
 
         XCTAssertTrue(info.hasQuarantineFlag)
         XCTAssertEqual(info.quarantineAgent, "com.apple.Safari")
         XCTAssertNotNil(info.quarantineTimestamp)
-        XCTAssertTrue(info.wasUserApproved)  // 0x0083 has 0x0040 set
-        XCTAssertTrue(info.wasTranslocated)  // 0x0083 has 0x0020 set
+        XCTAssertTrue(info.wasUserApproved)  // 0x0063 has 0x0040 set
+        XCTAssertTrue(info.wasTranslocated)  // 0x0063 has 0x0020 set
     }
 
     func testParseQuarantineStringNoApproval() {

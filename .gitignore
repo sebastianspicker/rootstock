@@ -21,6 +21,7 @@ htmlcov/
 .worktrees/
 .codex/
 .agents/
+ralph-prompts/
 AUDIT.md
 
 # Real scan data (machine-specific, never commit)

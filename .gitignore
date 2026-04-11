@@ -10,9 +10,18 @@ __pycache__/
 *.pyo
 .ruff_cache/
 .pytest_cache/
+.mypy_cache/
+.venv/
+.tox/
+.coverage
+coverage.xml
+htmlcov/
 *.egg-info/
 .superpowers/
 .worktrees/
+.codex/
+.agents/
+AUDIT.md
 
 # Real scan data (machine-specific, never commit)
 scan.json

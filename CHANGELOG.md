@@ -4,6 +4,22 @@
 - Community file integration (LICENSE, CONTRIBUTING, templates)
 - Conference submission preparation
 
+## v0.8.0 — Hardening & Release Alignment
+
+Correctness-first hardening pass across graph identity, collector semantics, and Cypher accuracy.
+
+- Multi-scan graph identity: composite primary keys (`app_key`, `computer_key`, `profile_key`)
+  allow multiple scans to coexist in the same Neo4j instance without node collisions
+- Thread `scan_id` through all import functions; update Neo4j uniqueness constraints
+- `Bool` → `Bool?` for Firewall and RemoteAccess fields that can be genuinely unknown
+  (not just false) when data is unreadable; collector and schema updated to match
+- Symlink resolution in CodeSigning, ProcessSnapshot, and Quarantine data sources
+- Fix `CHILD_INHERITS_TCC` edge direction in risk scoring (was backwards)
+- Fix `file_acl_escalation` and `mdm_risk` Cypher traversals to use correct relationship paths
+- Fix integration test fixture path; add schema setup to pytest session fixture
+- CI: trigger on both `main` and `dev` branches
+- **Stats:** 31 node types, 785 test functions (506 Python + 279 Swift)
+
 ### Bug Fixes
 - Fix risk scoring Cypher: use EXISTS subqueries instead of OPTIONAL MATCH/count pattern, fix tier comparison from string 'T0' to integer 0
 - Fix injection method matching from 'DYLD' to 'dyld' (case-sensitive match against actual scan data)
@@ -36,7 +52,7 @@ from attack path discovery to a quantitative risk intelligence platform.
 - Added ESF event enrichment and monitoring gap analysis (inference + queries)
 - Added automated remediation recommendation engine with priority-ranked action items
 - Added 7 risk/recommendation Cypher queries (95-101): high-risk apps, risk score distribution, CWE weakness heatmap, memory safety risk, ESF monitoring gaps, top recommendations, app remediation plans
-- Systematic quality audit across collector (23 modules), graph pipeline (17 inference engines), and query library (101 queries)
+- Systematic quality audit across collector (26 modules), graph pipeline (17 inference engines), and query library (101 queries)
 - All subsystems at A-grade quality after review pass
 - **Stats:** 31 node types, 751 test functions (479 Python + 272 Swift)
 

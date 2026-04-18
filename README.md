@@ -226,11 +226,11 @@ Environment variables for Neo4j connection: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PA
 
 | Category | Count | Details |
 |----------|-------|---------|
-| Collector modules | 23 | TCC, entitlements, code signing, XPC, persistence, keychain, MDM, groups, remote access, firewall, login sessions, authorization DB/plugins, system extensions, sudoers, processes, file ACLs, shell hooks, physical security, AD, Kerberos, sandbox, quarantine |
-| Graph node types | 29 | Application, TCC_Permission, Entitlement, User, XPC_Service, LaunchItem, Keychain_Item, MDM_Profile, Computer, Vulnerability, CWE, AttackTechnique, ThreatGroup, ADUser, Recommendation, and more |
-| Inference engines | 18 | Injection assessment, TCC inheritance, Apple Events, accessibility, Kerberos, automation, Finder FDA, ESF monitoring, risk scoring, recommendations, and more |
+| Collector modules | 26 | TCC, entitlements, code signing, XPC, persistence, keychain, MDM, groups, remote access, firewall, login sessions, authorization DB/plugins, system extensions, sudoers, processes, file ACLs, shell hooks, physical security, AD, Kerberos, sandbox, quarantine |
+| Graph node types | 31 | Application, TCC_Permission, Entitlement, User, XPC_Service, LaunchItem, Keychain_Item, MDM_Profile, Computer, Vulnerability, CWE, AttackTechnique, ThreatGroup, ADUser, Recommendation, and more |
+| Inference engines | 17 | Injection assessment, TCC inheritance, Apple Events, accessibility, Kerberos, automation, Finder FDA, ESF monitoring, risk scoring, recommendations, and more |
 | Cypher queries | 101 | 10 categories: Red Team, Blue Team, Forensic |
-| Python tests | 489 | Unit tests, integration tests, edge case coverage |
+| Python tests | 506 | Unit tests, integration tests, edge case coverage |
 | API endpoints | 15 | REST API with OpenAPI docs, interactive viewer, Cypher console |
 | CVE registry | 30+ | Curated macOS CVEs with EPSS/KEV/NVD live enrichment |
 
@@ -339,7 +339,7 @@ graph/                     Neo4j import, inference, query engine & API
 ├── viewer_template.html   Interactive Canvas-based graph viewer
 ├── pipeline.sh            One-command pipeline (schema → import → infer → classify → report)
 ├── queries/               101 pre-built Cypher queries (10 categories)
-└── tests/                 489 Python tests
+└── tests/                 506 Python tests
 
 scripts/
 ├── validate-scan.py       Output validation script

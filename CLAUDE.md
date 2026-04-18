@@ -14,9 +14,9 @@ Think: BloodHound for macOS-native security boundaries.
 
 ## Project Phase
 
-**Current phase:** Post-Phase 7 — SOTA Review & Improvement
-**Status:** All 7 phases complete + full-repo review. Collector has 23 data source modules,
-graph pipeline has 18 inference engines, 101 Cypher queries, 29 node types, and 489 Python tests.
+**Current phase:** Post-Phase 7 — Hardening & Release Alignment
+**Status:** All 7 phases complete + full-repo review. Collector has 26 data source modules,
+graph pipeline has 17 inference engines, 101 Cypher queries, 31 node types, and 506 Python tests.
 All subsystems at A-grade quality after systematic audit and improvement pass.
 
 ## Repository Layout
@@ -29,7 +29,7 @@ rootstock/
 ├── ROADMAP.md                # Full development roadmap (7 phases)
 ├── README.md                 # Public-facing project README
 │
-├── collector/                # Swift-based macOS collector (23 modules)
+├── collector/                # Swift-based macOS collector (26 modules)
 │   ├── Package.swift
 │   └── Sources/
 │       ├── RootstockCLI/     # CLI entry point + ScanOrchestrator

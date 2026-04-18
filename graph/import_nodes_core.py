@@ -45,8 +45,9 @@ def import_computer(
     """MERGE a Computer node representing the scanned host. Returns 1."""
     session.run(
         """
-        MERGE (c:Computer {hostname: $hostname})
+        MERGE (c:Computer {computer_key: $computer_key})
         SET c.macos_version = $macos_version,
+            c.hostname = $hostname,
             c.scan_id = $scan_id,
             c.scanned_at = $scanned_at,
             c.collector_version = $collector_version,
@@ -70,6 +71,7 @@ def import_computer(
             c.collection_error_count = $collection_error_count,
             c.collection_error_sources = $collection_error_sources
         """,
+        computer_key=f"{computer.scan_id}:{computer.hostname}",
         hostname=computer.hostname,
         macos_version=computer.macos_version,
         scan_id=computer.scan_id,
@@ -102,12 +104,12 @@ def import_installed_on(session: Session, hostname: str, scan_id: str) -> int:
     """Create INSTALLED_ON edges from this scan's Application nodes to the Computer node. Returns edge count."""
     result = session.run(
         """
-        MATCH (a:Application), (c:Computer {hostname: $hostname})
+        MATCH (a:Application), (c:Computer {computer_key: $computer_key})
         WHERE a.scan_id = $scan_id
         MERGE (a)-[r:INSTALLED_ON]->(c)
         RETURN count(r) AS n
         """,
-        hostname=hostname,
+        computer_key=f"{scan_id}:{hostname}",
         scan_id=scan_id,
     )
     return result.single()["n"]
@@ -125,24 +127,26 @@ def import_local_to(session: Session, hostname: str, scan_id: str) -> int:
     """
     result = session.run(
         """
-        MATCH (c:Computer {hostname: $hostname})
+        MATCH (c:Computer {computer_key: $computer_key})
         WITH c
-        // Source 1: Users referenced by launch items of this scan's apps
-        OPTIONAL MATCH (:Application {scan_id: $scan_id})-[:PERSISTS_VIA]->(li:LaunchItem)-[:RUNS_AS]->(u1:User)
-        WITH c, collect(DISTINCT u1) AS launch_users
-        // Source 2: Users in local groups (scoped: only users already found via this scan)
-        OPTIONAL MATCH (u2:User)-[:MEMBER_OF]->(:LocalGroup)
-        WHERE u2 IN launch_users
-        WITH c, launch_users, collect(DISTINCT u2) AS group_users
-        // Source 3: Users with login sessions (scoped: only users seen in this scan)
-        OPTIONAL MATCH (u3:User)-[:HAS_SESSION]->(:LoginSession)
-        WITH c, launch_users + group_users + collect(DISTINCT u3) AS all_users
+        // Source 1: users with sessions on this host
+        OPTIONAL MATCH (u1:User)-[:HAS_SESSION]->(:LoginSession {hostname: $hostname})
+        WITH c, collect(DISTINCT u1) AS session_users
+        // Source 2: users running launch items belonging to this scan's apps
+        OPTIONAL MATCH (:Application {scan_id: $scan_id})-[:PERSISTS_VIA]->(:LaunchItem)-[:RUNS_AS]->(u2:User)
+        WITH c, session_users, collect(DISTINCT u2) AS launch_users
+        // Source 3: users in host-local groups discovered for this scan
+        OPTIONAL MATCH (u3:User)-[m:MEMBER_OF]->(:LocalGroup)
+        WHERE m.scan_id = $scan_id
+        WITH c, session_users, launch_users, collect(DISTINCT u3) AS group_users
+        WITH c, session_users + launch_users + group_users AS all_users
         UNWIND all_users AS u
         WITH DISTINCT c, u
         WHERE u IS NOT NULL
         MERGE (u)-[r:LOCAL_TO]->(c)
         RETURN count(r) AS n
         """,
+        computer_key=f"{scan_id}:{hostname}",
         hostname=hostname,
         scan_id=scan_id,
     )
@@ -159,6 +163,7 @@ def import_applications(
     now = _now_iso()
     records = [
         {
+            "app_key": f"{scan_id}:{app.bundle_id}:{app.path}",
             "bundle_id": app.bundle_id,
             "name": app.name,
             "path": app.path,
@@ -206,8 +211,9 @@ def import_applications(
     session.run(
         """
         UNWIND $records AS r
-        MERGE (a:Application {bundle_id: r.bundle_id})
-        SET a.name             = r.name,
+        MERGE (a:Application {app_key: r.app_key})
+        SET a.bundle_id        = r.bundle_id,
+            a.name             = r.name,
             a.path             = r.path,
             a.version          = r.version,
             a.team_id          = r.team_id,
@@ -283,7 +289,7 @@ def import_tcc_grants(
     result = session.run(
         """
         UNWIND $records AS r
-        MATCH (a:Application {bundle_id: r.client})
+        MATCH (a:Application {scan_id: r.scan_id, bundle_id: r.client})
         MATCH (t:TCC_Permission {service: r.service})
         MERGE (a)-[rel:HAS_TCC_GRANT {scope: r.scope}]->(t)
         SET rel.allowed       = r.allowed,
@@ -307,7 +313,7 @@ def import_tcc_grants(
 
 
 def import_entitlements(
-    session: Session, apps: list[ApplicationData]
+    session: Session, apps: list[ApplicationData], scan_id: str
 ) -> tuple[int, int]:
     """
     MERGE Entitlement nodes and HAS_ENTITLEMENT relationships.
@@ -316,7 +322,9 @@ def import_entitlements(
     # Flatten app → entitlement pairs, keyed by bundle_id
     records = [
         {
+            "scan_id": scan_id,
             "bundle_id": app.bundle_id,
+            "path": app.path,
             "name": ent.name,
             "is_private": ent.is_private,
             "category": ent.category,
@@ -345,7 +353,7 @@ def import_entitlements(
     result = session.run(
         """
         UNWIND $records AS r
-        MATCH (a:Application {bundle_id: r.bundle_id})
+        MATCH (a:Application {scan_id: r.scan_id, bundle_id: r.bundle_id, path: r.path})
         MATCH (e:Entitlement {name: r.name})
         MERGE (a)-[rel:HAS_ENTITLEMENT]->(e)
         RETURN count(rel) AS rels
@@ -360,7 +368,7 @@ def import_entitlements(
 
 
 def import_certificate_authorities(
-    session: Session, apps: list[ApplicationData]
+    session: Session, apps: list[ApplicationData], scan_id: str
 ) -> tuple[int, int, int]:
     """
     Extract CertificateAuthority nodes from application certificate chains.
@@ -401,7 +409,12 @@ def import_certificate_authorities(
 
     # SIGNED_BY_CA: Application -> leaf cert's CA (first in chain)
     signed_by_records = [
-        {"bundle_id": app.bundle_id, "sha256": app.certificate_chain[0].sha256}
+        {
+            "scan_id": scan_id,
+            "bundle_id": app.bundle_id,
+            "path": app.path,
+            "sha256": app.certificate_chain[0].sha256,
+        }
         for app in apps
         if app.certificate_chain
     ]
@@ -411,7 +424,7 @@ def import_certificate_authorities(
         result = session.run(
             """
             UNWIND $records AS r
-            MATCH (a:Application {bundle_id: r.bundle_id})
+            MATCH (a:Application {scan_id: r.scan_id, bundle_id: r.bundle_id, path: r.path})
             MATCH (ca:CertificateAuthority {sha256: r.sha256})
             MERGE (a)-[rel:SIGNED_BY_CA]->(ca)
             RETURN count(rel) AS n
@@ -474,7 +487,7 @@ def import_signed_by_team(session: Session) -> int:
 
 
 def import_sandbox_profiles(
-    session: Session, profiles: list[SandboxProfileData]
+    session: Session, profiles: list[SandboxProfileData], scan_id: str
 ) -> tuple[int, int]:
     """
     MERGE SandboxProfile nodes and HAS_SANDBOX_PROFILE relationships.
@@ -486,6 +499,8 @@ def import_sandbox_profiles(
     now = _now_iso()
     records = [
         {
+            "profile_key": f"{scan_id}:{p.bundle_id}",
+            "scan_id": scan_id,
             "bundle_id": p.bundle_id,
             "profile_source": p.profile_source,
             "file_read_rules": p.file_read_rules,
@@ -505,8 +520,10 @@ def import_sandbox_profiles(
     session.run(
         """
         UNWIND $records AS r
-        MERGE (sp:SandboxProfile {bundle_id: r.bundle_id})
-        SET sp.profile_source           = r.profile_source,
+        MERGE (sp:SandboxProfile {profile_key: r.profile_key})
+        SET sp.scan_id                  = r.scan_id,
+            sp.bundle_id                = r.bundle_id,
+            sp.profile_source           = r.profile_source,
             sp.file_read_rules          = r.file_read_rules,
             sp.file_write_rules         = r.file_write_rules,
             sp.mach_lookup_rules        = r.mach_lookup_rules,
@@ -524,8 +541,8 @@ def import_sandbox_profiles(
     result = session.run(
         """
         UNWIND $records AS r
-        MATCH (a:Application {bundle_id: r.bundle_id})
-        MATCH (sp:SandboxProfile {bundle_id: r.bundle_id})
+        MATCH (a:Application {scan_id: r.scan_id, bundle_id: r.bundle_id})
+        MATCH (sp:SandboxProfile {profile_key: r.profile_key})
         MERGE (a)-[rel:HAS_SANDBOX_PROFILE]->(sp)
         RETURN count(rel) AS n
         """,

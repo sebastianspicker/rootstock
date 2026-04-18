@@ -131,4 +131,23 @@ final class RemoteAccessTests: XCTestCase {
             XCTAssertTrue(error.recoverable, "All remote access errors should be recoverable")
         }
     }
+
+    func testParseDisabledServices() {
+        let output = "\"com.openssh.sshd\" => true\n\"com.apple.screensharing\" => false"
+        let result = RemoteAccessDataSource.parseDisabledServices(output: output)
+        XCTAssertEqual(result["com.openssh.sshd"], true)
+        XCTAssertEqual(result["com.apple.screensharing"], false)
+    }
+
+    func testCommandFailureProducesUnknownState() async {
+        let source = RemoteAccessDataSource(
+            launchctlRunner: { _ in nil }
+        )
+        let result = await source.collect()
+        let services = result.nodes.compactMap { $0 as? RemoteAccessService }
+
+        XCTAssertEqual(services.count, 2)
+        XCTAssertTrue(services.allSatisfy { $0.enabled == nil })
+        XCTAssertFalse(result.errors.isEmpty)
+    }
 }

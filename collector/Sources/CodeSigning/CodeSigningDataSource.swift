@@ -23,8 +23,9 @@ public struct CodeSigningDataSource {
         var errors: [CollectionError] = []
 
         applications = applications.map { app in
-            let info = analyzer.analyze(appPath: app.path)
-            let sipProtected = analyzer.isSIPProtected(appPath: app.path)
+            let resolvedPath = URL(fileURLWithPath: app.path).resolvingSymlinksInPath().path
+            let info = analyzer.analyze(appPath: resolvedPath)
+            let sipProtected = analyzer.isSIPProtected(appPath: resolvedPath)
 
             if info.analysisError {
                 errors.append(CollectionError(
@@ -45,13 +46,13 @@ public struct CodeSigningDataSource {
             // spctl is ~100ms/app; unsigned apps can't be notarized by definition.
             let isNotarized: Bool?
             if !app.isSystem && info.signed {
-                isNotarized = checkNotarization(appPath: app.path)
+                isNotarized = checkNotarization(appPath: resolvedPath)
             } else {
                 isNotarized = nil
             }
 
             let launchConstraint = detectLaunchConstraint(
-                appPath: app.path, signed: info.signed, isSystem: app.isSystem
+                appPath: resolvedPath, signed: info.signed, isSystem: app.isSystem
             )
 
             let chain = info.certificateChain

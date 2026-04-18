@@ -1,8 +1,7 @@
 # ROADMAP.md — Rootstock Development Roadmap
 
-> Complete roadmap from first line of code to community release.
-> Each phase is broken into manageable sections, each achievable in 1–2 weeks.
-> Sections within a phase may partially overlap.
+> Historical roadmap from first line of code to community release.
+> Most roadmap phases are now implemented; current work is a hardening and release-alignment pass.
 
 ---
 

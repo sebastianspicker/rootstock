@@ -9,13 +9,13 @@ public enum RemoteServiceName {
 /// A remote access service (SSH, Screen Sharing) and its configuration.
 public struct RemoteAccessService: Codable, Sendable, GraphNode {
     public let service: String
-    public let enabled: Bool
+    public let enabled: Bool?
     public let port: Int?
     public let config: [String: String]
 
     public var nodeType: String { "RemoteAccessService" }
 
-    public init(service: String, enabled: Bool, port: Int?, config: [String: String]) {
+    public init(service: String, enabled: Bool?, port: Int?, config: [String: String]) {
         self.service = service
         self.enabled = enabled
         self.port = port

@@ -191,7 +191,7 @@ class LocalGroupData(BaseModel):
 
 class RemoteAccessServiceData(BaseModel):
     service: Literal["ssh", "screen_sharing"]
-    enabled: bool
+    enabled: bool | None = None
     port: int | None = None
     config: dict[str, str] = Field(default_factory=dict)
 
@@ -202,10 +202,10 @@ class FirewallAppRuleData(BaseModel):
 
 
 class FirewallStatusData(BaseModel):
-    enabled: bool
-    stealth_mode: bool
-    allow_signed: bool
-    allow_built_in: bool
+    enabled: bool | None = None
+    stealth_mode: bool | None = None
+    allow_signed: bool | None = None
+    allow_built_in: bool | None = None
     app_rules: list[FirewallAppRuleData] = Field(default_factory=list)
 
 

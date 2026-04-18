@@ -60,7 +60,9 @@ def import_scan(session, scan: ScanResult) -> None:
     # Report any collection errors from the scan
     if scan.errors:
         for err in scan.errors:
-            print(f"  [{hostname}] WARNING: {err.source}: {err.message}", file=sys.stderr)
+            print(
+                f"  [{hostname}] WARNING: {err.source}: {err.message}", file=sys.stderr
+            )
 
     # Computer node with posture data
     computer = ComputerData(
@@ -95,36 +97,36 @@ def import_scan(session, scan: ScanResult) -> None:
     # All data imports
     n_apps = import_applications(session, scan.applications, scan.scan_id)
     grants_linked, _ = import_tcc_grants(session, scan.tcc_grants, scan.scan_id)
-    import_entitlements(session, scan.applications)
+    import_entitlements(session, scan.applications, scan.scan_id)
     import_signed_by_team(session)
-    import_certificate_authorities(session, scan.applications)
+    import_certificate_authorities(session, scan.applications, scan.scan_id)
     import_xpc_services(session, scan.xpc_services)
-    import_keychain_items(session, scan.keychain_acls)
+    import_keychain_items(session, scan.keychain_acls, scan.scan_id)
     import_mdm_profiles(session, scan.mdm_profiles)
-    import_launch_items(session, scan.launch_items)
-    import_local_groups(session, scan.local_groups)
+    import_launch_items(session, scan.launch_items, scan.scan_id)
+    import_local_groups(session, scan.local_groups, scan.scan_id)
     import_remote_access_services(session, scan.remote_access_services)
-    import_firewall_status(session, scan.firewall_status)
+    import_firewall_status(session, scan.firewall_status, scan.scan_id)
     import_login_sessions(session, scan.login_sessions, hostname)
     import_authorization_rights(session, scan.authorization_rights)
     import_authorization_plugins(session, scan.authorization_plugins)
     import_system_extensions(session, scan.system_extensions)
     import_sudoers_rules(session, scan.sudoers_rules)
-    import_running_processes(session, scan.running_processes)
+    import_running_processes(session, scan.running_processes, scan.scan_id)
     import_user_details(session, scan.user_details)
     import_file_acls(session, scan.file_acls)
 
     # AD binding, Kerberos artifacts, and sandbox profiles
-    import_ad_binding(session, scan.ad_binding, hostname)
-    import_kerberos_artifacts(session, scan.kerberos_artifacts, hostname)
-    import_sandbox_profiles(session, scan.sandbox_profiles)
+    import_ad_binding(session, scan.ad_binding, hostname, scan.scan_id)
+    import_kerberos_artifacts(session, scan.kerberos_artifacts, hostname, scan.scan_id)
+    import_sandbox_profiles(session, scan.sandbox_profiles, scan.scan_id)
 
     # Computer linkage
     n_installed = import_installed_on(session, hostname, scan.scan_id)
     n_local_to = import_local_to(session, hostname, scan.scan_id)
 
     # Bluetooth devices
-    import_bluetooth_devices(session, scan.bluetooth_devices, hostname)
+    import_bluetooth_devices(session, scan.bluetooth_devices, hostname, scan.scan_id)
 
     print(
         f"  [{hostname}] {n_apps} apps, {grants_linked} grants, "
@@ -170,6 +172,7 @@ def main() -> int:
     hostnames = [s.hostname for s in scans]
     if len(set(hostnames)) != len(hostnames):
         from collections import Counter
+
         dupes = [h for h, c in Counter(hostnames).items() if c > 1]
         print(
             f"ERROR: Duplicate hostnames detected: {dupes}. "

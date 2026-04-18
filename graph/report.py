@@ -24,6 +24,7 @@ import socket
 import sys
 from pathlib import Path
 
+from neo4j_connection import add_neo4j_args, connect_from_args
 from query_runner import discover_queries, load_cypher
 from utils import first_cypher_statement, run_query
 from report_formatters import (  # noqa: F401
@@ -59,6 +60,7 @@ _DEFAULT_PARAMS = {
 
 # ── Query Execution ───────────────────────────────────────────────────────────
 
+
 def _has_parameters(query: dict) -> bool:
     """Check if a query descriptor declares parameters."""
     return query.get("parameters", "none").lower() != "none"
@@ -91,29 +93,45 @@ def run_all_queries(driver) -> dict[str, list[dict] | str]:
 
 # ── Scan Metadata ─────────────────────────────────────────────────────────────
 
+
 def get_scan_metadata_from_neo4j(driver) -> dict:
     """Query Neo4j for node counts and available scan metadata."""
     with driver.session() as session:
         try:
-            row = dict(session.run("""
+            row = dict(
+                session.run("""
                 MATCH (a:Application)
                 WITH count(a) AS app_count
                 OPTIONAL MATCH (g:Application)-[:HAS_TCC_GRANT]->(p:TCC_Permission)
                 WITH app_count, count(g) AS tcc_grant_count
                 OPTIONAL MATCH (e:Application)-[:HAS_ENTITLEMENT]->(en:Entitlement)
                 RETURN app_count, tcc_grant_count, count(en) AS entitlement_count
-            """).single() or {})
+            """).single()
+                or {}
+            )
         except Exception as e:
             print(f"  ⚠ Metadata query failed: {e}", file=sys.stderr)
             row = {}
 
         try:
-            meta_row = dict(session.run("""
-                MATCH (a:Application) WHERE a.scan_id IS NOT NULL
-                RETURN a.scan_id AS scan_id, a.hostname AS hostname,
-                       a.macos_version AS macos_version
+            meta_row = dict(
+                session.run("""
+                MATCH (c:Computer)
+                RETURN c.scan_id AS scan_id,
+                       c.hostname AS hostname,
+                       c.macos_version AS macos_version,
+                       c.collector_version AS collector_version,
+                       c.scanned_at AS timestamp,
+                       c.elevation_is_root AS is_root,
+                       c.elevation_has_fda AS has_fda,
+                       c.icloud_signed_in AS icloud_signed_in,
+                       c.icloud_drive_enabled AS icloud_drive_enabled,
+                       c.icloud_keychain_enabled AS icloud_keychain_enabled
+                ORDER BY c.scanned_at DESC
                 LIMIT 1
-            """).single() or {})
+            """).single()
+                or {}
+            )
         except Exception as e:
             print(f"  ⚠ Scan metadata query failed: {e}", file=sys.stderr)
             meta_row = {}
@@ -152,11 +170,11 @@ def get_scan_metadata_from_json(json_path: Path) -> dict:
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Rootstock Security Assessment Report Generator"
     )
-    from neo4j_connection import add_neo4j_args
     add_neo4j_args(parser)
     parser.add_argument("--output", required=True, help="Output report file path")
     parser.add_argument(
@@ -172,8 +190,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Connect to Neo4j
-    from neo4j_connection import connect
-    driver = connect(args.uri, args.neo4j_user, args.neo4j_password)
+    driver = connect_from_args(args)
 
     # Gather metadata
     if args.scan_json:

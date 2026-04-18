@@ -30,6 +30,7 @@ from opengraph_export import (
 
 # ── Node ID generation ──────────────────────────────────────────────────────
 
+
 class TestNodeIdGeneration:
     def test_basic_node_id(self):
         nid = make_node_id("mymac", "Application", "com.1password.1password")
@@ -59,10 +60,24 @@ class TestNodeIdGeneration:
 
 # ── Node key extraction ─────────────────────────────────────────────────────
 
+
 class TestNodeKey:
     def test_application_key(self):
-        key = _node_key("Application", {"bundle_id": "com.example.app", "name": "Example"})
-        assert key == "com.example.app"
+        key = _node_key(
+            "Application",
+            {
+                "app_key": "scan-1:com.example.app:/Applications/Example.app",
+                "bundle_id": "com.example.app",
+                "name": "Example",
+            },
+        )
+        assert key == "scan-1:com.example.app:/Applications/Example.app"
+
+    def test_computer_key_prefers_composite_identity(self):
+        key = _node_key(
+            "Computer", {"computer_key": "scan-1:host-a", "hostname": "host-a"}
+        )
+        assert key == "scan-1:host-a"
 
     def test_tcc_permission_key(self):
         key = _node_key("TCC_Permission", {"service": "kTCCServiceMicrophone"})
@@ -73,7 +88,9 @@ class TestNodeKey:
         assert key == "com.apple.security.app-sandbox"
 
     def test_keychain_item_composite_key(self):
-        key = _node_key("Keychain_Item", {"label": "My Credential", "kind": "generic_password"})
+        key = _node_key(
+            "Keychain_Item", {"label": "My Credential", "kind": "generic_password"}
+        )
         assert key == "My Credential-generic_password"
 
     def test_user_key(self):
@@ -113,7 +130,9 @@ class TestNodeKey:
         assert key == "admin:ALL:ALL"
 
     def test_bluetooth_device_key(self):
-        key = _node_key("BluetoothDevice", {"address": "AA:BB:CC:DD:EE:FF", "name": "Keyboard"})
+        key = _node_key(
+            "BluetoothDevice", {"address": "AA:BB:CC:DD:EE:FF", "name": "Keyboard"}
+        )
         assert key == "AA:BB:CC:DD:EE:FF"
 
     def test_unknown_label_fallback(self):
@@ -127,9 +146,12 @@ class TestNodeKey:
 
 # ── Node display names ──────────────────────────────────────────────────────
 
+
 class TestNodeDisplayName:
     def test_application_display_name(self):
-        name = _node_display_name("Application", {"name": "Safari", "bundle_id": "com.apple.Safari"})
+        name = _node_display_name(
+            "Application", {"name": "Safari", "bundle_id": "com.apple.Safari"}
+        )
         assert name == "Safari"
 
     def test_application_fallback_to_bundle_id(self):
@@ -137,15 +159,21 @@ class TestNodeDisplayName:
         assert name == "com.example.app"
 
     def test_tcc_permission_display_name(self):
-        name = _node_display_name("TCC_Permission", {"display_name": "Microphone", "service": "kTCCServiceMicrophone"})
+        name = _node_display_name(
+            "TCC_Permission",
+            {"display_name": "Microphone", "service": "kTCCServiceMicrophone"},
+        )
         assert name == "Microphone"
 
     def test_entitlement_display_name(self):
-        name = _node_display_name("Entitlement", {"name": "com.apple.security.app-sandbox"})
+        name = _node_display_name(
+            "Entitlement", {"name": "com.apple.security.app-sandbox"}
+        )
         assert name == "com.apple.security.app-sandbox"
 
 
 # ── Property serialization ──────────────────────────────────────────────────
+
 
 class TestSerializeProps:
     def test_primitives_pass_through(self):
@@ -166,16 +194,21 @@ class TestSerializeProps:
 
 # ── Type map completeness ───────────────────────────────────────────────────
 
+
 class TestTypeMaps:
     def test_all_node_types_have_kind(self):
         for label, info in NODE_TYPE_MAP.items():
             assert "kind" in info, f"{label} missing 'kind'"
-            assert info["kind"].startswith("rs_"), f"{label} kind should start with 'rs_'"
+            assert info["kind"].startswith("rs_"), (
+                f"{label} kind should start with 'rs_'"
+            )
 
     def test_all_node_types_have_icon(self):
         for label, info in NODE_TYPE_MAP.items():
             assert "icon" in info, f"{label} missing 'icon'"
-            assert info["icon"].startswith("fa-"), f"{label} icon should be Font Awesome"
+            assert info["icon"].startswith("fa-"), (
+                f"{label} icon should be Font Awesome"
+            )
 
     def test_all_node_types_have_color(self):
         for label, info in NODE_TYPE_MAP.items():
@@ -185,7 +218,9 @@ class TestTypeMaps:
     def test_all_edge_types_have_kind(self):
         for rel_type, info in EDGE_TYPE_MAP.items():
             assert "kind" in info, f"{rel_type} missing 'kind'"
-            assert info["kind"].startswith("rs_"), f"{rel_type} kind should start with 'rs_'"
+            assert info["kind"].startswith("rs_"), (
+                f"{rel_type} kind should start with 'rs_'"
+            )
 
     def test_all_edge_types_have_traversable(self):
         for rel_type, info in EDGE_TYPE_MAP.items():
@@ -197,11 +232,12 @@ class TestTypeMaps:
         assert len(NODE_TYPE_MAP) == 29
 
     def test_edge_type_count(self):
-        """Verify all 50 Rootstock edge types are mapped (47 post-Phase 6 + HAS_CWE + HAS_RECOMMENDATION + MITIGATES)."""
-        assert len(EDGE_TYPE_MAP) == 50
+        """Verify all 51 Rootstock edge types are mapped including AD_USER_OF."""
+        assert len(EDGE_TYPE_MAP) == 51
 
 
 # ── Primary label selection ─────────────────────────────────────────────────
+
 
 class TestPrimaryLabel:
     def test_known_label_selected(self):
@@ -218,6 +254,7 @@ class TestPrimaryLabel:
 
 
 # ── OpenGraph JSON format validation ────────────────────────────────────────
+
 
 class TestOpenGraphFormat:
     def test_minimal_opengraph_structure(self):

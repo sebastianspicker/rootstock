@@ -24,18 +24,21 @@ TEST_SCAN_ID = "test-sandbox-00000000-0000-0000-0000-000000000001"
 class TestSandboxModels:
     def test_sandbox_profile_data_validates(self):
         from models import SandboxProfileData
-        profile = SandboxProfileData.model_validate({
-            "bundle_id": "com.example.app",
-            "profile_source": "entitlements",
-            "file_read_rules": ["rule1"],
-            "file_write_rules": [],
-            "mach_lookup_rules": ["rule2"],
-            "network_rules": ["com.apple.security.network.client"],
-            "iokit_rules": [],
-            "exception_count": 2,
-            "has_unconstrained_network": True,
-            "has_unconstrained_file_read": False,
-        })
+
+        profile = SandboxProfileData.model_validate(
+            {
+                "bundle_id": "com.example.app",
+                "profile_source": "entitlements",
+                "file_read_rules": ["rule1"],
+                "file_write_rules": [],
+                "mach_lookup_rules": ["rule2"],
+                "network_rules": ["com.apple.security.network.client"],
+                "iokit_rules": [],
+                "exception_count": 2,
+                "has_unconstrained_network": True,
+                "has_unconstrained_file_read": False,
+            }
+        )
         assert profile.bundle_id == "com.example.app"
         assert profile.has_unconstrained_network is True
         assert profile.has_unconstrained_file_read is False
@@ -43,10 +46,13 @@ class TestSandboxModels:
 
     def test_sandbox_profile_data_defaults(self):
         from models import SandboxProfileData
-        profile = SandboxProfileData.model_validate({
-            "bundle_id": "com.example.app",
-            "profile_source": "none",
-        })
+
+        profile = SandboxProfileData.model_validate(
+            {
+                "bundle_id": "com.example.app",
+                "profile_source": "none",
+            }
+        )
         assert profile.file_read_rules == []
         assert profile.file_write_rules == []
         assert profile.mach_lookup_rules == []
@@ -59,62 +65,81 @@ class TestSandboxModels:
     def test_sandbox_profile_missing_required_raises(self):
         from models import SandboxProfileData
         from pydantic import ValidationError
+
         with pytest.raises(ValidationError):
-            SandboxProfileData.model_validate({
-                "profile_source": "entitlements",
-            })
+            SandboxProfileData.model_validate(
+                {
+                    "profile_source": "entitlements",
+                }
+            )
 
     def test_application_with_sandbox_profile(self):
         from models import ApplicationData
-        app = ApplicationData.model_validate({
-            "name": "TestApp",
-            "bundle_id": "com.example.test",
-            "path": "/Applications/TestApp.app",
-            "hardened_runtime": True,
-            "library_validation": True,
-            "is_electron": False,
-            "is_system": False,
-            "signed": True,
-            "sandbox_profile": {
+
+        app = ApplicationData.model_validate(
+            {
+                "name": "TestApp",
                 "bundle_id": "com.example.test",
-                "profile_source": "entitlements",
-                "has_unconstrained_network": True,
-            },
-        })
+                "path": "/Applications/TestApp.app",
+                "hardened_runtime": True,
+                "library_validation": True,
+                "is_electron": False,
+                "is_system": False,
+                "signed": True,
+                "sandbox_profile": {
+                    "bundle_id": "com.example.test",
+                    "profile_source": "entitlements",
+                    "has_unconstrained_network": True,
+                },
+            }
+        )
         assert app.sandbox_profile is not None
         assert app.sandbox_profile.bundle_id == "com.example.test"
         assert app.sandbox_profile.has_unconstrained_network is True
 
     def test_application_without_sandbox_profile(self):
         from models import ApplicationData
-        app = ApplicationData.model_validate({
-            "name": "TestApp",
-            "bundle_id": "com.example.test",
-            "path": "/Applications/TestApp.app",
-            "hardened_runtime": True,
-            "library_validation": True,
-            "is_electron": False,
-            "is_system": False,
-            "signed": True,
-        })
+
+        app = ApplicationData.model_validate(
+            {
+                "name": "TestApp",
+                "bundle_id": "com.example.test",
+                "path": "/Applications/TestApp.app",
+                "hardened_runtime": True,
+                "library_validation": True,
+                "is_electron": False,
+                "is_system": False,
+                "signed": True,
+            }
+        )
         assert app.sandbox_profile is None
 
     def test_fixture_loads_with_sandbox_profiles(self):
         from models import ScanResult
+
         data = json.loads(FIXTURE_PATH.read_text())
         scan = ScanResult.model_validate(data)
         assert len(scan.sandbox_profiles) == 2
-        iterm = next(p for p in scan.sandbox_profiles if p.bundle_id == "com.googlecode.iterm2")
+        iterm = next(
+            p for p in scan.sandbox_profiles if p.bundle_id == "com.googlecode.iterm2"
+        )
         assert iterm.profile_source == "entitlements"
         assert iterm.has_unconstrained_network is False
-        slack = next(p for p in scan.sandbox_profiles if p.bundle_id == "com.tinyspeck.slackmacgap")
+        slack = next(
+            p
+            for p in scan.sandbox_profiles
+            if p.bundle_id == "com.tinyspeck.slackmacgap"
+        )
         assert slack.has_unconstrained_network is True
 
     def test_fixture_app_has_embedded_sandbox_profile(self):
         from models import ScanResult
+
         data = json.loads(FIXTURE_PATH.read_text())
         scan = ScanResult.model_validate(data)
-        iterm = next(a for a in scan.applications if a.bundle_id == "com.googlecode.iterm2")
+        iterm = next(
+            a for a in scan.applications if a.bundle_id == "com.googlecode.iterm2"
+        )
         assert iterm.sandbox_profile is not None
         assert iterm.sandbox_profile.bundle_id == "com.googlecode.iterm2"
 
@@ -135,24 +160,26 @@ class TestSandboxImport:
     def test_import_sandbox_profiles(self, neo4j_session):
         from import_nodes import import_applications, import_sandbox_profiles
         from models import ScanResult
+
         data = json.loads(FIXTURE_PATH.read_text())
         data["scan_id"] = TEST_SCAN_ID
         scan = ScanResult.model_validate(data)
 
         import_applications(neo4j_session, scan.applications, TEST_SCAN_ID)
-        n_nodes, n_edges = import_sandbox_profiles(neo4j_session, scan.sandbox_profiles)
+        n_nodes, n_edges = import_sandbox_profiles(
+            neo4j_session, scan.sandbox_profiles, TEST_SCAN_ID
+        )
         assert n_nodes == 2
         assert n_edges == 2
 
         # Verify SandboxProfile nodes exist
-        result = neo4j_session.run(
-            "MATCH (sp:SandboxProfile) RETURN count(sp) AS n"
-        )
+        result = neo4j_session.run("MATCH (sp:SandboxProfile) RETURN count(sp) AS n")
         assert result.single()["n"] >= 2
 
     def test_sandbox_profile_properties(self, neo4j_session):
         result = neo4j_session.run(
-            "MATCH (sp:SandboxProfile {bundle_id: 'com.tinyspeck.slackmacgap'}) RETURN sp"
+            "MATCH (sp:SandboxProfile {profile_key: $profile_key}) RETURN sp",
+            profile_key=f"{TEST_SCAN_ID}:com.tinyspeck.slackmacgap",
         )
         row = result.single()
         assert row is not None
@@ -165,9 +192,10 @@ class TestSandboxImport:
     def test_has_sandbox_profile_edge(self, neo4j_session):
         result = neo4j_session.run(
             """
-            MATCH (a:Application {bundle_id: 'com.googlecode.iterm2'})-[:HAS_SANDBOX_PROFILE]->(sp:SandboxProfile)
+            MATCH (a:Application {scan_id: $scan_id, bundle_id: 'com.googlecode.iterm2'})-[:HAS_SANDBOX_PROFILE]->(sp:SandboxProfile)
             RETURN sp.bundle_id AS bundle_id
-            """
+            """,
+            scan_id=TEST_SCAN_ID,
         )
         row = result.single()
         assert row is not None
@@ -176,21 +204,24 @@ class TestSandboxImport:
     def test_sandbox_import_idempotency(self, neo4j_session):
         from import_nodes import import_sandbox_profiles
         from models import ScanResult
+
         data = json.loads(FIXTURE_PATH.read_text())
         data["scan_id"] = TEST_SCAN_ID
         scan = ScanResult.model_validate(data)
 
-        import_sandbox_profiles(neo4j_session, scan.sandbox_profiles)
-        import_sandbox_profiles(neo4j_session, scan.sandbox_profiles)
+        import_sandbox_profiles(neo4j_session, scan.sandbox_profiles, TEST_SCAN_ID)
+        import_sandbox_profiles(neo4j_session, scan.sandbox_profiles, TEST_SCAN_ID)
 
         result = neo4j_session.run(
-            "MATCH (sp:SandboxProfile) WHERE sp.bundle_id IN ['com.googlecode.iterm2', 'com.tinyspeck.slackmacgap'] RETURN count(sp) AS n"
+            "MATCH (sp:SandboxProfile {scan_id: $scan_id}) WHERE sp.bundle_id IN ['com.googlecode.iterm2', 'com.tinyspeck.slackmacgap'] RETURN count(sp) AS n",
+            scan_id=TEST_SCAN_ID,
         )
         assert result.single()["n"] == 2, "Duplicate SandboxProfile nodes created"
 
     def test_import_empty_sandbox_profiles(self, neo4j_session):
         from import_nodes import import_sandbox_profiles
-        n_nodes, n_edges = import_sandbox_profiles(neo4j_session, [])
+
+        n_nodes, n_edges = import_sandbox_profiles(neo4j_session, [], TEST_SCAN_ID)
         assert n_nodes == 0
         assert n_edges == 0
 
@@ -244,6 +275,7 @@ class TestSandboxInference:
 
     def test_infer_sandbox_escape(self, neo4j_session):
         from infer_sandbox import infer
+
         n = infer(neo4j_session)
         assert n >= 1, "Expected at least 1 sandbox inference edge"
 
@@ -262,6 +294,7 @@ class TestSandboxInference:
 
     def test_infer_idempotent(self, neo4j_session):
         from infer_sandbox import infer
+
         _n1 = infer(neo4j_session)
         n2 = infer(neo4j_session)
         # MERGE makes it idempotent; second run should return same count

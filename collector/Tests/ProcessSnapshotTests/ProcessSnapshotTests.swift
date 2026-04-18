@@ -52,4 +52,30 @@ final class ProcessSnapshotTests: XCTestCase {
         XCTAssertEqual(ds.name, "Process Snapshot")
         XCTAssertFalse(ds.requiresElevation)
     }
+
+    func testParsePsOutputResolvesSymlinkedAppPaths() throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("test-ps-symlink-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let realApp = tempDir.appendingPathComponent("Real.app")
+        let symlinkApp = tempDir.appendingPathComponent("Linked.app")
+        try FileManager.default.createDirectory(at: realApp, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: symlinkApp, withDestinationURL: realApp)
+
+        let output = "321 admin \(realApp.path)/Contents/MacOS/Real"
+        let apps = [
+            Application(
+                name: "Linked", bundleId: "com.example.linked",
+                path: symlinkApp.path,
+                version: nil, teamId: nil,
+                hardenedRuntime: true, libraryValidation: true,
+                isElectron: false, isSystem: false, signed: true
+            ),
+        ]
+
+        let processes = ProcessSnapshotDataSource.parsePsOutput(output, knownApps: apps)
+        XCTAssertEqual(processes.count, 1)
+        XCTAssertEqual(processes.first?.bundleId, "com.example.linked")
+    }
 }

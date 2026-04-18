@@ -8,9 +8,14 @@ import logging
 from neo4j import Session
 
 from models import (
-    LocalGroupData, RemoteAccessServiceData, FirewallStatusData,
-    LoginSessionData, AuthorizationRightData, AuthorizationPluginData,
-    SystemExtensionData, SudoersRuleData,
+    LocalGroupData,
+    RemoteAccessServiceData,
+    FirewallStatusData,
+    LoginSessionData,
+    AuthorizationRightData,
+    AuthorizationPluginData,
+    SystemExtensionData,
+    SudoersRuleData,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,7 +30,7 @@ _FIREWALL_POLICY_NAME = "default"
 
 
 def import_local_groups(
-    session: Session, groups: list[LocalGroupData]
+    session: Session, groups: list[LocalGroupData], scan_id: str | None = None
 ) -> tuple[int, int]:
     """
     MERGE LocalGroup nodes and MEMBER_OF relationships from User → LocalGroup.
@@ -63,9 +68,11 @@ def import_local_groups(
         MATCH (g:LocalGroup {name: r.name})
         MERGE (u:User {name: username})
         MERGE (u)-[rel:MEMBER_OF]->(g)
+        SET rel.scan_id = $scan_id
         RETURN count(rel) AS n
         """,
         records=records,
+        scan_id=scan_id,
     )
     edges = result.single()["n"]
 
@@ -125,7 +132,7 @@ def import_remote_access_services(
 
 
 def import_firewall_status(
-    session: Session, statuses: list[FirewallStatusData]
+    session: Session, statuses: list[FirewallStatusData], scan_id: str | None = None
 ) -> tuple[int, int]:
     """
     MERGE FirewallPolicy node and HAS_FIREWALL_RULE edges to Applications.
@@ -176,6 +183,7 @@ def import_firewall_status(
         """
         UNWIND $records AS r
         MATCH (a:Application {bundle_id: r.bundle_id})
+        WHERE $scan_id IS NULL OR a.scan_id = $scan_id
         MATCH (f:FirewallPolicy {name: $policy_name})
         MERGE (a)-[rel:HAS_FIREWALL_RULE]->(f)
         SET rel.allow_incoming = r.allow_incoming
@@ -183,6 +191,7 @@ def import_firewall_status(
         """,
         records=rule_records,
         policy_name=_FIREWALL_POLICY_NAME,
+        scan_id=scan_id,
     )
     edges = result.single()["n"]
 

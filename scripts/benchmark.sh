@@ -11,14 +11,14 @@
 
 set -euo pipefail
 
-BINARY="${1:-$(dirname "$0")/../collector/.build/release/RootstockCLI}"
+BINARY="${1:-$(dirname "$0")/../collector/.build/release/rootstock-collector}"
 OUTFILE_PREFIX="/tmp/rootstock-bench"
 DOCS_DIR="$(dirname "$0")/../docs/benchmarks"
 
 if [[ ! -x "$BINARY" ]]; then
-    echo "ERROR: binary not found or not executable: $BINARY" >&2
-    echo "Run 'swift build -c release' in the collector/ directory first." >&2
-    exit 1
+	echo "ERROR: binary not found or not executable: $BINARY" >&2
+	echo "Run 'swift build -c release' in the collector/ directory first." >&2
+	exit 1
 fi
 
 echo "Binary: $BINARY"
@@ -28,30 +28,30 @@ echo ""
 declare -a WALLS USERS SYSTEMS SIZES APPS GRANTS
 
 for i in 1 2 3; do
-    OUTFILE="${OUTFILE_PREFIX}-${i}.json"
+	OUTFILE="${OUTFILE_PREFIX}-${i}.json"
 
-    START=$(date +%s%3N)
-    /usr/bin/time -l "$BINARY" --output "$OUTFILE" 2>"${OUTFILE_PREFIX}-${i}.time.txt" || true
-    END=$(date +%s%3N)
+	START=$(date +%s%3N)
+	/usr/bin/time -l "$BINARY" --output "$OUTFILE" 2>"${OUTFILE_PREFIX}-${i}.time.txt" || true
+	END=$(date +%s%3N)
 
-    WALL=$(echo "scale=2; ($END - $START) / 1000" | bc)
-    USER_TIME=$(grep "user" "${OUTFILE_PREFIX}-${i}.time.txt" | awk '{print $1}' | head -1)
-    MEM_BYTES=$(grep "maximum resident" "${OUTFILE_PREFIX}-${i}.time.txt" | awk '{print $1}')
-    MEM_MB=$(echo "scale=1; $MEM_BYTES / 1048576" | bc)
-    SIZE_KB=$(echo "scale=0; $(wc -c < "$OUTFILE") / 1024" | bc)
+	WALL=$(echo "scale=2; ($END - $START) / 1000" | bc)
+	USER_TIME=$(grep "user" "${OUTFILE_PREFIX}-${i}.time.txt" | awk '{print $1}' | head -1)
+	MEM_BYTES=$(grep "maximum resident" "${OUTFILE_PREFIX}-${i}.time.txt" | awk '{print $1}')
+	MEM_MB=$(echo "scale=1; $MEM_BYTES / 1048576" | bc)
+	SIZE_KB=$(echo "scale=0; $(wc -c <"$OUTFILE") / 1024" | bc)
 
-    # Parse scan summary from stdout (already printed during run — read the JSON)
-    APP_COUNT=$(python3 -c "import json,sys; d=json.load(open('$OUTFILE')); print(len(d['applications']))" 2>/dev/null || echo "?")
-    GRANT_COUNT=$(python3 -c "import json,sys; d=json.load(open('$OUTFILE')); print(len(d['tcc_grants']))" 2>/dev/null || echo "?")
+	# Parse scan summary from stdout (already printed during run — read the JSON)
+	APP_COUNT=$(python3 -c "import json,sys; d=json.load(open('$OUTFILE')); print(len(d['applications']))" 2>/dev/null || echo "?")
+	GRANT_COUNT=$(python3 -c "import json,sys; d=json.load(open('$OUTFILE')); print(len(d['tcc_grants']))" 2>/dev/null || echo "?")
 
-    echo "Run $i: ${WALL}s wall, ${MEM_MB} MB peak, ${APP_COUNT} apps, ${GRANT_COUNT} TCC grants, ${SIZE_KB} KB"
+	echo "Run $i: ${WALL}s wall, ${MEM_MB} MB peak, ${APP_COUNT} apps, ${GRANT_COUNT} TCC grants, ${SIZE_KB} KB"
 
-    WALLS+=("$WALL")
-    USERS+=("${USER_TIME:-?}")
-    SYSTEMS+=("?")
-    SIZES+=("$SIZE_KB")
-    APPS+=("$APP_COUNT")
-    GRANTS+=("$GRANT_COUNT")
+	WALLS+=("$WALL")
+	USERS+=("${USER_TIME:-?}")
+	SYSTEMS+=("?")
+	SIZES+=("$SIZE_KB")
+	APPS+=("$APP_COUNT")
+	GRANTS+=("$GRANT_COUNT")
 done
 
 # Compute average wall time
@@ -75,16 +75,16 @@ HOSTNAME=$(hostname -s)
 MACOS=$(sw_vers -productVersion)
 
 {
-    echo ""
-    echo "## Run on ${DATE} — ${HOSTNAME} (macOS ${MACOS})"
-    echo ""
-    echo "| Metric | Run 1 | Run 2 | Run 3 | Average |"
-    echo "|---|---|---|---|---|"
-    echo "| Total time (s)   | ${WALLS[0]} | ${WALLS[1]} | ${WALLS[2]} | ${AVG} |"
-    echo "| Apps scanned     | ${APPS[0]} | ${APPS[1]} | ${APPS[2]} | — |"
-    echo "| TCC grants       | ${GRANTS[0]} | ${GRANTS[1]} | ${GRANTS[2]} | — |"
-    echo "| JSON size (KB)   | ${SIZES[0]} | ${SIZES[1]} | ${SIZES[2]} | ${AVG_SIZE} |"
-} >> "$BASELINE"
+	echo ""
+	echo "## Run on ${DATE} — ${HOSTNAME} (macOS ${MACOS})"
+	echo ""
+	echo "| Metric | Run 1 | Run 2 | Run 3 | Average |"
+	echo "|---|---|---|---|---|"
+	echo "| Total time (s)   | ${WALLS[0]} | ${WALLS[1]} | ${WALLS[2]} | ${AVG} |"
+	echo "| Apps scanned     | ${APPS[0]} | ${APPS[1]} | ${APPS[2]} | — |"
+	echo "| TCC grants       | ${GRANTS[0]} | ${GRANTS[1]} | ${GRANTS[2]} | — |"
+	echo "| JSON size (KB)   | ${SIZES[0]} | ${SIZES[1]} | ${SIZES[2]} | ${AVG_SIZE} |"
+} >>"$BASELINE"
 
 echo ""
 echo "Results appended to $BASELINE"

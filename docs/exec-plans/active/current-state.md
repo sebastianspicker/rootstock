@@ -1,24 +1,26 @@
 # Current Project State
 
-> Last updated: 2026-03-20
+> Last updated: 2026-04-17
 
 ## Phase Status
 
-Rootstock has completed through **Phase 5** (Gap Features). All collector modules
-and graph pipeline components are implemented and tested.
+Rootstock has implemented the collector, graph pipeline, report generation,
+viewer/export, and broad test coverage. The project is in a hardening and
+release-alignment phase.
 
 ## Current Focus
 
-The project is in a **hardening / tech-debt** cycle between Phase 5 and Phase 6.
-Active work is tracked in [`docs/exec-plans/tech-debt-tracker.md`](../tech-debt-tracker.md).
+The current focus is a correctness-first hardening pass covering graph identity,
+inference semantics, collector failure-state modelling, validation contract alignment,
+and CI/tooling cleanup.
 
 Key areas:
-- CLI error handling standardization across graph tools
-- Test coverage expansion for pure-Python modules
-- Query performance optimization (Neo4j round-trip reduction)
-- Logging improvements for operational visibility
+- validation contract and example-data alignment
+- release/documentation consistency for the collector CLI
+- end-to-end verification and CI trustworthiness
+- residual collector and graph semantic bug fixes
 
 ## What's Next
 
-Phase 6 (reporting and visualization enhancements) has not yet been planned.
-A formal execution plan will be authored when the current hardening pass is complete.
+The next milestone is a stable release candidate with verified collector,
+graph, docs, and integration workflows.

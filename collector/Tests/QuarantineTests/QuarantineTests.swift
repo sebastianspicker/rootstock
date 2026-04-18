@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import Quarantine
 import Models
 
@@ -241,5 +242,28 @@ final class QuarantineTests: XCTestCase {
         _ = source.enrich(applications: &apps)
         XCTAssertNotNil(apps[0].quarantineInfo)
         XCTAssertNotNil(apps[1].quarantineInfo)
+    }
+
+    func testReadQuarantineFollowsSymlinkToTargetBundle() throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("test-quarantine-symlink-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let realApp = tempDir.appendingPathComponent("Real.app")
+        let linkedApp = tempDir.appendingPathComponent("Linked.app")
+        try FileManager.default.createDirectory(at: realApp, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: linkedApp, withDestinationURL: realApp)
+
+        let raw = "0043;5f3b3c00;com.apple.Safari;UUID"
+        let bytes = Array(raw.utf8)
+        let result = bytes.withUnsafeBufferPointer {
+            setxattr(realApp.path, "com.apple.quarantine", $0.baseAddress, bytes.count, 0, 0)
+        }
+        XCTAssertEqual(result, 0)
+
+        let info = QuarantineDataSource().readQuarantine(at: linkedApp.path)
+        XCTAssertTrue(info.hasQuarantineFlag)
+        XCTAssertEqual(info.quarantineAgent, "com.apple.Safari")
+        XCTAssertTrue(info.wasUserApproved)
     }
 }

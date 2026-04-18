@@ -8,19 +8,39 @@ Usage:
 Exit code 0 on success, 1 on validation failure.
 """
 
+import importlib.util
 import json
 import sys
-import uuid
 from pathlib import Path
 from datetime import datetime
+
+ROOT = Path(__file__).parent.parent
 
 try:
     import jsonschema
 except ImportError:
-    print("ERROR: jsonschema not installed. Run: pip3 install jsonschema", file=sys.stderr)
+    print(
+        "ERROR: jsonschema not installed. Run: pip3 install -r graph/requirements.txt",
+        file=sys.stderr,
+    )
     sys.exit(1)
 
-SCHEMA_PATH = Path(__file__).parent.parent / "collector" / "schema" / "scan-result.schema.json"
+model_spec = importlib.util.spec_from_file_location(
+    "graph_models", ROOT / "graph" / "models.py"
+)
+if model_spec is None or model_spec.loader is None:
+    print(
+        "ERROR: graph models not importable. Run: pip3 install -r graph/requirements.txt",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+graph_models = importlib.util.module_from_spec(model_spec)
+model_spec.loader.exec_module(graph_models)
+graph_models.ScanResult.model_rebuild(_types_namespace=vars(graph_models))
+ScanResult = graph_models.ScanResult
+
+SCHEMA_PATH = ROOT / "collector" / "schema" / "scan-result.schema.json"
 
 
 def load_schema():
@@ -45,16 +65,10 @@ def validate_semantics(data):
     """Perform semantic checks beyond JSON Schema. Returns list of error strings."""
     errors = []
 
-    # scan_id must be a valid UUID
-    try:
-        uuid.UUID(data.get("scan_id", ""))
-    except ValueError:
-        errors.append(f"  Semantic: scan_id is not a valid UUID: {data.get('scan_id')!r}")
-
     # timestamp must be parseable ISO 8601
     ts = data.get("timestamp", "")
     try:
-        datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ")
+        datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         errors.append(f"  Semantic: timestamp is not valid ISO 8601 UTC: {ts!r}")
 
@@ -63,12 +77,14 @@ def validate_semantics(data):
         if not data.get(field, "").strip():
             errors.append(f"  Semantic: required field '{field}' is empty")
 
-    # No duplicate bundle_ids in applications
-    bundle_ids = [a["bundle_id"] for a in data.get("applications", [])]
+    # No duplicate application observations by (bundle_id, path)
+    bundle_ids = [
+        (a.get("bundle_id"), a.get("path")) for a in data.get("applications", [])
+    ]
     seen = set()
     for bid in bundle_ids:
         if bid in seen:
-            errors.append(f"  Semantic: duplicate bundle_id: {bid!r}")
+            errors.append(f"  Semantic: duplicate application observation: {bid!r}")
         seen.add(bid)
 
     # No empty strings in application required string fields
@@ -80,7 +96,16 @@ def validate_semantics(data):
                 )
 
     # Entitlement categories must be from known set
-    known_categories = {"tcc", "injection", "privilege", "sandbox", "keychain", "network", "other"}
+    known_categories = {
+        "tcc",
+        "injection",
+        "privilege",
+        "sandbox",
+        "keychain",
+        "network",
+        "icloud",
+        "other",
+    }
     for app in data.get("applications", []):
         for ent in app.get("entitlements", []):
             if ent.get("category") not in known_categories:
@@ -90,6 +115,15 @@ def validate_semantics(data):
                 )
 
     return errors
+
+
+def validate_models(data):
+    """Validate data against the shared Pydantic contract."""
+    try:
+        ScanResult.model_validate(data)
+    except Exception as exc:
+        return [f"  Model: {exc}"]
+    return []
 
 
 def main():
@@ -113,8 +147,9 @@ def main():
     schema = load_schema()
 
     schema_errors = validate_schema(data, schema)
+    model_errors = validate_models(data)
     semantic_errors = validate_semantics(data)
-    all_errors = schema_errors + semantic_errors
+    all_errors = schema_errors + model_errors + semantic_errors
 
     if all_errors:
         print(f"✗ Invalid: {path}")

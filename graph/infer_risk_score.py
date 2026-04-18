@@ -46,7 +46,7 @@ _CATEGORY_CHECKS: dict[str, str] = {
     """,
     "electron_inheritance": """
         EXISTS {
-            MATCH (app)-[:CHILD_INHERITS_TCC]->()
+            MATCH ()-[:CHILD_INHERITS_TCC]->(app)
         }
     """,
     "sip_bypass": """
@@ -100,9 +100,7 @@ _CATEGORY_CHECKS: dict[str, str] = {
         }
     """,
     "physical_security": """
-        EXISTS {
-            MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(:TCC_Permission)
-        }
+        false
     """,
     "esf_bypass": """
         EXISTS {
@@ -116,7 +114,7 @@ _CATEGORY_CHECKS: dict[str, str] = {
     """,
     "file_acl_escalation": """
         EXISTS {
-            MATCH (app)-[:CAN_WRITE]->(:CriticalFile)
+            MATCH (app)-[:INSTALLED_ON]->(:Computer)<-[:LOCAL_TO]-(:User)-[:CAN_WRITE]->(:CriticalFile)
         }
     """,
     "sandbox_escape": """
@@ -125,7 +123,8 @@ _CATEGORY_CHECKS: dict[str, str] = {
     """,
     "mdm_risk": """
         EXISTS {
-            MATCH (app)-[:MDM_OVERGRANT]->()
+            MATCH (:MDM_Profile)-[:CONFIGURES {bundle_id: app.bundle_id, allowed: true}]->(t:TCC_Permission)
+            MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(t)
         }
     """,
     "running_processes": """
@@ -253,7 +252,7 @@ def infer(session: Session) -> int:
                   OR coalesce(app.is_adhoc_signed, false) = true
                   THEN $w_cert ELSE 0.0 END +
              CASE WHEN EXISTS {{
-                 MATCH (app)-[:CHILD_INHERITS_TCC]->()
+                 MATCH ()-[:CHILD_INHERITS_TCC]->(app)
              }} THEN $w_elec ELSE 0.0 END
              AS raw_score
         SET app.{RISK_SCORE_PROPERTY} = CASE

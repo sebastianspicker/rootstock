@@ -12,6 +12,7 @@ for recommendations that map to ATT&CK techniques.
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 from neo4j import Session
 
@@ -81,9 +82,7 @@ _RECOMMENDATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         "Enable Lockdown Mode on high-value targets to reduce zero-click attack surface.",
         "medium",
         ["T1200"],
-        """EXISTS {
-            MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(:TCC_Permission)
-        }""",
+        """false""",
     ),
     (
         "require_notarization",
@@ -129,7 +128,7 @@ _RECOMMENDATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         ["T1548.004"],
         """EXISTS {
             MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(t:TCC_Permission)
-            MATCH (:MDM_Profile)-[:MDM_OVERGRANT]->(t)
+            MATCH (:MDM_Profile)-[:CONFIGURES {bundle_id: app.bundle_id, allowed: true}]->(t)
         }""",
     ),
     (
@@ -139,7 +138,8 @@ _RECOMMENDATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         "high",
         ["T1021.004", "T1021.005"],
         """EXISTS {
-            MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(:TCC_Permission)
+            MATCH (app)-[:INSTALLED_ON]->(:Computer)<-[:LOCAL_TO]-(u:User)
+            MATCH (:RemoteAccessService {enabled: true})-[:ACCESSIBLE_BY]->(u)
         }""",
     ),
     (
@@ -148,7 +148,9 @@ _RECOMMENDATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         "Audit file ACLs on security-critical files — remove non-root write ACEs.",
         "high",
         ["T1098"],
-        """EXISTS { MATCH (app)-[:CAN_WRITE]->(:CriticalFile) }""",
+        """EXISTS {
+            MATCH (app)-[:INSTALLED_ON]->(:Computer)<-[:LOCAL_TO]-(:User)-[:CAN_WRITE]->(:CriticalFile)
+        }""",
     ),
     (
         "audit_sudoers",
@@ -157,7 +159,7 @@ _RECOMMENDATIONS: list[tuple[str, str, str, str, list[str], str]] = [
         "medium",
         ["T1548.003"],
         """EXISTS {
-            MATCH (app)-[:HAS_TCC_GRANT {allowed: true}]->(:TCC_Permission)
+            MATCH (app)-[:INSTALLED_ON]->(:Computer)<-[:LOCAL_TO]-(:User)-[:SUDO_NOPASSWD]->(:SudoersRule)
         }""",
     ),
     (
@@ -224,8 +226,9 @@ def infer(session: Session) -> int:
             RETURN count(*) AS n
         """
         try:
-            result = session.run(cypher, key=key)
-            total_edges += result.single()["n"]
+            result = session.run(cast(Any, cypher), key=key)
+            record = result.single()
+            total_edges += int(record["n"]) if record else 0
         except Exception as exc:
             logger.debug("Skipping recommendation edge for key=%s: %s", key, exc)
 

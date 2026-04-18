@@ -6,7 +6,7 @@
 
 Attack path discovery for macOS that maps TCC grants, entitlements, Keychain ACLs, and XPC trust relationships as an exploitable graph.
 
-> **Status:** Phase 7 Complete — Full graph intelligence pipeline with risk scoring, CWE taxonomy, ESF enrichment, vulnerability correlation, and 101 Cypher queries.
+> **Status:** Hardening release candidate — collector and graph pipeline are implemented; current work focuses on correctness, validation, and release alignment before 1.0.
 
 ## What is Rootstock?
 
@@ -58,7 +58,7 @@ All screenshots below are generated from the [demo scan](examples/demo-scan.json
 | [`demo-scan.json`](examples/demo-scan.json) | Synthetic scan data (15 apps, 15 TCC grants, 5 XPC services) |
 
 > To generate report and viewer outputs (requires Neo4j): `bash examples/regenerate.sh`
-> This produces `demo-report.md` (attack path report) and `demo-viewer.html` (interactive graph viewer).
+> This produces `examples/generated/demo-report.md` and `examples/generated/demo-viewer.html` locally.
 
 <details>
 <summary>Mermaid diagrams (GitHub-rendered fallback)</summary>
@@ -160,6 +160,7 @@ sudo .build/release/rootstock-collector --output scan.json
 ### Validate Output
 
 ```bash
+pip3 install -r graph/requirements.txt
 python3 scripts/validate-scan.py scan.json
 # ✓ Valid: scan.json (184 apps, 12 TCC grants, 3841 entitlements, 0 collection errors)
 ```
@@ -209,7 +210,7 @@ python3 scripts/validate-scan.py scan.json
 
 ```bash
 # Install Python dependencies
-pip install -e graph/
+pip3 install -r graph/requirements.txt
 
 # Run the full pipeline (schema → import → infer → classify → report)
 bash graph/pipeline.sh scan.json

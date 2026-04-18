@@ -902,8 +902,8 @@
           "description": "Service type."
         },
         "enabled": {
-          "type": "boolean",
-          "description": "Whether the service is enabled."
+          "type": ["boolean", "null"],
+          "description": "Whether the service is enabled. Null means collection could not determine state."
         },
         "port": {
           "type": ["integer", "null"],
@@ -942,20 +942,20 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {
-          "type": "boolean",
-          "description": "Whether the application firewall is enabled."
+          "type": ["boolean", "null"],
+          "description": "Whether the application firewall is enabled. Null means collection could not determine state."
         },
         "stealth_mode": {
-          "type": "boolean",
-          "description": "Whether stealth mode is active (drops unsolicited packets silently)."
+          "type": ["boolean", "null"],
+          "description": "Whether stealth mode is active. Null means collection could not determine state."
         },
         "allow_signed": {
-          "type": "boolean",
-          "description": "Whether signed applications are automatically allowed."
+          "type": ["boolean", "null"],
+          "description": "Whether signed applications are automatically allowed. Null means collection could not determine state."
         },
         "allow_built_in": {
-          "type": "boolean",
-          "description": "Whether built-in (Apple) applications are automatically allowed."
+          "type": ["boolean", "null"],
+          "description": "Whether built-in (Apple) applications are automatically allowed. Null means collection could not determine state."
         },
         "app_rules": {
           "type": "array",

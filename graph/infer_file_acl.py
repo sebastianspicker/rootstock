@@ -40,7 +40,7 @@ def infer(session: Session) -> int:
     result = session.run(
         """
         MATCH (cf:CriticalFile)
-        WHERE cf.is_writable_by_non_root = true
+        WHERE cf.is_group_writable = true
           AND cf.group_name IS NOT NULL
         MATCH (lg:LocalGroup {name: cf.group_name})
         MATCH (u:User)-[:MEMBER_OF]->(lg)

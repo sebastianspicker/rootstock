@@ -240,14 +240,16 @@ def main() -> int:
             f"  TCC grants:    {grants_linked} linked, {grants_skipped} skipped (path-only clients)"
         )
 
-        n_ents, n_ent_rels = import_entitlements(session, scan.applications)
+        n_ents, n_ent_rels = import_entitlements(
+            session, scan.applications, scan.scan_id
+        )
         print(f"  Entitlements:  {n_ents} nodes, {n_ent_rels} relationships")
 
         n_team_rels = import_signed_by_team(session)
         print(f"  Team edges:    {n_team_rels}")
 
         n_cas, n_signed_by, n_issued_by = import_certificate_authorities(
-            session, scan.applications
+            session, scan.applications, scan.scan_id
         )
         print(
             f"  Cert authorities: {n_cas} nodes, {n_signed_by} SIGNED_BY_CA, {n_issued_by} ISSUED_BY edges"
@@ -256,17 +258,21 @@ def main() -> int:
         n_xpc, n_comm = import_xpc_services(session, scan.xpc_services)
         print(f"  XPC services:  {n_xpc} nodes, {n_comm} COMMUNICATES_WITH edges")
 
-        n_kc, n_kc_edges = import_keychain_items(session, scan.keychain_acls)
+        n_kc, n_kc_edges = import_keychain_items(
+            session, scan.keychain_acls, scan.scan_id
+        )
         print(f"  Keychain ACLs: {n_kc} nodes, {n_kc_edges} CAN_READ_KEYCHAIN edges")
 
         n_mdm, n_cfg = import_mdm_profiles(session, scan.mdm_profiles)
         print(f"  MDM profiles:  {n_mdm} nodes, {n_cfg} CONFIGURES edges")
 
-        n_groups, n_member = import_local_groups(session, scan.local_groups)
+        n_groups, n_member = import_local_groups(
+            session, scan.local_groups, scan.scan_id
+        )
         print(f"  Local groups:  {n_groups} nodes, {n_member} MEMBER_OF edges")
 
         n_items, n_persists, n_runs, n_hijack = import_launch_items(
-            session, scan.launch_items
+            session, scan.launch_items, scan.scan_id
         )
         print(
             f"  Launch items:  {n_items} nodes, {n_persists} PERSISTS_VIA, {n_runs} RUNS_AS, {n_hijack} CAN_HIJACK edges"
@@ -277,10 +283,14 @@ def main() -> int:
         )
         print(f"  Remote access: {n_remote} nodes, {n_access} ACCESSIBLE_BY edges")
 
-        n_fw, n_fw_rules = import_firewall_status(session, scan.firewall_status)
+        n_fw, n_fw_rules = import_firewall_status(
+            session, scan.firewall_status, scan.scan_id
+        )
         print(f"  Firewall:      {n_fw} nodes, {n_fw_rules} HAS_FIREWALL_RULE edges")
 
-        n_sessions, n_has_session = import_login_sessions(session, scan.login_sessions, scan.hostname)
+        n_sessions, n_has_session = import_login_sessions(
+            session, scan.login_sessions, scan.hostname
+        )
         print(f"  Sessions:      {n_sessions} nodes, {n_has_session} HAS_SESSION edges")
 
         n_auth_rights = import_authorization_rights(session, scan.authorization_rights)
@@ -297,7 +307,9 @@ def main() -> int:
         n_sudoers, n_sudo_edges = import_sudoers_rules(session, scan.sudoers_rules)
         print(f"  Sudoers:       {n_sudoers} nodes, {n_sudo_edges} SUDO_NOPASSWD edges")
 
-        n_running = import_running_processes(session, scan.running_processes)
+        n_running = import_running_processes(
+            session, scan.running_processes, scan.scan_id
+        )
         print(f"  Running procs: {n_running} apps flagged")
 
         n_user_details = import_user_details(session, scan.user_details)
@@ -345,26 +357,26 @@ def main() -> int:
         )
 
         n_bt, n_paired = import_bluetooth_devices(
-            session, scan.bluetooth_devices, scan.hostname
+            session, scan.bluetooth_devices, scan.hostname, scan.scan_id
         )
         print(f"  BT devices:    {n_bt} nodes, {n_paired} PAIRED_WITH edges")
 
         n_adgroups, n_mapped = import_ad_binding(
-            session, scan.ad_binding, scan.hostname
+            session, scan.ad_binding, scan.hostname, scan.scan_id
         )
         print(
             f"  AD binding:    {n_adgroups} ADGroup nodes, {n_mapped} MAPPED_TO edges"
         )
 
         n_ka, n_found, n_cache, n_kt = import_kerberos_artifacts(
-            session, scan.kerberos_artifacts, scan.hostname
+            session, scan.kerberos_artifacts, scan.hostname, scan.scan_id
         )
         print(
             f"  Kerberos:      {n_ka} artifacts, {n_found} FOUND_ON, {n_cache} HAS_KERBEROS_CACHE, {n_kt} HAS_KEYTAB edges"
         )
 
         n_sandbox, n_sandbox_edges = import_sandbox_profiles(
-            session, scan.sandbox_profiles
+            session, scan.sandbox_profiles, scan.scan_id
         )
         print(
             f"  Sandbox:       {n_sandbox} profiles, {n_sandbox_edges} HAS_SANDBOX_PROFILE edges"

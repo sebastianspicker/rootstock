@@ -1,25 +1,7 @@
 #!/usr/bin/env bash
 # test_full_pipeline.sh — Rootstock end-to-end smoke test.
-#
-# Verifies the graph pipeline (import → infer → query) works end-to-end using
-# the fixture JSON from tests/fixtures/graph/minimal-scan.json.
-#
-# Requirements:
-#   - Python 3.10+ with neo4j and pydantic installed (see graph/requirements.txt)
-#   - A running Neo4j instance (defaults: bolt://localhost:7687, user: neo4j, pass: rootstock)
-#
-# Environment variables (all optional):
-#   NEO4J_URI      default: bolt://localhost:7687
-#   NEO4J_USER     default: neo4j
-#   NEO4J_PASSWORD default: rootstock
-#
-# Usage:
-#   bash tests/integration/test_full_pipeline.sh
-#   NEO4J_URI=bolt://other:7687 bash tests/integration/test_full_pipeline.sh
 
 set -euo pipefail
-
-# ── Config ────────────────────────────────────────────────────────────────────
 
 NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
 NEO4J_USER="${NEO4J_USER:-neo4j}"
@@ -27,172 +9,146 @@ NEO4J_PASSWORD="${NEO4J_PASSWORD:-rootstock}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GRAPH_DIR="$REPO_ROOT/graph"
-FIXTURE_JSON="$REPO_ROOT/tests/fixtures/graph/minimal-scan.json"
-TEST_SCAN_ID="integration-test-$(date +%s)"
+FIXTURE_JSON="$GRAPH_DIR/tests/fixture_minimal.json"
+REPORT_OUT="/tmp/rootstock-integration-report.md"
+TEMP_SCAN_JSON="/tmp/rootstock-integration-scan.json"
+TEST_SCAN_ID="integration-$(date +%s)"
 
 PASS=0
 FAIL=0
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+ok() {
+	echo "  PASS: $1"
+	PASS=$((PASS + 1))
+}
+fail() {
+	echo "  FAIL: $1"
+	FAIL=$((FAIL + 1))
+}
+step() {
+	echo
+	echo "== $1 =="
+}
 
-ok()   { echo "  ✓ $1"; ((PASS++)); }
-fail() { echo "  ✗ $1"; ((FAIL++)); }
-step() { echo ""; echo "── $1 ──"; }
-
-run_cypher() {
-    python3 - "$@" <<'PYTHON'
-import sys, os
-sys.path.insert(0, os.environ.get("GRAPH_DIR", "."))
+run_count() {
+	python3 - "$1" <<'PYTHON'
+import os
+import sys
 from neo4j import GraphDatabase
-uri  = os.environ.get("NEO4J_URI",      "bolt://localhost:7687")
-user = os.environ.get("NEO4J_USER",     "neo4j")
-pw   = os.environ.get("NEO4J_PASSWORD", "rootstock")
-cypher = sys.argv[1]
-params = {}
-for arg in sys.argv[2:]:
-    k, _, v = arg.partition("=")
-    params[k] = v
-driver = GraphDatabase.driver(uri, auth=(user, pw))
-with driver.session() as s:
-    result = list(s.run(cypher, params))
-    print(len(result))
+
+query = sys.argv[1]
+driver = GraphDatabase.driver(
+    os.environ["NEO4J_URI"],
+    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
+)
+with driver.session() as session:
+    record = session.run(query).single()
+    print(record[0] if record else 0)
 driver.close()
 PYTHON
 }
 
-# ── Pre-flight checks ─────────────────────────────────────────────────────────
+cleanup() {
+	rm -f "$TEMP_SCAN_JSON" "$REPORT_OUT"
+	python3 - <<'PYTHON'
+import os
+from neo4j import GraphDatabase
 
-step "Pre-flight checks"
+scan_id = os.environ["TEST_SCAN_ID"]
+driver = GraphDatabase.driver(
+    os.environ["NEO4J_URI"],
+    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
+)
+with driver.session() as session:
+    session.run(
+        "MATCH (n) WHERE n.scan_id = $scan_id DETACH DELETE n",
+        scan_id=scan_id,
+    )
+driver.close()
+PYTHON
+}
 
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 not found" >&2
-    exit 1
-fi
-ok "python3 found: $(python3 --version)"
+export NEO4J_URI NEO4J_USER NEO4J_PASSWORD TEST_SCAN_ID FIXTURE_JSON TEMP_SCAN_JSON
 
-if ! python3 -c "import neo4j" 2>/dev/null; then
-    echo "ERROR: neo4j Python driver not installed (pip install neo4j)" >&2
-    exit 1
-fi
-ok "neo4j driver installed"
+trap cleanup EXIT
 
-if ! python3 -c "import pydantic" 2>/dev/null; then
-    echo "ERROR: pydantic not installed (pip install pydantic)" >&2
-    exit 1
-fi
-ok "pydantic installed"
+step "Pre-flight"
 
-if [ ! -f "$FIXTURE_JSON" ]; then
-    echo "ERROR: Fixture JSON not found at $FIXTURE_JSON" >&2
-    exit 1
+if [[ ! -f "$FIXTURE_JSON" ]]; then
+	echo "ERROR: Fixture JSON not found at $FIXTURE_JSON" >&2
+	exit 1
 fi
 ok "fixture JSON found"
 
-# Test Neo4j connectivity
-if ! python3 -c "
-import sys, os
-sys.path.insert(0, '$GRAPH_DIR')
+python3 - <<'PYTHON'
+import json
+import os
+
+with open(os.environ["FIXTURE_JSON"]) as infile:
+    data = json.load(infile)
+
+data["scan_id"] = os.environ["TEST_SCAN_ID"]
+
+with open(os.environ["TEMP_SCAN_JSON"], "w") as outfile:
+    json.dump(data, outfile)
+PYTHON
+ok "temporary integration scan written"
+
+python3 - <<'PYTHON' >/dev/null
+import os
 from neo4j import GraphDatabase
-from neo4j.exceptions import ServiceUnavailable
-try:
-    d = GraphDatabase.driver('$NEO4J_URI', auth=('$NEO4J_USER', '$NEO4J_PASSWORD'))
-    d.verify_connectivity()
-    d.close()
-except (ServiceUnavailable, ConnectionRefusedError) as e:
-    print(f'Neo4j not available: {e}', file=sys.stderr)
-    sys.exit(1)
-" 2>/dev/null; then
-    echo "SKIP: Neo4j not available at $NEO4J_URI — skipping integration tests"
-    exit 0
-fi
-ok "Neo4j reachable at $NEO4J_URI"
 
-export GRAPH_DIR NEO4J_URI NEO4J_USER NEO4J_PASSWORD
+driver = GraphDatabase.driver(
+    os.environ["NEO4J_URI"],
+    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
+)
+driver.verify_connectivity()
+driver.close()
+PYTHON
+ok "Neo4j reachable"
 
-# ── Step 1: Import fixture JSON ───────────────────────────────────────────────
+step "Schema"
+python3 "$GRAPH_DIR/setup_schema.py" >/dev/null
+ok "schema applied"
 
-step "Step 1: Import fixture JSON"
+step "Import"
+python3 "$GRAPH_DIR/import.py" --input "$TEMP_SCAN_JSON" >/dev/null
 
-python3 "$GRAPH_DIR/import.py" \
-    --neo4j "$NEO4J_URI" \
-    --username "$NEO4J_USER" \
-    --password "$NEO4J_PASSWORD" \
-    --input "$FIXTURE_JSON" \
-    --scan-id "$TEST_SCAN_ID" 2>&1 | tail -5
-
-APP_COUNT=$(run_cypher "MATCH (a:Application {scan_id: '$TEST_SCAN_ID'}) RETURN count(a) AS n" 2>/dev/null || echo 0)
-if [ "$APP_COUNT" -ge 3 ]; then
-    ok "Application nodes imported (count: $APP_COUNT)"
+APP_COUNT="$(run_count "MATCH (a:Application {scan_id: '$TEST_SCAN_ID'}) RETURN count(a)")"
+if [[ "$APP_COUNT" -ge 3 ]]; then
+	ok "applications imported ($APP_COUNT)"
 else
-    fail "Expected ≥3 Application nodes, got $APP_COUNT"
+	fail "expected >=3 applications, got $APP_COUNT"
 fi
 
-TCC_COUNT=$(run_cypher "MATCH (:Application {scan_id: '$TEST_SCAN_ID'})-[r:HAS_TCC_GRANT]->() RETURN count(r) AS n" 2>/dev/null || echo 0)
-if [ "$TCC_COUNT" -ge 1 ]; then
-    ok "TCC_GRANT edges imported (count: $TCC_COUNT)"
+TCC_COUNT="$(run_count "MATCH (:Application {scan_id: '$TEST_SCAN_ID'})-[r:HAS_TCC_GRANT]->() RETURN count(r)")"
+if [[ "$TCC_COUNT" -ge 1 ]]; then
+	ok "TCC grant edges imported ($TCC_COUNT)"
 else
-    fail "Expected TCC_GRANT edges, got $TCC_COUNT"
+	fail "expected TCC grant edges after import"
 fi
 
-# ── Step 2: Run inference ─────────────────────────────────────────────────────
+step "Inference"
+python3 "$GRAPH_DIR/infer.py" >/dev/null
 
-step "Step 2: Run inference"
-
-python3 "$GRAPH_DIR/infer.py" \
-    --neo4j "$NEO4J_URI" \
-    --username "$NEO4J_USER" \
-    --password "$NEO4J_PASSWORD" 2>&1 | tail -5
-
-INJECT_COUNT=$(run_cypher "MATCH ()-[r:CAN_INJECT_INTO {inferred: true}]->() RETURN count(r) AS n" 2>/dev/null || echo 0)
-if [ "$INJECT_COUNT" -ge 1 ]; then
-    ok "CAN_INJECT_INTO edges inferred (count: $INJECT_COUNT)"
+INJECT_COUNT="$(run_count "MATCH ()-[r:CAN_INJECT_INTO {inferred: true}]->(:Application {scan_id: '$TEST_SCAN_ID'}) RETURN count(r)")"
+if [[ "$INJECT_COUNT" -ge 1 ]]; then
+	ok "inference created CAN_INJECT_INTO edges ($INJECT_COUNT)"
 else
-    fail "Expected CAN_INJECT_INTO edges after inference"
+	fail "expected CAN_INJECT_INTO edges after inference"
 fi
 
-# ── Step 3: Run queries ───────────────────────────────────────────────────────
-
-step "Step 3: Run representative queries"
-
-Q01_COUNT=$(run_cypher "$(head -20 "$GRAPH_DIR/queries/01-injectable-fda-apps.cypher" | grep -v '//')" 2>/dev/null || echo -1)
-if [ "$Q01_COUNT" -ge 0 ]; then
-    ok "Query 01 executed successfully (returned $Q01_COUNT rows)"
+step "Report Surface"
+python3 "$GRAPH_DIR/report.py" --output "$REPORT_OUT" --scan-json "$TEMP_SCAN_JSON" >/dev/null
+if [[ -s "$REPORT_OUT" ]]; then
+	ok "report generated"
 else
-    fail "Query 01 failed"
+	fail "report output missing"
 fi
 
-Q07_COUNT=$(run_cypher "$(grep -v '//' "$GRAPH_DIR/queries/07-tcc-grant-overview.cypher" | tr -d '\n')" 2>/dev/null || echo -1)
-if [ "$Q07_COUNT" -ge 0 ]; then
-    ok "Query 07 executed successfully (returned $Q07_COUNT rows)"
-else
-    fail "Query 07 failed"
-fi
-
-# ── Cleanup ───────────────────────────────────────────────────────────────────
-
-step "Cleanup"
-
-python3 -c "
-import sys, os
-sys.path.insert(0, '$GRAPH_DIR')
-from neo4j import GraphDatabase
-d = GraphDatabase.driver('$NEO4J_URI', auth=('$NEO4J_USER', '$NEO4J_PASSWORD'))
-with d.session() as s:
-    r = s.run('MATCH (n {scan_id: \$id}) DETACH DELETE n RETURN count(n) AS n',
-              id='$TEST_SCAN_ID').single()
-    print(f'  Deleted {r[\"n\"]} test nodes')
-d.close()
-"
-ok "Test nodes cleaned up"
-
-# ── Summary ───────────────────────────────────────────────────────────────────
-
-echo ""
-echo "────────────────────────────────────────"
+echo
 echo "Integration test results: $PASS passed, $FAIL failed"
-echo "────────────────────────────────────────"
 
-if [ "$FAIL" -gt 0 ]; then
-    exit 1
+if [[ "$FAIL" -gt 0 ]]; then
+	exit 1
 fi
-exit 0

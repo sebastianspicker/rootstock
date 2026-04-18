@@ -35,8 +35,9 @@ into Neo4j on your analysis workstation.
 No. Neo4j Community Edition (free, included in the Docker image) is sufficient.
 
 ### Can I import scans from multiple Macs?
-Yes. Each import is tagged with a `scan_id`. Import multiple JSON files into the same
-Neo4j instance. Cross-host attack paths are a planned future feature.
+Yes. Each import is tagged with a `scan_id`, and the importer preserves per-host
+installations. Import multiple JSON files into the same Neo4j instance with
+`graph/merge_scans.py` or repeated `graph/import.py` runs.
 
 ### Why do some queries return no results?
 Queries that depend on TCC grant data (01, 02, 05, 07) require the collector to run

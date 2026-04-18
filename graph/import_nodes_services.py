@@ -7,7 +7,10 @@ import logging
 from neo4j import Session
 
 from models import (
-    XPCServiceData, KeychainItemData, MDMProfileData, LaunchItemData,
+    XPCServiceData,
+    KeychainItemData,
+    MDMProfileData,
+    LaunchItemData,
 )
 
 logger = logging.getLogger(__name__)
@@ -79,7 +82,7 @@ def import_xpc_services(
 
 
 def import_launch_items(
-    session: Session, items: list[LaunchItemData]
+    session: Session, items: list[LaunchItemData], scan_id: str | None = None
 ) -> tuple[int, int, int, int]:
     """
     MERGE LaunchItem nodes, User nodes (for RUNS_AS), and infer graph edges.
@@ -137,10 +140,12 @@ def import_launch_items(
         MATCH (l:LaunchItem {label: r.label})
         MATCH (a:Application)
         WHERE r.program STARTS WITH a.path
+          AND ($scan_id IS NULL OR a.scan_id = $scan_id)
         MERGE (a)-[rel:PERSISTS_VIA]->(l)
         RETURN count(rel) AS n
         """,
         records=records,
+        scan_id=scan_id,
     )
     persists_count = persists_result.single()["n"]
 
@@ -265,7 +270,7 @@ def _keychain_sensitivity(kind: str, service: str | None) -> str:
 
 
 def import_keychain_items(
-    session: Session, items: list[KeychainItemData]
+    session: Session, items: list[KeychainItemData], scan_id: str | None = None
 ) -> tuple[int, int]:
     """
     MERGE Keychain_Item nodes and CAN_READ_KEYCHAIN relationships.
@@ -310,11 +315,13 @@ def import_keychain_items(
         WITH r WHERE size(r.trusted_apps) > 0
         UNWIND r.trusted_apps AS bundle_id
         MATCH (a:Application {bundle_id: bundle_id})
+        WHERE $scan_id IS NULL OR a.scan_id = $scan_id
         MATCH (k:Keychain_Item {label: r.label, kind: r.kind})
         MERGE (a)-[rel:CAN_READ_KEYCHAIN]->(k)
         RETURN count(rel) AS n
         """,
         records=records,
+        scan_id=scan_id,
     )
     edges = result.single()["n"]
 

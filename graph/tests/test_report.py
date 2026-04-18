@@ -2,8 +2,10 @@
 Tests for report.py formatting functions — no Neo4j required.
 All tested functions take query result dicts and return Markdown strings.
 """
+
 import sys
 import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from report import (
@@ -14,7 +16,10 @@ from report import (
     format_private_entitlement_table,
     format_executive_summary,
     format_no_findings,
+    get_scan_metadata_from_neo4j,
+    main,
 )
+from unittest.mock import MagicMock, patch
 
 
 class TestFormatNoFindings:
@@ -162,3 +167,57 @@ class TestFormatExecutiveSummary:
     def test_zero_findings(self):
         result = format_executive_summary(critical_count=0, high_count=0, top_paths=[])
         assert "0" in result
+
+
+class TestReportMetadata:
+    def test_metadata_prefers_computer_node(self):
+        driver = MagicMock()
+        session_cm = driver.session.return_value.__enter__.return_value
+        session_cm.run.side_effect = [
+            MagicMock(
+                single=lambda: {
+                    "app_count": 2,
+                    "tcc_grant_count": 3,
+                    "entitlement_count": 4,
+                }
+            ),
+            MagicMock(
+                single=lambda: {
+                    "scan_id": "scan-1",
+                    "hostname": "host-a",
+                    "macos_version": "14.5",
+                    "collector_version": "0.2.0",
+                    "timestamp": "2026-04-17T00:00:00Z",
+                    "is_root": True,
+                    "has_fda": True,
+                }
+            ),
+        ]
+
+        metadata = get_scan_metadata_from_neo4j(driver)
+
+        assert metadata["scan_id"] == "scan-1"
+        assert metadata["hostname"] == "host-a"
+        assert metadata["collector_version"] == "0.2.0"
+        assert metadata["has_fda"] is True
+
+
+class TestReportCli:
+    def test_main_uses_shared_connection_helper(self, tmp_path, monkeypatch):
+        output = tmp_path / "report.md"
+        fake_driver = MagicMock()
+        monkeypatch.setattr("sys.argv", ["report.py", "--output", str(output)])
+
+        with (
+            patch("report.connect_from_args", return_value=fake_driver) as connect_mock,
+            patch(
+                "report.get_scan_metadata_from_neo4j", return_value={"hostname": "host"}
+            ),
+            patch("report.run_all_queries", return_value={}),
+            patch("report.assemble_report", return_value="# report"),
+        ):
+            exit_code = main()
+
+        assert exit_code == 0
+        connect_mock.assert_called_once()
+        assert output.read_text() == "# report"

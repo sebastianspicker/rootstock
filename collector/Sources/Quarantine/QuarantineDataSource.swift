@@ -57,7 +57,8 @@ public struct QuarantineDataSource {
     /// Read and parse the quarantine xattr for the given path.
     /// Returns a QuarantineInfo even if the attribute is absent (hasQuarantineFlag = false).
     public func readQuarantine(at path: String) -> QuarantineInfo {
-        guard let raw = getQuarantineXattr(path: path) else {
+        let canonicalPath = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        guard let raw = getQuarantineXattr(path: canonicalPath) ?? getQuarantineXattr(path: path) else {
             return QuarantineInfo(hasQuarantineFlag: false)
         }
         return parseQuarantineString(raw)
@@ -119,11 +120,11 @@ public struct QuarantineDataSource {
     /// Returns the raw string value, or nil if the attribute is absent.
     private func getQuarantineXattr(path: String) -> String? {
         let name = Self.quarantineXattr
-        let size = getxattr(path, name, nil, 0, 0, XATTR_NOFOLLOW)
+        let size = getxattr(path, name, nil, 0, 0, 0)
         guard size > 0 else { return nil }
 
         var buffer = [UInt8](repeating: 0, count: size)
-        let result = getxattr(path, name, &buffer, size, 0, XATTR_NOFOLLOW)
+        let result = getxattr(path, name, &buffer, size, 0, 0)
         guard result > 0 else { return nil }
 
         return String(bytes: buffer[0..<result], encoding: .utf8)

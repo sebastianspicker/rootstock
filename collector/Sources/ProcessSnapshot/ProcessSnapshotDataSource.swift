@@ -31,6 +31,8 @@ public struct ProcessSnapshotDataSource: DataSource {
         var pathToBundle: [String: String] = [:]
         for app in knownApps {
             pathToBundle[app.path] = app.bundleId
+            let resolvedPath = URL(fileURLWithPath: app.path).resolvingSymlinksInPath().path
+            pathToBundle[resolvedPath] = app.bundleId
         }
 
         var processes: [RunningProcess] = []

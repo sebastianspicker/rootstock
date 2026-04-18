@@ -30,6 +30,7 @@ from constants import (
 
 # ── Unit tests ───────────────────────────────────────────────────────────────
 
+
 class TestCategoryChecks:
     def test_category_checks_are_nonempty(self):
         """All category checks should be non-empty Cypher fragments."""
@@ -43,10 +44,26 @@ class TestCategoryChecks:
         assert "kTCCServiceSystemPolicyAllFiles" in clause
         assert "injection_methods" in clause
 
+    def test_file_acl_escalation_uses_user_path_not_impossible_app_edge(self):
+        clause = _CATEGORY_CHECKS["file_acl_escalation"]
+        assert "LOCAL_TO" in clause
+        assert "CAN_WRITE" in clause
+        assert "(app)-[:CAN_WRITE]" not in clause
+
+    def test_mdm_risk_uses_configures_relationship(self):
+        clause = _CATEGORY_CHECKS["mdm_risk"]
+        assert "CONFIGURES" in clause
+        assert "MDM_OVERGRANT" not in clause
+
+    def test_physical_security_disabled_for_app_scoring(self):
+        assert _CATEGORY_CHECKS["physical_security"].strip() == "false"
+
     def test_critical_categories_are_subset(self):
         """Critical categories should all have check clauses."""
         for cat in _CRITICAL_CATEGORIES:
-            assert cat in _CATEGORY_CHECKS, f"Critical category {cat} missing from checks"
+            assert cat in _CATEGORY_CHECKS, (
+                f"Critical category {cat} missing from checks"
+            )
 
     def test_high_categories_are_subset(self):
         """High categories should all have check clauses."""
@@ -89,6 +106,7 @@ class TestInferFunction:
 
 
 # ── Integration tests (require Neo4j) ────────────────────────────────────
+
 
 class TestRiskScoreIntegration:
     @pytest.fixture(autouse=True)

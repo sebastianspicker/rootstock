@@ -10,21 +10,27 @@ public struct RemoteAccessDataSource: DataSource {
     public let requiresElevation = false
 
     private let sshdConfigPath: String
+    private let launchctlRunner: ([String]) -> String?
 
-    public init(sshdConfigPath: String = "/etc/ssh/sshd_config") {
+    public init(
+        sshdConfigPath: String = "/etc/ssh/sshd_config",
+        launchctlRunner: @escaping ([String]) -> String? = { args in Shell.run("/bin/launchctl", args) }
+    ) {
         self.sshdConfigPath = sshdConfigPath
+        self.launchctlRunner = launchctlRunner
     }
 
     public func collect() async -> DataSourceResult {
-        let ssh = collectSSH()
-        let screenSharing = collectScreenSharing()
-        return DataSourceResult(nodes: [ssh, screenSharing], errors: [])
+        var errors: [CollectionError] = []
+        let ssh = collectSSH(errors: &errors)
+        let screenSharing = collectScreenSharing(errors: &errors)
+        return DataSourceResult(nodes: [ssh, screenSharing], errors: errors)
     }
 
     // MARK: - SSH
 
-    private func collectSSH() -> RemoteAccessService {
-        let enabled = Shell.succeeds("/bin/launchctl", ["list", "com.openssh.sshd"])
+    private func collectSSH(errors: inout [CollectionError]) -> RemoteAccessService {
+        let enabled = detectServiceEnabled(label: "com.openssh.sshd", errors: &errors)
         var config: [String: String] = [:]
         var port: Int? = nil
 
@@ -39,7 +45,7 @@ public struct RemoteAccessDataSource: DataSource {
         return RemoteAccessService(
             service: RemoteServiceName.ssh,
             enabled: enabled,
-            port: port ?? (enabled ? 22 : nil),
+            port: port ?? (enabled == true ? 22 : nil),
             config: config
         )
     }
@@ -72,13 +78,52 @@ public struct RemoteAccessDataSource: DataSource {
 
     // MARK: - Screen Sharing
 
-    private func collectScreenSharing() -> RemoteAccessService {
-        let enabled = Shell.succeeds("/bin/launchctl", ["list", "com.apple.screensharing"])
+    private func collectScreenSharing(errors: inout [CollectionError]) -> RemoteAccessService {
+        let enabled = detectServiceEnabled(label: "com.apple.screensharing", errors: &errors)
         return RemoteAccessService(
             service: RemoteServiceName.screenSharing,
             enabled: enabled,
-            port: enabled ? 5900 : nil,
+            port: enabled == true ? 5900 : nil,
             config: [:]
         )
+    }
+
+    func detectServiceEnabled(label: String, errors: inout [CollectionError]) -> Bool? {
+        guard let disabledOutput = launchctlRunner(["print-disabled", "system"]) else {
+            errors.append(CollectionError(
+                source: name,
+                message: "Failed to query launchctl disabled state for \(label)",
+                recoverable: true
+            ))
+            return nil
+        }
+
+        if let disabled = Self.parseDisabledServices(output: disabledOutput)[label] {
+            return !disabled
+        }
+
+        if launchctlRunner(["print", "system/\(label)"]) != nil {
+            return true
+        }
+
+        return false
+    }
+
+    static func parseDisabledServices(output: String) -> [String: Bool] {
+        var services: [String: Bool] = [:]
+        for line in output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("\"") else { continue }
+            let parts = trimmed.components(separatedBy: "=>")
+            guard parts.count == 2 else { continue }
+            let label = parts[0].trimmingCharacters(in: CharacterSet(charactersIn: "\" \t"))
+            let value = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "; \t"))
+            if value == "true" {
+                services[label] = true
+            } else if value == "false" {
+                services[label] = false
+            }
+        }
+        return services
     }
 }

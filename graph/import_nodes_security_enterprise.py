@@ -12,7 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 def import_ad_binding(
-    session: Session, ad_binding: ADBindingData | None, hostname: str
+    session: Session,
+    ad_binding: ADBindingData | None,
+    hostname: str,
+    scan_id: str | None = None,
 ) -> tuple[int, int]:
     """
     Enrich Computer node with AD binding properties, create ADGroup nodes
@@ -26,7 +29,7 @@ def import_ad_binding(
     # Enrich Computer node with AD properties
     session.run(
         """
-        MATCH (c:Computer {hostname: $hostname})
+        MATCH (c:Computer {computer_key: $computer_key})
         SET c.ad_bound = true,
             c.ad_realm = $realm,
             c.ad_forest = $forest,
@@ -34,7 +37,7 @@ def import_ad_binding(
             c.ad_ou = $ou,
             c.ad_preferred_dc = $preferred_dc
         """,
-        hostname=hostname,
+        computer_key=f"{scan_id}:{hostname}" if scan_id is not None else None,
         realm=ad_binding.realm,
         forest=ad_binding.forest,
         computer_account=ad_binding.computer_account,
@@ -47,10 +50,10 @@ def import_ad_binding(
     session.run(
         """
         MATCH (u:User {is_ad_user: true})
-        MATCH (c:Computer {hostname: $hostname, ad_bound: true})
+        MATCH (c:Computer {computer_key: $computer_key, ad_bound: true})
         MERGE (u)-[:AD_USER_OF]->(c)
         """,
-        hostname=hostname,
+        computer_key=f"{scan_id}:{hostname}" if scan_id is not None else None,
     )
 
     if not ad_binding.group_mappings:
@@ -90,7 +93,10 @@ def import_ad_binding(
 
 
 def import_kerberos_artifacts(
-    session: Session, artifacts: list[KerberosArtifactData], hostname: str
+    session: Session,
+    artifacts: list[KerberosArtifactData],
+    hostname: str,
+    scan_id: str | None = None,
 ) -> tuple[int, int, int, int]:
     """
     MERGE KerberosArtifact nodes and create:
@@ -151,17 +157,19 @@ def import_kerberos_artifacts(
         """
         UNWIND $records AS r
         MATCH (ka:KerberosArtifact {path: r.path})
-        MATCH (c:Computer {hostname: $hostname})
+        MATCH (c:Computer {computer_key: $computer_key})
         MERGE (ka)-[rel:FOUND_ON]->(c)
         RETURN count(rel) AS n
         """,
         records=records,
-        hostname=hostname,
+        computer_key=f"{scan_id}:{hostname}" if scan_id is not None else None,
     )
     found_on = result.single()["n"]
 
     # HAS_KERBEROS_CACHE: User → KerberosArtifact (ccache with principal_hint)
-    ccache_records = [r for r in records if r["artifact_type"] == "ccache" and r["principal_hint"]]
+    ccache_records = [
+        r for r in records if r["artifact_type"] == "ccache" and r["principal_hint"]
+    ]
     has_cache = 0
     if ccache_records:
         result = session.run(
@@ -184,12 +192,12 @@ def import_kerberos_artifacts(
             """
             UNWIND $records AS r
             MATCH (ka:KerberosArtifact {path: r.path})
-            MATCH (c:Computer {hostname: $hostname})
+            MATCH (c:Computer {computer_key: $computer_key})
             MERGE (c)-[rel:HAS_KEYTAB]->(ka)
             RETURN count(rel) AS n
             """,
             records=keytab_records,
-            hostname=hostname,
+            computer_key=f"{scan_id}:{hostname}" if scan_id is not None else None,
         )
         has_keytab = result.single()["n"]
 

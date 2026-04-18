@@ -30,9 +30,9 @@ bash examples/regenerate.sh
 
 This runs the full pipeline (schema, CVE enrichment, import, infer, vulnerabilities,
 classify, report) and produces:
-- `demo-report.md` — Full attack path report with Mermaid diagrams and recommendations
-- `demo-graph.json` — OpenGraph JSON export for viewer
-- `demo-viewer.html` — Interactive Canvas-based graph viewer (open in browser)
+- `generated/demo-report.md` — Full attack path report with Mermaid diagrams and recommendations
+- `generated/demo-graph.json` — OpenGraph JSON export for viewer
+- `generated/demo-viewer.html` — Interactive Canvas-based graph viewer (open in browser)
 
 Environment variables: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
 
@@ -53,3 +53,5 @@ python3 graph/tier_classification.py
 python3 graph/server.py --port 8000
 # Open http://localhost:8000
 ```
+
+Install Python dependencies first with `pip3 install -r graph/requirements.txt`.

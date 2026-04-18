@@ -4,6 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
+| `dev` branch | Yes |
 | `main` branch | Yes |
 | All other branches | No |
 

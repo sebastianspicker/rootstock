@@ -522,7 +522,7 @@ python3 query_runner.py --run 23 --format csv > attack-surface.csv
 python3 query_runner.py --run all
 
 # Custom Neo4j connection
-python3 query_runner.py --neo4j bolt://host:7687 --user neo4j --password mypass --run 01
+python3 query_runner.py --neo4j bolt://host:7687 --neo4j-user neo4j --neo4j-password mypass --run 01
 ```
 
 ### Neo4j Browser (recommended for visualization)

@@ -63,10 +63,10 @@ final class FirewallTests: XCTestCase {
             ],
         ]
         let status = source.parseALFPlist(plist)
-        XCTAssertTrue(status.enabled)
-        XCTAssertTrue(status.stealthMode)
-        XCTAssertFalse(status.allowSigned)
-        XCTAssertTrue(status.allowBuiltIn)
+        XCTAssertEqual(status.enabled, true)
+        XCTAssertEqual(status.stealthMode, true)
+        XCTAssertEqual(status.allowSigned, false)
+        XCTAssertEqual(status.allowBuiltIn, true)
         XCTAssertEqual(status.appRules.count, 2)
 
         let allowed = status.appRules.first { $0.bundleId == "com.example.app" }
@@ -86,16 +86,16 @@ final class FirewallTests: XCTestCase {
 
         let status = source.parseALFPlist(plist)
 
-        XCTAssertTrue(status.allowSigned)
-        XCTAssertFalse(status.allowBuiltIn)
+        XCTAssertEqual(status.allowSigned, true)
+        XCTAssertEqual(status.allowBuiltIn, false)
     }
 
     func testParseALFPlistDisabled() {
         let source = FirewallDataSource()
         let plist: [String: Any] = ["globalstate": 0]
         let status = source.parseALFPlist(plist)
-        XCTAssertFalse(status.enabled)
-        XCTAssertFalse(status.stealthMode)
+        XCTAssertEqual(status.enabled, false)
+        XCTAssertEqual(status.stealthMode, false)
         XCTAssertTrue(status.appRules.isEmpty)
     }
 
@@ -103,16 +103,16 @@ final class FirewallTests: XCTestCase {
         let source = FirewallDataSource()
         let plist: [String: Any] = ["globalstate": 2]
         let status = source.parseALFPlist(plist)
-        XCTAssertTrue(status.enabled, "globalstate=2 (essential only) means enabled")
+        XCTAssertEqual(status.enabled, true, "globalstate=2 (essential only) means enabled")
     }
 
     func testParseALFPlistMissingKeys() {
         let source = FirewallDataSource()
         let plist: [String: Any] = [:]
         let status = source.parseALFPlist(plist)
-        XCTAssertFalse(status.enabled)
-        XCTAssertFalse(status.stealthMode)
-        XCTAssertFalse(status.allowSigned)
+        XCTAssertEqual(status.enabled, false)
+        XCTAssertEqual(status.stealthMode, false)
+        XCTAssertEqual(status.allowSigned, false)
     }
 
     // MARK: - DataSource tests
@@ -135,8 +135,8 @@ final class FirewallTests: XCTestCase {
         let source = FirewallDataSource(alfPlistPath: "/nonexistent/path.plist")
         let result = await source.collect()
         let statuses = result.nodes.compactMap { $0 as? FirewallStatus }
-        XCTAssertEqual(statuses.count, 1, "Should still return a disabled status")
-        XCTAssertFalse(statuses[0].enabled, "Status from missing file should be disabled")
+        XCTAssertEqual(statuses.count, 1, "Should still return a status placeholder")
+        XCTAssertNil(statuses[0].enabled, "Status from missing file should be unknown")
         XCTAssertFalse(result.errors.isEmpty, "Should report an error for missing plist")
     }
 

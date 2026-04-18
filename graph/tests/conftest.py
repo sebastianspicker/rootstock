@@ -27,6 +27,7 @@ NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "rootstock")
 
 # ── Neo4j driver fixture (session-scoped) ────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def neo4j_driver():
     """
@@ -45,6 +46,11 @@ def neo4j_driver():
         pytest.skip(f"Neo4j not available at {NEO4J_URI}")
     except AuthError:
         pytest.skip("Neo4j auth failed — check NEO4J_USER / NEO4J_PASSWORD")
+
+    with driver.session() as session:
+        from setup_schema import apply_schema
+
+        apply_schema(session)
 
     yield driver
     driver.close()

@@ -34,6 +34,7 @@ def neo4j_session(neo4j_driver):
 @pytest.fixture(scope="module")
 def scan_result():
     from models import ScanResult
+
     data = json.loads(FIXTURE_PATH.read_text())
     data["scan_id"] = TEST_SCAN_ID
     return ScanResult.model_validate(data)
@@ -41,9 +42,11 @@ def scan_result():
 
 # ── Integration tests (require Neo4j) ──────────────────────────────────────
 
+
 class TestImportIntegration:
     def test_import_applications(self, neo4j_session, scan_result):
         from import_nodes import import_applications
+
         n = import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
         assert n == 3
 
@@ -55,10 +58,12 @@ class TestImportIntegration:
 
     def test_application_properties(self, neo4j_session, scan_result):
         from import_nodes import import_applications
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
 
         result = neo4j_session.run(
-            "MATCH (a:Application {bundle_id: 'com.googlecode.iterm2'}) RETURN a"
+            "MATCH (a:Application {scan_id: $scan_id, bundle_id: 'com.googlecode.iterm2'}) RETURN a",
+            scan_id=TEST_SCAN_ID,
         )
         row = result.single()
         assert row is not None
@@ -70,8 +75,11 @@ class TestImportIntegration:
 
     def test_import_tcc_grants(self, neo4j_session, scan_result):
         from import_nodes import import_applications, import_tcc_grants
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
-        linked, skipped = import_tcc_grants(neo4j_session, scan_result.tcc_grants, TEST_SCAN_ID)
+        linked, skipped = import_tcc_grants(
+            neo4j_session, scan_result.tcc_grants, TEST_SCAN_ID
+        )
         assert linked == 5  # all 5 grants match apps in fixture
         assert skipped == 0
 
@@ -82,23 +90,31 @@ class TestImportIntegration:
 
     def test_import_entitlements(self, neo4j_session, scan_result):
         from import_nodes import import_applications, import_entitlements
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
-        n_ent_nodes, n_ent_rels = import_entitlements(neo4j_session, scan_result.applications)
+        n_ent_nodes, n_ent_rels = import_entitlements(
+            neo4j_session, scan_result.applications, TEST_SCAN_ID
+        )
         # 10 total entitlements but some names are shared across apps → fewer unique nodes
         assert n_ent_rels == 11  # one rel per (app, entitlement) pair
         assert n_ent_nodes <= 11  # unique entitlement names
 
     def test_idempotency(self, neo4j_session, scan_result):
         """Re-importing the same data must not create duplicate nodes."""
-        from import_nodes import import_applications, import_tcc_grants, import_entitlements
+        from import_nodes import (
+            import_applications,
+            import_tcc_grants,
+            import_entitlements,
+        )
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
         import_tcc_grants(neo4j_session, scan_result.tcc_grants, TEST_SCAN_ID)
-        import_entitlements(neo4j_session, scan_result.applications)
+        import_entitlements(neo4j_session, scan_result.applications, TEST_SCAN_ID)
 
         # Import again
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
         import_tcc_grants(neo4j_session, scan_result.tcc_grants, TEST_SCAN_ID)
-        import_entitlements(neo4j_session, scan_result.applications)
+        import_entitlements(neo4j_session, scan_result.applications, TEST_SCAN_ID)
 
         result = neo4j_session.run(
             "MATCH (a:Application {scan_id: $scan_id}) RETURN count(a) AS n",
@@ -115,7 +131,10 @@ class TestImportIntegration:
 
     def test_import_launch_items(self, neo4j_session, scan_result):
         from import_nodes import import_launch_items
-        n_nodes, n_persists, n_runs, n_hijacks = import_launch_items(neo4j_session, scan_result.launch_items)
+
+        n_nodes, n_persists, n_runs, n_hijacks = import_launch_items(
+            neo4j_session, scan_result.launch_items
+        )
         assert n_nodes == 3
         assert n_hijacks == 0  # no fixture items have program_writable_by_non_root
 
@@ -126,6 +145,7 @@ class TestImportIntegration:
 
     def test_launch_item_properties(self, neo4j_session, scan_result):
         from import_nodes import import_launch_items
+
         import_launch_items(neo4j_session, scan_result.launch_items)
 
         result = neo4j_session.run(
@@ -140,6 +160,7 @@ class TestImportIntegration:
 
     def test_launch_item_runs_as_edge(self, neo4j_session, scan_result):
         from import_nodes import import_launch_items
+
         import_launch_items(neo4j_session, scan_result.launch_items)
 
         result = neo4j_session.run(
@@ -152,6 +173,7 @@ class TestImportIntegration:
 
     def test_launch_item_idempotency(self, neo4j_session, scan_result):
         from import_nodes import import_launch_items
+
         import_launch_items(neo4j_session, scan_result.launch_items)
         import_launch_items(neo4j_session, scan_result.launch_items)
 
@@ -162,6 +184,7 @@ class TestImportIntegration:
 
     def test_import_xpc_services(self, neo4j_session, scan_result):
         from import_nodes import import_xpc_services
+
         n_nodes, n_edges = import_xpc_services(neo4j_session, scan_result.xpc_services)
         assert n_nodes == 2
 
@@ -172,6 +195,7 @@ class TestImportIntegration:
 
     def test_xpc_service_properties(self, neo4j_session, scan_result):
         from import_nodes import import_xpc_services
+
         import_xpc_services(neo4j_session, scan_result.xpc_services)
 
         result = neo4j_session.run(
@@ -189,6 +213,7 @@ class TestImportIntegration:
     def test_xpc_import_idempotency(self, neo4j_session, scan_result):
         """Re-importing the same XPC services must not create duplicate nodes."""
         from import_nodes import import_xpc_services
+
         import_xpc_services(neo4j_session, scan_result.xpc_services)
         import_xpc_services(neo4j_session, scan_result.xpc_services)
 
@@ -199,8 +224,11 @@ class TestImportIntegration:
 
     def test_import_keychain_items(self, neo4j_session, scan_result):
         from import_nodes import import_applications, import_keychain_items
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
-        n_nodes, n_edges = import_keychain_items(neo4j_session, scan_result.keychain_acls)
+        n_nodes, n_edges = import_keychain_items(
+            neo4j_session, scan_result.keychain_acls
+        )
         assert n_nodes == 3  # 3 items in fixture
 
         result = neo4j_session.run(
@@ -210,6 +238,7 @@ class TestImportIntegration:
 
     def test_keychain_can_read_edges(self, neo4j_session, scan_result):
         from import_nodes import import_applications, import_keychain_items
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
         _, n_edges = import_keychain_items(neo4j_session, scan_result.keychain_acls)
         # iTerm2 → iTerm2 Credential (1) + Slack → Slack Token (1) + Terminal → Slack Token (1) = 3
@@ -222,6 +251,7 @@ class TestImportIntegration:
 
     def test_keychain_item_properties(self, neo4j_session, scan_result):
         from import_nodes import import_applications, import_keychain_items
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
         import_keychain_items(neo4j_session, scan_result.keychain_acls)
 
@@ -238,6 +268,7 @@ class TestImportIntegration:
     def test_keychain_import_idempotency(self, neo4j_session, scan_result):
         """Re-importing the same keychain items must not create duplicate nodes."""
         from import_nodes import import_applications, import_keychain_items
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
         import_keychain_items(neo4j_session, scan_result.keychain_acls)
         import_keychain_items(neo4j_session, scan_result.keychain_acls)
@@ -247,21 +278,30 @@ class TestImportIntegration:
         )
         assert result.single()["n"] == 2, "Duplicate Keychain_Item nodes created"
 
-    def test_keychain_no_trusted_apps_creates_no_edges(self, neo4j_session, scan_result):
+    def test_keychain_no_trusted_apps_creates_no_edges(
+        self, neo4j_session, scan_result
+    ):
         """Keychain items with empty trusted_apps must not create CAN_READ_KEYCHAIN edges."""
         from import_nodes import import_applications, import_keychain_items
         from models import KeychainItemData
+
         import_applications(neo4j_session, scan_result.applications, TEST_SCAN_ID)
-        cert_only = [KeychainItemData(
-            label="Orphan Cert", kind="certificate",
-            service=None, access_group=None, trusted_apps=[],
-        )]
+        cert_only = [
+            KeychainItemData(
+                label="Orphan Cert",
+                kind="certificate",
+                service=None,
+                access_group=None,
+                trusted_apps=[],
+            )
+        ]
         n_nodes, n_edges = import_keychain_items(neo4j_session, cert_only)
         assert n_nodes == 1
         assert n_edges == 0
 
     def test_import_mdm_profiles(self, neo4j_session, scan_result):
         from import_nodes import import_mdm_profiles
+
         n_nodes, n_edges = import_mdm_profiles(neo4j_session, scan_result.mdm_profiles)
         assert n_nodes == 2  # 2 profiles in fixture
         assert n_edges == 2  # 2 TCC policies (only 1 profile has policies)
@@ -273,6 +313,7 @@ class TestImportIntegration:
 
     def test_mdm_configures_edges(self, neo4j_session, scan_result):
         from import_nodes import import_mdm_profiles
+
         import_mdm_profiles(neo4j_session, scan_result.mdm_profiles)
 
         result = neo4j_session.run(
@@ -282,6 +323,7 @@ class TestImportIntegration:
 
     def test_mdm_profile_properties(self, neo4j_session, scan_result):
         from import_nodes import import_mdm_profiles
+
         import_mdm_profiles(neo4j_session, scan_result.mdm_profiles)
 
         result = neo4j_session.run(
@@ -298,11 +340,16 @@ class TestImportIntegration:
         """Profiles with no TCC policies must not create CONFIGURES edges."""
         from import_nodes import import_mdm_profiles
         from models import MDMProfileData
-        basic_profile = [MDMProfileData(
-            identifier="com.example.empty.profile",
-            display_name="Empty Profile",
-            organization=None, install_date=None, tcc_policies=[],
-        )]
+
+        basic_profile = [
+            MDMProfileData(
+                identifier="com.example.empty.profile",
+                display_name="Empty Profile",
+                organization=None,
+                install_date=None,
+                tcc_policies=[],
+            )
+        ]
         n_nodes, n_edges = import_mdm_profiles(neo4j_session, basic_profile)
         assert n_nodes == 1
         assert n_edges == 0
@@ -310,6 +357,7 @@ class TestImportIntegration:
     def test_mdm_import_idempotency(self, neo4j_session, scan_result):
         """Re-importing the same MDM profiles must not create duplicate nodes."""
         from import_nodes import import_mdm_profiles
+
         import_mdm_profiles(neo4j_session, scan_result.mdm_profiles)
         import_mdm_profiles(neo4j_session, scan_result.mdm_profiles)
 
@@ -322,10 +370,16 @@ class TestImportIntegration:
         """A TCC grant whose client has no Application node should be skipped gracefully."""
         from models import TCCGrantData
         from import_nodes import import_tcc_grants
+
         orphan = TCCGrantData(
-            service="kTCCServiceMicrophone", display_name="Microphone",
-            client="com.nonexistent.app", client_type=0,
-            auth_value=2, auth_reason=1, scope="user", last_modified=0,
+            service="kTCCServiceMicrophone",
+            display_name="Microphone",
+            client="com.nonexistent.app",
+            client_type=0,
+            auth_value=2,
+            auth_reason=1,
+            scope="user",
+            last_modified=0,
         )
         linked, skipped = import_tcc_grants(neo4j_session, [orphan], TEST_SCAN_ID)
         assert linked == 0
@@ -335,6 +389,7 @@ class TestImportIntegration:
         """AD binding enriches Computer node and creates ADGroup + MAPPED_TO."""
         from import_nodes import import_computer, import_local_groups, import_ad_binding
         from models import ComputerData
+
         computer = ComputerData(
             hostname=scan_result.hostname,
             macos_version=scan_result.macos_version,
@@ -344,23 +399,23 @@ class TestImportIntegration:
         )
         import_computer(neo4j_session, computer)
         import_local_groups(neo4j_session, scan_result.local_groups)
-        n_groups, n_mapped = import_ad_binding(neo4j_session, scan_result.ad_binding, scan_result.hostname)
+        n_groups, n_mapped = import_ad_binding(
+            neo4j_session, scan_result.ad_binding, scan_result.hostname, TEST_SCAN_ID
+        )
         assert n_groups == 1  # one group mapping in fixture
         assert n_mapped == 1  # CORP\Domain Admins → admin
 
         # Verify Computer node has ad_bound property
         result = neo4j_session.run(
-            "MATCH (c:Computer {hostname: $hostname}) RETURN c.ad_bound AS ad_bound, c.ad_realm AS realm",
-            hostname=scan_result.hostname,
+            "MATCH (c:Computer {computer_key: $computer_key}) RETURN c.ad_bound AS ad_bound, c.ad_realm AS realm",
+            computer_key=f"{TEST_SCAN_ID}:{scan_result.hostname}",
         )
         row = result.single()
         assert row["ad_bound"] is True
         assert row["realm"] == "CORP.EXAMPLE.COM"
 
         # Verify ADGroup node exists
-        result = neo4j_session.run(
-            "MATCH (ag:ADGroup) RETURN count(ag) AS n"
-        )
+        result = neo4j_session.run("MATCH (ag:ADGroup) RETURN count(ag) AS n")
         assert result.single()["n"] >= 1
 
         # Verify MAPPED_TO edge
@@ -373,6 +428,7 @@ class TestImportIntegration:
         """Kerberos artifacts create nodes + FOUND_ON, HAS_KERBEROS_CACHE, HAS_KEYTAB edges."""
         from import_nodes import import_computer, import_kerberos_artifacts
         from models import ComputerData
+
         computer = ComputerData(
             hostname=scan_result.hostname,
             macos_version=scan_result.macos_version,
@@ -382,7 +438,10 @@ class TestImportIntegration:
         )
         import_computer(neo4j_session, computer)
         n_ka, n_found, n_cache, n_kt = import_kerberos_artifacts(
-            neo4j_session, scan_result.kerberos_artifacts, scan_result.hostname
+            neo4j_session,
+            scan_result.kerberos_artifacts,
+            scan_result.hostname,
+            TEST_SCAN_ID,
         )
         assert n_ka == 3  # ccache + keytab + config in fixture
         assert n_found == 3  # all FOUND_ON
@@ -390,9 +449,7 @@ class TestImportIntegration:
         assert n_kt == 1  # one keytab
 
         # Verify KerberosArtifact nodes
-        result = neo4j_session.run(
-            "MATCH (ka:KerberosArtifact) RETURN count(ka) AS n"
-        )
+        result = neo4j_session.run("MATCH (ka:KerberosArtifact) RETURN count(ka) AS n")
         assert result.single()["n"] >= 3
 
         # Verify HAS_KERBEROS_CACHE edge
@@ -405,6 +462,7 @@ class TestImportIntegration:
         """User details with is_ad_user should set the flag on User nodes."""
         from import_nodes import import_user_details
         from models import UserDetailData
+
         ad_user = UserDetailData(
             name="ad_testuser",
             shell="/bin/bash",
@@ -423,6 +481,7 @@ class TestImportIntegration:
         """Non-bound AD binding returns 0, 0 with no side effects."""
         from import_nodes import import_ad_binding
         from models import ADBindingData
+
         not_bound = ADBindingData(is_bound=False)
         n_groups, n_mapped = import_ad_binding(neo4j_session, not_bound, "test-mac")
         assert n_groups == 0
@@ -431,6 +490,49 @@ class TestImportIntegration:
     def test_ad_binding_none(self, neo4j_session):
         """None AD binding returns 0, 0."""
         from import_nodes import import_ad_binding
+
         n_groups, n_mapped = import_ad_binding(neo4j_session, None, "test-mac")
         assert n_groups == 0
         assert n_mapped == 0
+
+    def test_same_bundle_id_across_scans_remains_distinct(
+        self, neo4j_session, scan_result
+    ):
+        from import_nodes import import_applications
+
+        other_scan_id = "test-00000000-0000-0000-0000-000000000099"
+        import_applications(neo4j_session, [scan_result.applications[0]], TEST_SCAN_ID)
+        import_applications(neo4j_session, [scan_result.applications[0]], other_scan_id)
+
+        result = neo4j_session.run(
+            "MATCH (a:Application {bundle_id: $bundle_id}) WHERE a.scan_id IN [$scan_a, $scan_b] RETURN count(a) AS n",
+            bundle_id=scan_result.applications[0].bundle_id,
+            scan_a=TEST_SCAN_ID,
+            scan_b=other_scan_id,
+        )
+        assert result.single()["n"] == 2
+
+        cleanup_test_nodes(neo4j_session, other_scan_id)
+
+    def test_same_bundle_id_multiple_paths_remains_distinct(
+        self, neo4j_session, scan_result
+    ):
+        from import_nodes import import_applications
+        from models import ApplicationData
+
+        original = scan_result.applications[0]
+        moved = ApplicationData.model_validate(
+            {
+                **original.model_dump(),
+                "path": "/Applications/Alternate/iTerm2.app",
+            }
+        )
+
+        import_applications(neo4j_session, [original, moved], TEST_SCAN_ID)
+
+        result = neo4j_session.run(
+            "MATCH (a:Application {scan_id: $scan_id, bundle_id: $bundle_id}) RETURN count(a) AS n",
+            scan_id=TEST_SCAN_ID,
+            bundle_id=original.bundle_id,
+        )
+        assert result.single()["n"] == 2

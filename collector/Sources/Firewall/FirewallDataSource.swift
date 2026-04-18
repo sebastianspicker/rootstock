@@ -20,19 +20,18 @@ public struct FirewallDataSource: DataSource {
 
         guard let plistData = try? Data(contentsOf: URL(fileURLWithPath: alfPlistPath)),
               let plist = try? PropertyListSerialization.propertyList(
-                  from: plistData, format: nil
-              ) as? [String: Any] else {
+                   from: plistData, format: nil
+               ) as? [String: Any] else {
             errors.append(CollectionError(
                 source: "Firewall",
                 message: "Could not read ALF preferences at \(alfPlistPath)",
                 recoverable: true
             ))
-            // Return a disabled status rather than empty — explicit "unknown" state.
-            let disabled = FirewallStatus(
-                enabled: false, stealthMode: false,
-                allowSigned: false, allowBuiltIn: false, appRules: []
+            let unknown = FirewallStatus(
+                enabled: nil, stealthMode: nil,
+                allowSigned: nil, allowBuiltIn: nil, appRules: []
             )
-            return DataSourceResult(nodes: [disabled], errors: errors)
+            return DataSourceResult(nodes: [unknown], errors: errors)
         }
 
         let status = parseALFPlist(plist)

@@ -24,8 +24,11 @@ htmlcov/
 .agents/
 ralph-prompts/
 AUDIT.md
+CLAUDE.md
+AGENTS.md
 .kilo/
 docs/superpowers/
+docs/deprecated/audits/
 
 # Real scan data (machine-specific, never commit)
 scan.json

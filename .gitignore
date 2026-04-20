@@ -5,6 +5,7 @@
 xcuserdata/
 DerivedData/
 .claude/
+.env
 __pycache__/
 *.pyc
 *.pyo
@@ -23,6 +24,8 @@ htmlcov/
 .agents/
 ralph-prompts/
 AUDIT.md
+.kilo/
+docs/superpowers/
 
 # Real scan data (machine-specific, never commit)
 scan.json

@@ -8,7 +8,7 @@ import Export
 
 @main
 struct RootstockCommand: AsyncParsableCommand {
-    static let collectorVersion = "0.1.0"
+    static let collectorVersion = "1.0.0"
 
     static let configuration = CommandConfiguration(
         commandName: "rootstock-collector",

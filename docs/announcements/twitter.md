@@ -1,7 +1,7 @@
 # Twitter/X Announcement
 
 ## Short Version (280 chars)
-Introducing Rootstock - graph-based attack path discovery for macOS. 23 collector modules, 101 Cypher queries, 17 inference engines. CVE enrichment, risk scoring, BloodHound integration. Think BloodHound for macOS. Open source (GPLv3). github.com/[org]/rootstock
+Introducing Rootstock - graph-based attack path discovery for macOS. 23 collector modules, 101 Cypher queries, 17 inference engines. CVE enrichment, risk scoring, BloodHound integration. Think BloodHound for macOS. Open source (GPLv3). github.com/sebastianspicker/rootstock
 
 ## Thread Version
 
@@ -15,4 +15,4 @@ Introducing Rootstock - graph-based attack path discovery for macOS. 23 collecto
 
 5/ CVE/EPSS/KEV vulnerability enrichment, ATT&CK technique + ThreatGroup mapping, and bidirectional BloodHound integration. Import SharpHound data, export OpenGraph format.
 
-6/ 751 tests across collector and graph pipeline. Built for the macOS security research community. GPLv3. Zero network calls. Metadata only. Contributions welcome. github.com/[org]/rootstock
+6/ 751 tests across collector and graph pipeline. Built for the macOS security research community. GPLv3. Zero network calls. Metadata only. Contributions welcome. github.com/sebastianspicker/rootstock

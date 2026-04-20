@@ -3,4 +3,3 @@
 *.xcodeproj
 DerivedData/
 *.xcworkspace
-Package.resolved

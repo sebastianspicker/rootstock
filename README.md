@@ -3,10 +3,9 @@
 [![Build](https://github.com/sebastianspicker/rootstock/actions/workflows/test.yml/badge.svg)](https://github.com/sebastianspicker/rootstock/actions)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-brightgreen)](https://support.apple.com/macos)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](CHANGELOG.md)
 
 Attack path discovery for macOS that maps TCC grants, entitlements, Keychain ACLs, and XPC trust relationships as an exploitable graph.
-
-> **Status:** Hardening release candidate — collector and graph pipeline are implemented; current work focuses on correctness, validation, and release alignment before 1.0.
 
 ## What is Rootstock?
 
@@ -226,7 +225,7 @@ Environment variables for Neo4j connection: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PA
 
 | Category | Count | Details |
 |----------|-------|---------|
-| Collector modules | 26 | TCC, entitlements, code signing, XPC, persistence, keychain, MDM, groups, remote access, firewall, login sessions, authorization DB/plugins, system extensions, sudoers, processes, file ACLs, shell hooks, physical security, AD, Kerberos, sandbox, quarantine |
+| Collector modules | 23 data sources | TCC, entitlements, code signing, XPC, persistence, keychain, MDM, groups, remote access, firewall, login sessions, authorization DB/plugins, system extensions, sudoers, processes, file ACLs, shell hooks, physical security, AD, Kerberos, sandbox, quarantine |
 | Graph node types | 31 | Application, TCC_Permission, Entitlement, User, XPC_Service, LaunchItem, Keychain_Item, MDM_Profile, Computer, Vulnerability, CWE, AttackTechnique, ThreatGroup, ADUser, Recommendation, and more |
 | Inference engines | 17 | Injection assessment, TCC inheritance, Apple Events, accessibility, Kerberos, automation, Finder FDA, ESF monitoring, risk scoring, recommendations, and more |
 | Cypher queries | 101 | 10 categories: Red Team, Blue Team, Forensic |
@@ -280,7 +279,7 @@ Run with `sudo` or grant FDA to the binary to collect TCC grants. See `docs/rese
 ## Project Structure
 
 ```
-collector/                 Swift CLI collector (23 modules)
+collector/                 Swift CLI collector (23 data source modules, 26 Swift targets)
 ├── Sources/
 │   ├── Models/            Shared data models + MacOSVersion detection
 │   ├── TCC/               TCC database parser (version-aware schema adapters)

@@ -5,51 +5,52 @@
 Rootstock is a three-stage pipeline:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        macOS Endpoint                           │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────┐      │
-│  │              Collector (Swift CLI)                     │      │
-│  │                                                       │      │
-│  │  ┌──────────┐ ┌──────────┐ ┌────────────┐           │      │
-│  │  │ TCC      │ │ Entitle- │ │ CodeSign   │           │      │
-│  │  │ Parser   │ │ ments    │ │ Analyzer   │           │      │
-│  │  └────┬─────┘ └────┬─────┘ └─────┬──────┘           │      │
-│  │       │             │             │                   │      │
-│  │  ┌────┴─────┐ ┌────┴─────┐ ┌─────┴──────┐           │      │
-│  │  │ XPC      │ │ Keychain │ │ Persistence│           │      │
-│  │  │ Enum     │ │ ACLs     │ │ Scanner    │           │      │
-│  │  └────┬─────┘ └────┬─────┘ └─────┬──────┘           │      │
-│  │       │             │             │                   │      │
-│  │       └─────────────┼─────────────┘                   │      │
-│  │                     ▼                                 │      │
-│  │              ┌──────────────┐                         │      │
-│  │              │ JSON Export  │                         │      │
-│  │              └──────┬───────┘                         │      │
-│  └─────────────────────┼────────────────────────────────┘      │
-│                        │                                        │
-└────────────────────────┼────────────────────────────────────────┘
-                         │  scan.json
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Analysis Workstation                          │
-│                                                                 │
-│  ┌──────────────┐      ┌──────────────┐                        │
-│  │ Graph Import │ ──▶  │   Neo4j      │                        │
-│  │ (Python)     │      │   Database   │                        │
-│  └──────────────┘      └──────┬───────┘                        │
-│                               │                                 │
-│                        ┌──────┴───────┐                        │
-│                        │ Query Engine │                        │
-│                        │ (Cypher)     │                        │
-│                        └──────┬───────┘                        │
-│                               │                                 │
-│                        ┌──────┴───────┐                        │
-│                        │ Visualizer   │                        │
-│                        │ (Neo4j UI /  │                        │
-│                        │  Custom)     │                        │
-│                        └──────────────┘                        │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          macOS Endpoint                                  │
+│                                                                          │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │                  Collector (Swift CLI, v1.0.0)                    │   │
+│  │                                                                   │   │
+│  │  Security Boundaries (23 data source modules):                    │   │
+│  │  TCC · Entitlements · CodeSigning · XPC · Keychain · Persistence  │   │
+│  │  MDM · Groups · RemoteAccess · Firewall · LoginSession            │   │
+│  │  AuthorizationDB · AuthorizationPlugins · SystemExtensions        │   │
+│  │  Sudoers · ProcessSnapshot · FileACLs · ShellHooks                │   │
+│  │  PhysicalSecurity · ActiveDirectory · KerberosArtifacts           │   │
+│  │  Sandbox · Quarantine                                             │   │
+│  │                            │                                      │   │
+│  │                     ┌──────▼──────┐                               │   │
+│  │                     │ JSON Export  │  (scan.json, ~1 MB, <6s)     │   │
+│  │                     └──────┬──────┘                               │   │
+│  └────────────────────────────┼─────────────────────────────────────┘   │
+│                               │                                          │
+└───────────────────────────────┼──────────────────────────────────────────┘
+                                │  scan.json
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Analysis Workstation                              │
+│                                                                          │
+│  ┌──────────────────┐   ┌──────────────┐   ┌───────────────────────┐   │
+│  │ Graph Import     │──▶│   Neo4j      │◀──│ CVE/ATT&CK Enrichment  │   │
+│  │ (6 import mods)  │   │   Database   │   │ (EPSS/KEV/NVD)        │   │
+│  └──────────────────┘   └──────┬───────┘   └───────────────────────┘   │
+│                                │                                         │
+│  ┌──────────────────────────── │ ───────────────────────────────────┐   │
+│  │        Inference Engines (17 modules)                             │   │
+│  │  Injection · TCC Inheritance · Apple Events · Accessibility       │   │
+│  │  Kerberos · Automation · Finder FDA · ESF Monitoring              │   │
+│  │  Risk Scoring (0-100) · Recommendations · Sandbox · Quarantine    │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                │                                         │
+│            ┌───────────────────┼───────────────────┐                    │
+│            ▼                   ▼                   ▼                    │
+│  ┌──────────────────┐ ┌───────────────┐ ┌──────────────────┐            │
+│  │ 101 Cypher       │ │ REST API      │ │ Markdown / HTML  │            │
+│  │ Queries          │ │ (FastAPI)     │ │ Report           │            │
+│  │ (Red/Blue/       │ │ + Interactive │ │ + BloodHound     │            │
+│  │  Forensic)       │ │ Graph Viewer  │ │   OpenGraph      │            │
+│  └──────────────────┘ └───────────────┘ └──────────────────┘            │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Design Principle: Separation of Collection and Analysis
@@ -101,7 +102,7 @@ This abstraction serves three purposes:
 3. **Extensibility:** New data sources (MDM profiles, ESF events, etc.) plug in without
    modifying existing code.
 
-### Data Sources (23 Modules)
+### Data Sources (23 Data Source Modules)
 
 | Module | Data Source | Requires Elevation? |
 |--------|-------------|---------------------|
@@ -337,7 +338,7 @@ These relationships don't exist in the raw collector JSON but are derived:
     "timestamp": "ISO-8601",
     "hostname": "string",
     "macos_version": "14.5",
-    "collector_version": "0.1.0",
+    "collector_version": "1.0.0",
     "elevation": {
         "is_root": false,
         "has_fda": false

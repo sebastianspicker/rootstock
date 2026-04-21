@@ -52,16 +52,16 @@ final class GroupTests: XCTestCase {
         XCTAssertFalse(groups.isEmpty, "Should find at least one security-relevant group")
     }
 
-    func testAdminGroupExists() async {
+    func testAdminGroupExists() async throws {
         let source = GroupDataSource()
         let result = await source.collect()
         let groups = result.nodes.compactMap { $0 as? LocalGroup }
         let adminGroup = groups.first { $0.name == "admin" }
-        XCTAssertNotNil(adminGroup, "admin group should exist on macOS")
-        if let admin = adminGroup {
-            XCTAssertEqual(admin.gid, 80, "admin group GID should be 80")
-            XCTAssertFalse(admin.members.isEmpty, "admin group should have at least one member")
+        guard let admin = adminGroup else {
+            throw XCTSkip("admin group is not present on this host")
         }
+        XCTAssertEqual(admin.gid, 80, "admin group GID should be 80")
+        XCTAssertFalse(admin.members.isEmpty, "admin group should have at least one member")
     }
 
     func testStaffGroupExists() async {

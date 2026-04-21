@@ -24,4 +24,14 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(output?.count, 100000)
         XCTAssertEqual(output?.first, "B")
     }
+
+    func testRunReturnsNilWhenTimeoutExpires() {
+        let output = Shell.run(
+            python3Path,
+            ["-c", "import time; time.sleep(5)"],
+            timeoutSeconds: 0.1
+        )
+
+        XCTAssertNil(output)
+    }
 }

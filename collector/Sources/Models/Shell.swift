@@ -5,6 +5,11 @@ import Foundation
 public enum Shell {
     /// Run a command and return stdout as a trimmed String, or nil on failure / non-zero exit.
     public static func run(_ path: String, _ arguments: [String]) -> String? {
+        run(path, arguments, timeoutSeconds: nil)
+    }
+
+    /// Run a command with an optional timeout and return stdout as a trimmed String.
+    public static func run(_ path: String, _ arguments: [String], timeoutSeconds: TimeInterval?) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
@@ -19,8 +24,21 @@ public enum Shell {
             return nil
         }
 
+        if let timeoutSeconds {
+            let completed = DispatchSemaphore(value: 0)
+            process.terminationHandler = { _ in completed.signal() }
+            let deadline = DispatchTime.now() + timeoutSeconds
+            if completed.wait(timeout: deadline) == .timedOut {
+                process.terminate()
+                process.waitUntilExit()
+                return nil
+            }
+        }
+
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        if timeoutSeconds == nil {
+            process.waitUntilExit()
+        }
         guard process.terminationStatus == 0 else { return nil }
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }

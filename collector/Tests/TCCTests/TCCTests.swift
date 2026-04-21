@@ -236,10 +236,14 @@ final class TCCTests: XCTestCase {
     }
 
     func testMacOSVersionDetectReturnsValidValue() {
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
         let version = MacOSVersion.detect()
+        let expected = MacOSVersion.from(
+            majorVersion: osVersion.majorVersion,
+            minorVersion: osVersion.minorVersion
+        )
         XCTAssertFalse(version.displayString.isEmpty)
-        // On the test machine (macOS 26.3 Tahoe), detect() must return .tahoe
-        XCTAssertEqual(version, .tahoe, "Expected .tahoe on this test machine (macOS 26.3)")
+        XCTAssertEqual(version, expected)
     }
 
     func testSequoiaErrorMessageContainsGuidance() async {

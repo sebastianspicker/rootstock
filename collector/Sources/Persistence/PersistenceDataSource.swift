@@ -146,7 +146,7 @@ public struct PersistenceDataSource: DataSource {
     }
 
     private func collectLoginItemsViaSfltool() -> ([LaunchItem], [String]) {
-        guard let output = Shell.run("/usr/bin/sfltool", ["dumpbtm"]) else {
+        guard let output = Shell.run("/usr/bin/sfltool", ["dumpbtm"], timeoutSeconds: 5) else {
             return ([], [])
         }
         return (Self.parseSfltoolOutput(output), [])

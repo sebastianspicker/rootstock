@@ -22,6 +22,7 @@ import html as html_mod
 import json
 import logging
 import os
+import secrets
 import sys
 import tempfile
 from contextlib import asynccontextmanager
@@ -31,7 +32,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from neo4j import GraphDatabase, READ_ACCESS
 from neo4j.exceptions import ServiceUnavailable, AuthError
@@ -43,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import importlib
 
 from query_runner import discover_queries, find_query, load_cypher
-from utils import first_cypher_statement, run_query, validate_read_only_cypher
+from utils import first_cypher_statement, validate_read_only_cypher
 
 _import_mod = importlib.import_module("import")
 query_stats = _import_mod.query_stats
@@ -126,7 +127,7 @@ app.add_middleware(
     allow_origins=[],
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
 
 
@@ -136,6 +137,56 @@ logger = logging.getLogger("rootstock.api")
 _LAYOUT_CACHE_LIMIT = 8
 _LAYOUT_CACHE: dict[str, dict[str, tuple[float, float]]] = {}
 _LAYOUT_CACHE_ORDER: list[str] = []
+DEFAULT_QUERY_MAX_ROWS = 2000
+
+
+def _expected_api_token() -> str | None:
+    token = getattr(app.state, "api_token", None)
+    return str(token) if token else None
+
+
+def _provided_api_token(request: Request) -> str | None:
+    api_key = request.headers.get("x-api-key")
+    if api_key:
+        return api_key
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return None
+
+
+@app.middleware("http")
+async def require_api_auth(request: Request, call_next):
+    expected = _expected_api_token()
+    if expected and request.url.path.startswith("/api/"):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        provided = _provided_api_token(request)
+        if not provided or not secrets.compare_digest(provided, expected):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
+
+def _query_max_rows() -> int:
+    value = getattr(app.state, "query_max_rows", DEFAULT_QUERY_MAX_ROWS)
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_QUERY_MAX_ROWS
+    return max(1, min(parsed, 10000))
+
+
+def _run_query_limited(session, cypher: str, params: dict[str, Any] | None) -> tuple[list[dict], bool]:
+    max_rows = _query_max_rows()
+    result = session.run(cypher, params or {})
+    rows: list[dict] = []
+    truncated = False
+    for record in result:
+        if len(rows) >= max_rows:
+            truncated = True
+            break
+        rows.append(dict(record))
+    return rows, truncated
 
 
 def get_session(request: Request):
@@ -209,7 +260,7 @@ def run_query_endpoint(
     cypher = first_cypher_statement(load_cypher(q))
     params = body.params if body else {}
     try:
-        rows = run_query(session, cypher, params or {})
+        rows, truncated = _run_query_limited(session, cypher, params or {})
     except Exception as e:
         logger.warning("Query %s failed: %s", query_id, e)
         raise HTTPException(status_code=400, detail="Query execution failed")
@@ -223,6 +274,7 @@ def run_query_endpoint(
         },
         "rows": rows,
         "count": len(rows),
+        "truncated": truncated,
     }
 
 
@@ -411,13 +463,20 @@ async def import_bloodhound(file: UploadFile, session=Depends(get_session)):
     if not file.filename or not file.filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="File must be a .zip archive")
 
-    MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
-    content = await file.read(MAX_UPLOAD_BYTES + 1)
-    if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Upload exceeds 50 MB limit")
-
+    max_upload_bytes = 50 * 1024 * 1024  # 50 MB
+    chunk_size = 1024 * 1024
+    total_bytes = 0
     with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-        tmp.write(content)
+        while True:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > max_upload_bytes:
+                tmp.close()
+                Path(tmp.name).unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Upload exceeds 50 MB limit")
+            tmp.write(chunk)
         tmp_path = tmp.name
 
     try:
@@ -449,10 +508,8 @@ def run_cypher_endpoint(body: CypherRequest, session=Depends(get_read_session)):
         raise HTTPException(status_code=403, detail=error)
 
     try:
-        result = session.run(body.cypher, body.params or {})
-        records = list(result)
-        columns = list(records[0].keys()) if records else []
-        rows = [dict(r) for r in records]
+        rows, truncated = _run_query_limited(session, body.cypher, body.params or {})
+        columns = list(rows[0].keys()) if rows else []
     except Exception as e:
         logger.warning("Ad-hoc Cypher failed: %s", e)
         raise HTTPException(status_code=400, detail="Query execution failed")
@@ -461,6 +518,7 @@ def run_cypher_endpoint(body: CypherRequest, session=Depends(get_read_session)):
         "columns": columns,
         "rows": rows,
         "count": len(rows),
+        "truncated": truncated,
     }
 
 
@@ -582,6 +640,17 @@ def main() -> int:
     parser.add_argument(
         "--neo4j-password", default=None, help="Neo4j password (or set NEO4J_PASSWORD)"
     )
+    parser.add_argument(
+        "--api-token",
+        default=None,
+        help="API token for /api/* endpoints (or set ROOTSTOCK_API_TOKEN)",
+    )
+    parser.add_argument(
+        "--query-max-rows",
+        type=int,
+        default=DEFAULT_QUERY_MAX_ROWS,
+        help=f"Maximum rows returned from query endpoints (default: {DEFAULT_QUERY_MAX_ROWS})",
+    )
     args = parser.parse_args()
 
     password = args.neo4j_password or os.environ.get("NEO4J_PASSWORD")
@@ -595,6 +664,8 @@ def main() -> int:
     app.state.neo4j_uri = args.neo4j
     app.state.neo4j_user = args.neo4j_user
     app.state.neo4j_password = password
+    app.state.api_token = args.api_token or os.environ.get("ROOTSTOCK_API_TOKEN")
+    app.state.query_max_rows = args.query_max_rows
 
     import uvicorn
 

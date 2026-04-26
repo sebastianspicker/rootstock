@@ -214,3 +214,58 @@ class TestCypherEndpoint:
         response = client.post("/api/cypher", json={"cypher": ""})
         # Empty query likely fails at Neo4j level with 400
         assert response.status_code in (200, 400)
+
+    def test_query_result_is_truncated_when_over_limit(self, client):
+        from server import app
+
+        app.state.query_max_rows = 2
+        mock_records = [{"n": 1}, {"n": 2}, {"n": 3}]
+        with patch.object(app.state.driver, "session") as mock_session_ctx:
+            mock_session = MagicMock()
+            mock_session.run.return_value = iter(mock_records)
+            mock_session_ctx.return_value.__enter__.return_value = mock_session
+            mock_session_ctx.return_value.__exit__.return_value = None
+
+            response = client.post("/api/cypher", json={"cypher": "MATCH (n) RETURN n"})
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["count"] == 2
+        assert body["truncated"] is True
+        app.state.query_max_rows = 2000
+
+
+class TestApiAuthentication:
+    def test_api_requires_token_when_configured(self, client):
+        from server import app
+
+        app.state.api_token = "secret-token"
+        response = client.get("/api/queries")
+        assert response.status_code == 401
+        app.state.api_token = None
+
+    def test_api_accepts_bearer_token_when_configured(self, client):
+        from server import app
+
+        app.state.api_token = "secret-token"
+        response = client.get(
+            "/api/queries", headers={"Authorization": "Bearer secret-token"}
+        )
+        assert response.status_code == 200
+        app.state.api_token = None
+
+    def test_api_accepts_x_api_key_when_configured(self, client):
+        from server import app
+
+        app.state.api_token = "secret-token"
+        response = client.get("/api/queries", headers={"X-API-Key": "secret-token"})
+        assert response.status_code == 200
+        app.state.api_token = None
+
+    def test_options_request_not_blocked_by_auth(self, client):
+        from server import app
+
+        app.state.api_token = "secret-token"
+        response = client.options("/api/queries")
+        assert response.status_code in (200, 405)
+        app.state.api_token = None

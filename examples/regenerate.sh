@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# regenerate.sh — Rebuild all demo outputs from scratch.
+# regenerate.sh — Rebuild demo outputs from the checked-in demo scan.
 #
 # Requires a running Neo4j instance (default: bolt://localhost:7687).
-# The repository only commits demo-scan.json. Regenerated report/viewer artifacts
+# The repository commits demo-scan.json as the demo source of truth. Pipeline artifacts
 # are written under examples/generated/.
 #
 # Usage:
@@ -57,9 +57,9 @@ print('  Neo4j OK')
 	exit 1
 }
 
-# 1. Generate synthetic scan JSON
-echo "==> Generating demo-scan.json ..."
-python3 examples/generate_demo_scan.py -o examples/demo-scan.json
+# 1. Validate checked-in synthetic scan JSON
+echo "==> Validating demo-scan.json ..."
+python3 scripts/validate-scan.py examples/demo-scan.json
 
 # 2. Run full pipeline (schema → import → infer → classify)
 echo "==> Running pipeline ..."
@@ -77,7 +77,7 @@ python3 graph/viewer.py -i "$OUTPUT_DIR/demo-graph.json" -o "$OUTPUT_DIR/demo-vi
 
 echo ""
 echo "Done! Generated:"
-echo "  examples/demo-scan.json              — synthetic scan data"
+echo "  examples/demo-scan.json              — validated synthetic scan data"
 echo "  examples/generated/demo-report.md    — attack path report"
 echo "  examples/generated/demo-graph.json   — graph export for viewer"
 echo "  examples/generated/demo-viewer.html  — interactive graph viewer"

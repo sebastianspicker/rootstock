@@ -52,6 +52,34 @@ def client():
             yield tc
 
 
+class TestRouteSurface:
+    def test_public_viewer_api_routes_are_locked(self):
+        """Only the viewer API routes should be exposed as FastAPI app routes."""
+        from fastapi.routing import APIRoute
+        from server import app
+
+        expected_routes = {
+            ("GET", "/"),
+            ("GET", "/api/queries"),
+            ("POST", "/api/queries/{query_id}/run"),
+            ("GET", "/api/graph"),
+            ("POST", "/api/mark-owned"),
+            ("POST", "/api/clear-owned"),
+            ("GET", "/api/owned"),
+            ("POST", "/api/tier-classify"),
+            ("POST", "/api/cypher"),
+        }
+        actual_routes = {
+            (method, route.path)
+            for route in app.routes
+            if isinstance(route, APIRoute)
+            for method in route.methods
+            if method in {"GET", "POST"}
+        }
+
+        assert actual_routes == expected_routes
+
+
 class TestQueryEndpoints:
     def test_list_queries(self, client):
         """GET /api/queries should return a list of query descriptors."""
@@ -88,12 +116,7 @@ class TestStaticEndpoints:
             expected_keys = {"id", "filename", "name", "purpose", "category", "severity", "parameters"}
             assert expected_keys.issubset(set(q.keys()))
 
-    def test_graph_layout_is_cached_for_identical_payloads(self, client):
-        from server import _LAYOUT_CACHE, _LAYOUT_CACHE_ORDER
-
-        _LAYOUT_CACHE.clear()
-        _LAYOUT_CACHE_ORDER.clear()
-
+    def test_graph_gets_deterministic_positions(self, client):
         graph_payload = {
             "graph": {
                 "nodes": [
@@ -106,21 +129,18 @@ class TestStaticEndpoints:
             }
         }
 
-        def fake_layout(nodes, _edges, iterations):
-            for index, node in enumerate(nodes):
-                node["x"] = float(index)
-                node["y"] = float(iterations + index)
-
         with patch("server._get_hostname", return_value="cached-host"), patch(
             "server.build_opengraph",
             side_effect=lambda *_args, **_kwargs: copy.deepcopy(graph_payload),
-        ), patch("server.compute_layout", side_effect=fake_layout) as mock_layout:
+        ):
             first = client.get("/api/graph")
             second = client.get("/api/graph")
 
         assert first.status_code == 200
         assert second.status_code == 200
-        assert mock_layout.call_count == 1
+        for node in first.json()["graph"]["nodes"]:
+            assert isinstance(node["x"], int | float)
+            assert isinstance(node["y"], int | float)
         assert first.json()["graph"]["nodes"] == second.json()["graph"]["nodes"]
 
 

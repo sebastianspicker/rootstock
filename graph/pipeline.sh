@@ -54,7 +54,7 @@ fi
 # Neo4j connection — CLI args override env vars, env vars override defaults
 NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
 NEO4J_USER="${NEO4J_USER:-neo4j}"
-NEO4J_PASS="${NEO4J_PASSWORD:?Set NEO4J_PASSWORD or use --password}"
+NEO4J_PASS="${NEO4J_PASSWORD:-}"
 REPORT_FILE=""
 SKIP_REPORT=false
 SERVE=false
@@ -75,6 +75,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -z "$NEO4J_PASS" ]]; then
+    echo "ERROR: Set NEO4J_PASSWORD or use --password" >&2
+    exit 1
+fi
+
 NEO4J_ARGS=(--neo4j "$NEO4J_URI" --neo4j-user "$NEO4J_USER" --neo4j-password "$NEO4J_PASS")
 
 echo "╔══════════════════════════════════════════════════╗"
@@ -94,6 +99,8 @@ echo ""
 # ── Step 2/7: CVE Enrichment (offline-safe) ──────────────────────────────────
 
 echo "── Step 2/7: Enriching CVE data ──"
+# Public CVE sources are optional enrichment. Static registry data keeps the
+# rest of the pipeline useful when the network or cache directory is unavailable.
 python3 "$SCRIPT_DIR/cve_enrichment.py" --fetch || echo "  ⚠ CVE enrichment skipped (offline?)"
 echo ""
 

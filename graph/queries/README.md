@@ -7,11 +7,9 @@ These queries surface attack paths in the Rootstock Neo4j graph. Run them with t
 
 Before running queries:
 ```bash
-cd graph
-docker compose up -d          # start Neo4j
-python3 setup.py              # initialize schema + seed TCC nodes
-python3 import.py --input scan.json  # import collector data
-python3 infer.py              # compute inferred relationships
+# From the repository root:
+cd graph && docker compose up -d && cd ..
+NEO4J_PASSWORD=rootstock bash graph/pipeline.sh scan.json --skip-report
 ```
 
 ---

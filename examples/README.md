@@ -5,27 +5,26 @@ Demo data and scripts for Rootstock.
 ## Files
 
 ### `demo-scan.json`
-Synthetic scan data representing a typical corporate MacBook ("Acme Corp"). Contains
-15 applications, 15 TCC grants, 5 XPC services, 6 launch items, 4 keychain ACLs,
-file ACLs, Bluetooth devices, Kerberos artifacts, and representative entitlements.
-Validated against the Pydantic models in `graph/models.py` and the JSON Schema in
-`collector/schema/scan-result.schema.json`. Use this to test the graph pipeline
-without running the collector.
-
-### `generate_demo_scan.py`
-Python script that generates `demo-scan.json`. Edit this to add or modify demo data.
+Synthetic scan data representing a typical corporate MacBook ("Acme Corp").
+This file is the demo source of truth. Edit it directly to add or modify demo data,
+then validate it against the Pydantic models in `graph/models.py` and the JSON Schema
+in `collector/schema/scan-result.schema.json`:
 
 ```bash
-python3 examples/generate_demo_scan.py
+python3 scripts/validate-scan.py examples/demo-scan.json
 ```
 
+Use this scan to test the graph pipeline without running the collector.
+
 ### `regenerate.sh`
-End-to-end script that regenerates all demo outputs from `demo-scan.json`.
-Requires a running Neo4j instance.
+End-to-end script that validates `demo-scan.json` and rebuilds the pipeline outputs.
+It does not rewrite `demo-scan.json`. Requires a running Neo4j instance.
 
 ```bash
-# Ensure Neo4j is running, then:
-bash examples/regenerate.sh
+# Start Neo4j with graph/docker-compose.yml if needed.
+cd graph && docker compose up -d && cd ..
+
+NEO4J_PASSWORD=rootstock bash examples/regenerate.sh
 ```
 
 This runs the full pipeline (schema, CVE enrichment, import, infer, vulnerabilities,
@@ -34,7 +33,11 @@ classify, report) and produces:
 - `generated/demo-graph.json` — OpenGraph JSON export for viewer
 - `generated/demo-viewer.html` — Interactive Canvas-based graph viewer (open in browser)
 
-Environment variables: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
+`generated/` is a local output directory, not the source of truth. Keep demo
+data changes in `demo-scan.json`, then regenerate derived outputs.
+
+Environment variables: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`. The bundled
+Neo4j compose file uses `NEO4J_PASSWORD=rootstock`.
 
 ## Using Demo Data
 

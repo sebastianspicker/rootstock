@@ -264,6 +264,26 @@ final class TCCTests: XCTestCase {
         XCTAssertEqual(grants.map(\.client), ["com.example.valid"])
     }
 
+    func testTCCAccessProbeRequiresSuccessfulQuery() throws {
+        let path = NSTemporaryDirectory() + "tcc-probe-\(UUID().uuidString).db"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        makeMinimalDB(at: path, insertStatements: [])
+
+        XCTAssertTrue(TCCAccessProbe.canQueryDatabase(at: path))
+        XCTAssertFalse(TCCAccessProbe.canQueryDatabase(at: "/nonexistent/path/TCC.db"))
+    }
+
+    func testTCCAccessProbeRejectsUnreadableSchema() throws {
+        let path = NSTemporaryDirectory() + "tcc-probe-bad-\(UUID().uuidString).db"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        var raw: OpaquePointer?
+        sqlite3_open_v2(path, &raw, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
+        runSQL("CREATE TABLE not_access (service TEXT)", on: raw)
+        sqlite3_close(raw)
+
+        XCTAssertFalse(TCCAccessProbe.canQueryDatabase(at: path))
+    }
+
     func testMacOSVersionFromMajorVersion() {
         XCTAssertEqual(MacOSVersion.from(majorVersion: 14), .sonoma)
         XCTAssertEqual(MacOSVersion.from(majorVersion: 15), .sequoia)

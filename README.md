@@ -234,17 +234,20 @@ python3 scripts/validate-scan.py scan.json
 pip3 install -r graph/requirements.txt
 
 # Start Neo4j with the bundled local compose file
-cd graph && docker compose up -d && cd ..
+cd graph && NEO4J_AUTH=neo4j/CHANGE_ME docker compose up -d && cd ..
 
 # Run the full pipeline (schema -> import -> infer -> classify -> report)
-NEO4J_PASSWORD=rootstock bash graph/pipeline.sh scan.json
+NEO4J_PASSWORD=CHANGE_ME bash graph/pipeline.sh scan.json
 
 # Or start the API server with interactive viewer
-NEO4J_PASSWORD=rootstock bash graph/pipeline.sh scan.json --serve 8000
+ROOTSTOCK_API_TOKEN=CHANGE_ME_API_TOKEN NEO4J_PASSWORD=CHANGE_ME \
+  bash graph/pipeline.sh scan.json --serve 8000
 # Open http://localhost:8000 for the interactive graph viewer
 ```
 
 Environment variables for Neo4j connection: `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`.
+The live API additionally requires `ROOTSTOCK_API_TOKEN`. CVE network refresh is
+opt-in with `--refresh-cve`; the default pipeline uses cached/static enrichment.
 
 ## Local Verification
 
@@ -263,7 +266,8 @@ shellcheck examples/regenerate.sh graph/pipeline.sh scripts/*.sh tests/integrati
 python3 scripts/validate-scan.py examples/demo-scan.json
 ```
 
-Runtime smoke tests need Neo4j. With `graph/docker-compose.yml`, the default password is `rootstock`.
+Runtime smoke tests need Neo4j. With `graph/docker-compose.yml`, set
+`NEO4J_AUTH=neo4j/CHANGE_ME` and use the matching `NEO4J_PASSWORD`.
 
 ## Feature Matrix
 

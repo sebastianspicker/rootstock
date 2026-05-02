@@ -8,7 +8,7 @@ Usage:
     python3 graph/setup_schema.py
         [--neo4j bolt://localhost:7687]
         [--neo4j-user neo4j]
-        [--neo4j-password rootstock]
+        [--neo4j-password <password>]  # or NEO4J_PASSWORD
 """
 
 from __future__ import annotations

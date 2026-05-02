@@ -137,3 +137,22 @@ public struct TCCDataSource: DataSource {
         }
     }
 }
+
+/// Probes whether the current process can open and query a TCC database.
+public enum TCCAccessProbe {
+    public static let systemDatabasePath = "/Library/Application Support/com.apple.TCC/TCC.db"
+
+    public static func canQueryDatabase(at path: String) -> Bool {
+        do {
+            let db = try SQLiteDatabase(path: path)
+            _ = try db.query("SELECT 1 FROM access LIMIT 1")
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    public static func hasFullDiskAccess() -> Bool {
+        canQueryDatabase(at: systemDatabasePath)
+    }
+}

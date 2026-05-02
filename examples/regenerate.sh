@@ -8,7 +8,7 @@
 #
 # Usage:
 #   bash examples/regenerate.sh
-#   bash examples/regenerate.sh --neo4j bolt://host:7687 --username neo4j --password secret
+#   NEO4J_PASSWORD=secret bash examples/regenerate.sh --neo4j bolt://host:7687 --username neo4j
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,7 +19,7 @@ mkdir -p "$OUTPUT_DIR"
 # Parse optional Neo4j args (env vars override defaults, CLI args override env vars)
 NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
 NEO4J_USER="${NEO4J_USER:-neo4j}"
-NEO4J_PASS="${NEO4J_PASSWORD:-rootstock}"
+NEO4J_PASS="${NEO4J_PASSWORD:-}"
 
 while [[ $# -gt 0 ]]; do
 	case "$1" in
@@ -39,20 +39,31 @@ while [[ $# -gt 0 ]]; do
 		echo "Unknown option: $1"
 		exit 1
 		;;
-	esac
+esac
 done
 
-NEO4J_ARGS=(--neo4j "$NEO4J_URI" --neo4j-user "$NEO4J_USER" --neo4j-password "$NEO4J_PASS")
+if [[ -z "$NEO4J_PASS" ]]; then
+	echo "ERROR: Set NEO4J_PASSWORD or pass --password" >&2
+	exit 1
+fi
+
+export NEO4J_URI NEO4J_USER
+export NEO4J_PASSWORD="$NEO4J_PASS"
+NEO4J_ARGS=(--neo4j "$NEO4J_URI" --neo4j-user "$NEO4J_USER")
 
 # Check Neo4j connectivity
 echo "==> Checking Neo4j at $NEO4J_URI ..."
-python3 -c "
+python3 - <<'PY' || {
+import os
 from neo4j import GraphDatabase
-d = GraphDatabase.driver('$NEO4J_URI', auth=('$NEO4J_USER', '$NEO4J_PASS'))
+d = GraphDatabase.driver(
+    os.environ['NEO4J_URI'],
+    auth=(os.environ['NEO4J_USER'], os.environ['NEO4J_PASSWORD']),
+)
 d.verify_connectivity()
 d.close()
 print('  Neo4j OK')
-" || {
+PY
 	echo "ERROR: Cannot connect to Neo4j at $NEO4J_URI"
 	exit 1
 }
@@ -64,7 +75,7 @@ python3 scripts/validate-scan.py examples/demo-scan.json
 # 2. Run full pipeline (schema → import → infer → classify)
 echo "==> Running pipeline ..."
 bash graph/pipeline.sh examples/demo-scan.json \
-	--neo4j "$NEO4J_URI" --username "$NEO4J_USER" --password "$NEO4J_PASS" \
+	--neo4j "$NEO4J_URI" --username "$NEO4J_USER" \
 	--report "$OUTPUT_DIR/demo-report.md"
 
 # 3. Export OpenGraph JSON

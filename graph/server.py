@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import argparse
 import html as html_mod
+import ipaddress
 import json
 import logging
 import math
 import os
+import re
 import sys
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -30,9 +32,9 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
-from neo4j import GraphDatabase, READ_ACCESS
+from neo4j import GraphDatabase, Query, READ_ACCESS
 from neo4j.exceptions import ServiceUnavailable, AuthError
 
 # ── Imports from existing Rootstock modules ─────────────────────────────────
@@ -124,6 +126,10 @@ app.add_middleware(
 # ── Dependencies ────────────────────────────────────────────────────────────
 
 logger = logging.getLogger("rootstock.api")
+MAX_ADHOC_CYPHER_LENGTH = 10_000
+MAX_ADHOC_CYPHER_ROWS = 1_000
+ADHOC_CYPHER_TIMEOUT_SECONDS = 5.0
+_DBMS_CALL_RE = re.compile(r"\bCALL\s+dbms\.", re.IGNORECASE)
 
 
 def get_session(request: Request):
@@ -138,27 +144,40 @@ def get_read_session(request: Request):
         yield session
 
 
+@app.middleware("http")
+async def require_api_token(request: Request, call_next):
+    """Protect all /api routes with a bearer token."""
+    if request.url.path.startswith("/api/"):
+        token = getattr(request.app.state, "api_token", None)
+        auth_header = request.headers.get("Authorization", "")
+        if not token or auth_header != f"Bearer {token}":
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Missing or invalid bearer token"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
+
+
 # ── Routes ──────────────────────────────────────────────────────────────────
 
 
 @app.get("/", response_class=HTMLResponse)
 def serve_viewer(request: Request):
-    """Serve the live interactive viewer with real-time graph data."""
-    with request.app.state.driver.session() as session:
-        hostname, data = _build_live_graph(session)
-
+    """Serve the live interactive viewer without embedding graph data."""
     template_path = Path(__file__).parent / "viewer_template.html"
     template = template_path.read_text()
 
+    data = _empty_graph_payload()
     safe_json = json.dumps(data, ensure_ascii=True).replace("</", "<\\/")
-    title = f"{hostname} Attack Graph"
+    title = "Live Attack Graph"
 
     # Inject live mode flag and replace template placeholders
     live_inject = "const __ROOTSTOCK_LIVE__ = true;\nconst API_BASE = '';\n"
     html = template.replace("{{VIEWER_TITLE}}", html_mod.escape(title))
     html = html.replace(
-        "const DATA = {{VIEWER_DATA}};",
-        live_inject + "const DATA = " + safe_json + ";",
+        "let DATA = {{VIEWER_DATA}};",
+        live_inject + "let DATA = " + safe_json + ";",
     )
 
     return HTMLResponse(content=html)
@@ -303,13 +322,24 @@ def run_cypher_endpoint(body: CypherRequest, session=Depends(get_read_session)):
     Returns {"columns": [...], "rows": [...], "count": N}.
     Rejects write operations (CREATE, MERGE, SET, DELETE, etc.) with 403.
     """
-    error = validate_read_only_cypher(body.cypher)
+    if len(body.cypher) > MAX_ADHOC_CYPHER_LENGTH:
+        raise HTTPException(status_code=413, detail="Cypher query exceeds 10000 characters")
+    error = _validate_adhoc_cypher(body.cypher)
     if error:
         raise HTTPException(status_code=403, detail=error)
 
     try:
-        result = session.run(body.cypher, body.params or {})
-        records = list(result)
+        result = session.run(
+            Query(body.cypher, timeout=ADHOC_CYPHER_TIMEOUT_SECONDS),
+            body.params or {},
+        )
+        records = []
+        truncated = False
+        for index, record in enumerate(result):
+            if index >= MAX_ADHOC_CYPHER_ROWS:
+                truncated = True
+                break
+            records.append(record)
         columns = list(records[0].keys()) if records else []
         rows = [dict(r) for r in records]
     except Exception as e:
@@ -320,6 +350,7 @@ def run_cypher_endpoint(body: CypherRequest, session=Depends(get_read_session)):
         "columns": columns,
         "rows": rows,
         "count": len(rows),
+        "truncated": truncated,
     }
 
 
@@ -365,6 +396,43 @@ def _build_live_graph(session) -> tuple[str, dict[str, Any]]:
     return hostname, data
 
 
+def _empty_graph_payload() -> dict[str, Any]:
+    return {
+        "metadata": {
+            "hostname": "rootstock",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        "graph": {"nodes": [], "edges": []},
+    }
+
+
+def _validate_adhoc_cypher(cypher: str) -> str | None:
+    cleaned = re.sub(r"/\*.*?\*/", " ", cypher, flags=re.DOTALL)
+    cleaned = "\n".join(
+        line for line in cleaned.splitlines() if not line.strip().startswith("//")
+    )
+    cleaned = re.sub(r"'(?:[^'\\]|\\.)*'", "''", cleaned)
+    cleaned = re.sub(r'"(?:[^"\\]|\\.)*"', '""', cleaned)
+    if _DBMS_CALL_RE.search(cleaned):
+        return "dbms procedures are not allowed in ad-hoc Cypher"
+    return validate_read_only_cypher(cypher)
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _validate_bind_host(host: str, allow_remote: bool) -> None:
+    if allow_remote or _is_loopback_host(host):
+        return
+    raise ValueError("Refusing non-loopback bind without --allow-remote")
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
@@ -377,6 +445,11 @@ def main() -> int:
         "--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)"
     )
     parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="Allow binding to a non-loopback host",
+    )
+    parser.add_argument(
         "--neo4j", default="bolt://localhost:7687", help="Neo4j bolt URI"
     )
     parser.add_argument("--neo4j-user", default="neo4j", help="Neo4j username")
@@ -384,6 +457,12 @@ def main() -> int:
         "--neo4j-password", default=None, help="Neo4j password (or set NEO4J_PASSWORD)"
     )
     args = parser.parse_args()
+
+    try:
+        _validate_bind_host(args.host, args.allow_remote)
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
 
     password = args.neo4j_password or os.environ.get("NEO4J_PASSWORD")
     if not password:
@@ -393,9 +472,15 @@ def main() -> int:
         )
         sys.exit(1)
 
+    api_token = os.environ.get("ROOTSTOCK_API_TOKEN")
+    if not api_token:
+        print("ERROR: ROOTSTOCK_API_TOKEN is required for /api/* routes", file=sys.stderr)
+        sys.exit(1)
+
     app.state.neo4j_uri = args.neo4j
     app.state.neo4j_user = args.neo4j_user
     app.state.neo4j_password = password
+    app.state.api_token = api_token
 
     import uvicorn
 

@@ -476,8 +476,7 @@ struct ScanOrchestrator {
 
     /// Detects Full Disk Access by attempting to read the system TCC database.
     private func detectFDA() -> Bool {
-        let systemTCC = "/Library/Application Support/com.apple.TCC/TCC.db"
-        return FileManager.default.isReadableFile(atPath: systemTCC)
+        TCCAccessProbe.hasFullDiskAccess()
     }
 
     /// Runs `block`, returning the result and wall-clock elapsed time in seconds.

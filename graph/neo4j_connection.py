@@ -11,6 +11,7 @@ are installed, providing a friendly error message if not.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import sys
 
@@ -24,9 +25,7 @@ except ImportError:
     )
     sys.exit(1)
 
-try:
-    import pydantic  # noqa: F401
-except ImportError:
+if importlib.util.find_spec("pydantic") is None:
     print(
         "ERROR: pydantic not installed. Run: pip3 install -r graph/requirements.txt",
         file=sys.stderr,

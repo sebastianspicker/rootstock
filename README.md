@@ -20,6 +20,22 @@ Rootstock is a graph-based attack path discovery tool for macOS security boundar
 - **Enterprise integration** — Active Directory binding, Kerberos artifacts, BloodHound interop
 - **ESF monitoring** — Endpoint Security Framework event coverage gap analysis
 
+## Current Status
+
+The current public project surface is the Swift collector, Python graph
+pipeline, `modules/cve-scan/`, synthetic examples, and the active docs in this
+README and `docs/`. Completed audit/remediation packets, one-off plans,
+ledgers, status files, investigation notes, announcements, paper drafts,
+deprecated notes, generated reports, and historical roadmaps are not part of the
+committed public documentation set. Keep local copies only in ignored paths such
+as `docs/archive/` or `archive/`.
+
+The collector is passive and local-only. It writes a scan artifact; graph
+analysis, optional CVE feed refresh, and scoped cve-scan evidence collection are
+separate operator actions. Full graph behavior verification requires Neo4j. The
+non-Neo4j pytest suite is useful for fast local checks, but it does not prove
+import, inference, query, report, or API semantics end to end.
+
 ## Project Map
 
 Rootstock has three deliberate parts plus one checked-in demo fixture:
@@ -173,19 +189,19 @@ swift build -c release
 
 ```bash
 # Full scan (TCC + entitlements + code signing)
-.build/release/rootstock-collector --output scan.json
+.build/release/RootstockCLI --output scan.json
 
 # Verbose progress output
-.build/release/rootstock-collector --output scan.json --verbose
+.build/release/RootstockCLI --output scan.json --verbose
 
 # TCC grants only
-.build/release/rootstock-collector --output scan.json --modules tcc
+.build/release/RootstockCLI --output scan.json --modules tcc
 
 # Entitlements + code signing only (no TCC)
-.build/release/rootstock-collector --output scan.json --modules entitlements,codesigning
+.build/release/RootstockCLI --output scan.json --modules entitlements,codesigning
 
 # With Full Disk Access (reads system TCC.db)
-sudo .build/release/rootstock-collector --output scan.json
+sudo .build/release/RootstockCLI --output scan.json
 ```
 
 ### Validate Output
@@ -273,6 +289,11 @@ opt-in with `--refresh-cve`; the default pipeline uses cached/static enrichment.
 ruff check graph/ scripts/ examples/ docs/
 (cd graph && pytest tests)
 
+# Required graph Neo4j behavior lane for release/high-risk graph changes
+(cd graph && NEO4J_AUTH=neo4j/CHANGE_ME docker compose up -d)
+(cd graph && ROOTSTOCK_REQUIRE_NEO4J=1 NEO4J_PASSWORD=CHANGE_ME pytest tests -v --tb=short)
+NEO4J_PASSWORD=CHANGE_ME bash tests/integration/test_full_pipeline.sh
+
 # cve-scan module
 (cd modules/cve-scan && ruff check . && pytest)
 shellcheck modules/cve-scan/scripts/perf-smoke.sh
@@ -285,7 +306,10 @@ python3 scripts/validate-scan.py examples/demo-scan.json
 ```
 
 Runtime smoke tests need Neo4j. With `graph/docker-compose.yml`, set
-`NEO4J_AUTH=neo4j/CHANGE_ME` and use the matching `NEO4J_PASSWORD`.
+`NEO4J_AUTH=neo4j/CHANGE_ME` and use the matching `NEO4J_PASSWORD`. The
+required graph Neo4j lane fails instead of skipping when Neo4j is unavailable.
+Do not claim graph import, inference, query, report, or API semantics verified
+unless that lane has run against a reachable Neo4j test database.
 
 ## Feature Matrix
 
@@ -340,7 +364,8 @@ macOS 15+ requires Full Disk Access to read TCC databases. Without FDA:
 - User TCC.db: blocked at kernel level (`SQLITE_AUTH`)
 - System TCC.db: blocked at kernel level
 
-Run with `sudo` or grant FDA to the binary to collect TCC grants. See `docs/research/tcc-version-diffs.md` for full details; the historical tech-debt note is archived at `docs/archive/exec-plans/tech-debt-tracker.md` as TD-004.
+Run with `sudo` or grant FDA to the binary to collect TCC grants. See
+`docs/research/tcc-version-diffs.md` for current TCC version notes.
 
 ## Project Structure
 
@@ -420,10 +445,7 @@ docs/
 ├── references/            Entitlement categories, macOS security reference
 ├── benchmarks/            Performance measurements
 ├── research/              macOS security research notes
-├── screenshots/           README and report screenshots
-└── archive/               Historical planning, announcement, paper, and product-spec material
-
-deprecated/                Historical scripts kept out of the active workflow
+└── screenshots/           README and report screenshots
 ```
 
 ## Threat Model

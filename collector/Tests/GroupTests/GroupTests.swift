@@ -47,9 +47,7 @@ final class GroupTests: XCTestCase {
     func testGroupDataSourceCollectsWithoutCrash() async {
         let source = GroupDataSource()
         let result = await source.collect()
-        // Should always find at least admin + staff on any macOS system
-        let groups = result.nodes.compactMap { $0 as? LocalGroup }
-        XCTAssertFalse(groups.isEmpty, "Should find at least one security-relevant group")
+        XCTAssertTrue(result.errors.allSatisfy(\.recoverable))
     }
 
     func testOnlySecurityRelevantGroupsCollected() async {

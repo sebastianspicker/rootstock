@@ -17,6 +17,7 @@ from report import (
     get_scan_metadata_from_neo4j,
     get_scan_metadata_from_json,
     main,
+    run_all_queries,
 )
 from report_assembly import assemble_report, markdown_to_html
 from report_formatters import (
@@ -30,7 +31,7 @@ from report_formatters import (
     format_tcc_overview_table,
 )
 from unittest import TestCase
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 
 checks = TestCase()
@@ -420,6 +421,36 @@ class TestReportMetadata:
 
         with pytest.raises(ScanMetadataError, match="Cannot read scan metadata"):
             get_scan_metadata_from_json(missing_scan)
+
+
+class TestReportQueries:
+    def test_parameterized_queries_receive_app_name_default(self, monkeypatch):
+        session = MagicMock()
+        driver = MagicMock()
+        driver.session.return_value.__enter__.return_value = session
+        monkeypatch.setattr(
+            "report.discover_queries",
+            lambda: [
+                {
+                    "filename": "22-trust-boundary-map.cypher",
+                    "cypher": "MATCH (a) WHERE $app_name IS NULL RETURN a",
+                    "parameters": "$app_name",
+                }
+            ],
+        )
+
+        with patch("report.run_query", return_value=[]) as run_query_mock:
+            results = run_all_queries(driver)
+
+        checks.assertEqual(results["22-trust-boundary-map.cypher"], [])
+        run_query_mock.assert_called_once_with(
+            session,
+            "MATCH (a) WHERE $app_name IS NULL RETURN a",
+            ANY,
+        )
+        params = run_query_mock.call_args.args[2]
+        checks.assertIn("app_name", params)
+        checks.assertIsNone(params["app_name"])
 
 
 class TestReportCli:

@@ -45,6 +45,7 @@ _DEFAULT_PARAMS = {
     "min_methods": 1,
     "username": "",
     "scope": None,
+    "app_name": None,
 }
 
 

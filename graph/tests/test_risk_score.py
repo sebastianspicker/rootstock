@@ -168,8 +168,7 @@ class TestRiskScoringBehavior:
             session.run(
                 """
                 MATCH (app:Application {risk_fixture: $fixture, app_key: 'critical-app'})
-                CREATE (perm:TCC_Permission {
-                    risk_fixture: $fixture,
+                MERGE (perm:TCC_Permission {
                     service: 'kTCCServiceSystemPolicyAllFiles'
                 })
                 CREATE (v:Vulnerability {risk_fixture: $fixture, cve_id: 'CVE-2099-5000'})

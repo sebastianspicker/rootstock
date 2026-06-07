@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -262,13 +263,15 @@ def _edge_color(rel: str, *, is_inferred: bool) -> str:
 # ── Rendering ─────────────────────────────────────────────────────────────────
 
 def render_dot(dot_path: Path, output_format: str = "png") -> Path:
-    """Reject in-process rendering; callers should render DOT files explicitly."""
+    """Render a DOT file with Graphviz using an argument vector, never a shell."""
     if output_format not in {"png", "svg"}:
         raise ValueError(f"Unsupported Graphviz output format: {output_format}")
-    raise RuntimeError(
-        "Automatic Graphviz rendering is disabled. Render the DOT file with a "
-        "trusted local Graphviz command outside Rootstock."
+    output_path = dot_path.with_suffix(f".{output_format}")
+    subprocess.run(
+        ["dot", f"-T{output_format}", str(dot_path), "-o", str(output_path)],
+        check=True,
     )
+    return output_path
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

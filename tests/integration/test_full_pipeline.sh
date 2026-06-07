@@ -159,6 +159,9 @@ if python3 "$GRAPH_DIR/report.py" --output "$REPORT_OUT" --scan-json "$TEMP_SCAN
 	ok "report command completed"
 else
 	fail "report command failed"
+	if [[ -s "$REPORT_ERR" ]]; then
+		sed 's/^/  report stderr: /' "$REPORT_ERR" >&2
+	fi
 fi
 
 if [[ -s "$REPORT_OUT" ]]; then

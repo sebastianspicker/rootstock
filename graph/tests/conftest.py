@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
+NEO4J_AUTH = os.environ.get("NEO4J_AUTH")
 
 
 # ── Neo4j driver fixture (session-scoped) ────────────────────────────────────
@@ -30,6 +31,10 @@ NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD")
 
 def _neo4j_required() -> bool:
     return os.environ.get("ROOTSTOCK_REQUIRE_NEO4J") == "1"
+
+
+def _neo4j_auth_disabled() -> bool:
+    return NEO4J_AUTH == "none"
 
 
 def _skip_or_fail_neo4j_unavailable(reason: str) -> None:
@@ -51,14 +56,15 @@ def neo4j_driver():
         from neo4j.exceptions import ServiceUnavailable, AuthError
     except ImportError:
         _skip_or_fail_neo4j_unavailable("neo4j driver not installed")
-    if not NEO4J_PASSWORD:
+    if not NEO4J_PASSWORD and not _neo4j_auth_disabled():
         _skip_or_fail_neo4j_unavailable(
             "NEO4J_PASSWORD is required for Neo4j integration tests"
         )
 
     unavailable_reason = None
     try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+        auth = None if _neo4j_auth_disabled() else (NEO4J_USER, NEO4J_PASSWORD)
+        driver = GraphDatabase.driver(NEO4J_URI, auth=auth)
         driver.verify_connectivity()
     except (ServiceUnavailable, ConnectionRefusedError):
         unavailable_reason = f"Neo4j not available at {NEO4J_URI}"

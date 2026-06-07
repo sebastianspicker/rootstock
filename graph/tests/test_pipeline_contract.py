@@ -71,7 +71,10 @@ def test_pipeline_cve_refresh_failure_is_not_suppressed() -> None:
 
 def test_pipeline_requires_password_before_steps() -> None:
     source = _source()
-    password_check = _line_index(source, 'if [[ -z "$NEO4J_PASS" ]]; then')
+    password_check = _line_index(
+        source,
+        'if [[ -z "$NEO4J_PASS" && "${NEO4J_AUTH:-}" != "none" ]]; then',
+    )
     password_error = _line_index_after(
         source,
         'echo "ERROR: Set NEO4J_PASSWORD or use --password" >&2',
@@ -82,13 +85,13 @@ def test_pipeline_requires_password_before_steps() -> None:
     _assert_in_order(
         source,
         'NEO4J_PASS="${NEO4J_PASSWORD:-}"',
-        'if [[ -z "$NEO4J_PASS" ]]; then',
-        'export NEO4J_PASSWORD="$NEO4J_PASS"',
+        'if [[ -z "$NEO4J_PASS" && "${NEO4J_AUTH:-}" != "none" ]]; then',
+        'if [[ -n "$NEO4J_PASS" ]]; then',
         'echo "── Step 1/7: Setting up schema ──"',
     )
     checks.assertLess(password_check, password_error)
     checks.assertLess(password_error, password_exit)
-    checks.assertLess(password_exit, _line_index(source, 'export NEO4J_PASSWORD="$NEO4J_PASS"'))
+    checks.assertLess(password_exit, _line_index(source, 'if [[ -n "$NEO4J_PASS" ]]; then'))
 
 
 def test_pipeline_import_failure_stops_before_later_steps() -> None:
@@ -116,6 +119,7 @@ def test_pipeline_does_not_pass_password_on_child_argv() -> None:
         if line.strip().startswith("python3 ")
     ]
 
+    checks.assertIn('if [[ -n "$NEO4J_PASS" ]]; then', source)
     checks.assertIn('export NEO4J_PASSWORD="$NEO4J_PASS"', source)
     checks.assertIn('NEO4J_ARGS=(--neo4j "$NEO4J_URI" --neo4j-user "$NEO4J_USER")', source)
     checks.assertFalse(any("NEO4J_PASS" in line for line in python_invocations))

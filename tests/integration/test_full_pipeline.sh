@@ -6,8 +6,9 @@ set -euo pipefail
 NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
 NEO4J_USER="${NEO4J_USER:-neo4j}"
 NEO4J_PASSWORD="${NEO4J_PASSWORD:-}"
+NEO4J_AUTH="${NEO4J_AUTH:-}"
 
-if [[ -z "$NEO4J_PASSWORD" ]]; then
+if [[ -z "$NEO4J_PASSWORD" && "$NEO4J_AUTH" != "none" ]]; then
 	echo "ERROR: Set NEO4J_PASSWORD before running the integration test" >&2
 	exit 1
 fi
@@ -45,7 +46,10 @@ from neo4j import GraphDatabase
 query = sys.argv[1]
 driver = GraphDatabase.driver(
     os.environ["NEO4J_URI"],
-    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
+    auth=None if os.environ.get("NEO4J_AUTH") == "none" else (
+        os.environ["NEO4J_USER"],
+        os.environ["NEO4J_PASSWORD"],
+    ),
 )
 with driver.session() as session:
     record = session.run(query).single()
@@ -63,7 +67,10 @@ from neo4j import GraphDatabase
 scan_id = os.environ["TEST_SCAN_ID"]
 driver = GraphDatabase.driver(
     os.environ["NEO4J_URI"],
-    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
+    auth=None if os.environ.get("NEO4J_AUTH") == "none" else (
+        os.environ["NEO4J_USER"],
+        os.environ["NEO4J_PASSWORD"],
+    ),
 )
 with driver.session() as session:
     session.run(
@@ -74,7 +81,7 @@ driver.close()
 PYTHON
 }
 
-export NEO4J_URI NEO4J_USER NEO4J_PASSWORD TEST_SCAN_ID FIXTURE_JSON TEMP_SCAN_JSON
+export NEO4J_URI NEO4J_USER NEO4J_PASSWORD NEO4J_AUTH TEST_SCAN_ID FIXTURE_JSON TEMP_SCAN_JSON
 
 trap cleanup EXIT
 
@@ -106,7 +113,10 @@ from neo4j import GraphDatabase
 
 driver = GraphDatabase.driver(
     os.environ["NEO4J_URI"],
-    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]),
+    auth=None if os.environ.get("NEO4J_AUTH") == "none" else (
+        os.environ["NEO4J_USER"],
+        os.environ["NEO4J_PASSWORD"],
+    ),
 )
 driver.verify_connectivity()
 driver.close()

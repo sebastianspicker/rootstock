@@ -13,7 +13,7 @@
 # Environment variables (override defaults):
 #     NEO4J_URI       bolt://localhost:7687
 #     NEO4J_USER      neo4j
-#     NEO4J_PASSWORD   (required — no default)
+#     NEO4J_PASSWORD   required unless NEO4J_AUTH=none
 #
 # For interactive visualization after pipeline completes (Canvas-based, pre-computed layout):
 #     python3 graph/opengraph_export.py -o graph.json && python3 graph/viewer.py -i graph.json -o viewer.html
@@ -83,7 +83,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$NEO4J_PASS" ]]; then
+if [[ -z "$NEO4J_PASS" && "${NEO4J_AUTH:-}" != "none" ]]; then
     echo "ERROR: Set NEO4J_PASSWORD or use --password" >&2
     exit 1
 fi
@@ -93,7 +93,9 @@ if [[ -n "$CVE_SCAN_EXPORT" && ! -f "$CVE_SCAN_EXPORT" ]]; then
     exit 1
 fi
 
-export NEO4J_PASSWORD="$NEO4J_PASS"
+if [[ -n "$NEO4J_PASS" ]]; then
+    export NEO4J_PASSWORD="$NEO4J_PASS"
+fi
 NEO4J_ARGS=(--neo4j "$NEO4J_URI" --neo4j-user "$NEO4J_USER")
 
 echo "╔══════════════════════════════════════════════════╗"

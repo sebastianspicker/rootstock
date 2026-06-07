@@ -39,7 +39,7 @@ jobs:
 
   # ── Python unit tests ────────────────────────────────────────────────────
   python-tests:
-    name: Graph Tests + Neo4j Lane
+    name: Python Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:

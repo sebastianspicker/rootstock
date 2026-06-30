@@ -4,15 +4,13 @@ on:
   push:
     branches: [main, dev]
     paths-ignore:
-      - "deprecated/**"
       - "docs/archive/**"
-      - "docs/deprecated/**"
+      - "docs/private/**"
   pull_request:
     branches: [main, dev]
     paths-ignore:
-      - "deprecated/**"
       - "docs/archive/**"
-      - "docs/deprecated/**"
+      - "docs/private/**"
 
 permissions:
   contents: read
@@ -103,7 +101,7 @@ jobs:
         run: pip install ruff
 
       - name: ruff check
-        run: ruff check graph/ scripts/ examples/ docs/ --exclude deprecated --exclude docs/archive --exclude docs/deprecated
+        run: ruff check graph/ scripts/ examples/ docs/ --exclude docs/archive --exclude docs/private
 
   # ── cve-scan module checks ──────────────────────────────────────────────
   cve-scan-tests:

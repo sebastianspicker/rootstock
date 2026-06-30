@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==82.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,88 +8,21 @@ version = "0.1.0"
 description = "Rootstock graph import and query engine"
 requires-python = ">=3.10"
 dependencies = [
-    "neo4j>=5.0,<6.0",
-    "pydantic>=2.4,<3.0",
-    "tabulate>=0.9,<1.0",
-    "fastapi>=0.110,<1.0",
-    "httpx>=0.27,<1.0",
-    "uvicorn>=0.27,<1.0",
-    "requests>=2.33,<3.0",
-    "jsonschema>=4.0,<5.0",
+    "neo4j==5.28.4",
+    "pydantic==2.13.4",
+    "tabulate==0.10.0",
+    "fastapi==0.137.0",
+    "httpx==0.28.1",
+    "uvicorn==0.49.0",
+    "requests==2.34.2",
+    "jsonschema==4.26.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest==9.1.0", "ruff==0.15.17"]
 
 [tool.setuptools]
-py-modules = [
-  "bloodhound_import",
-  "category_predicates",
-  "clear_owned",
-  "constants",
-  "cve_enrichment",
-  "cve_reference",
-  "cve_reference_catalog",
-  "cve_reference_cves_core",
-  "cve_reference_cves_extended",
-  "cve_reference_models",
-  "diff_formatters",
-  "diff_models",
-  "diff_scans",
-  "import_cve_scan",
-  "import_nodes_certificates",
-  "import_nodes_core",
-  "import_nodes_enrichment",
-  "import_nodes_sandbox",
-  "import_nodes_security",
-  "import_nodes_security_enterprise",
-  "import_nodes_services",
-  "import_scan",
-  "import_vulnerabilities",
-  "infer",
-  "infer_accessibility",
-  "infer_automation",
-  "infer_common",
-  "infer_electron",
-  "infer_esf",
-  "infer_file_acl",
-  "infer_finder_fda",
-  "infer_group_capabilities",
-  "infer_injection",
-  "infer_kerberos",
-  "infer_keychain_groups",
-  "infer_mdm_overgrant",
-  "infer_password",
-  "infer_quarantine",
-  "infer_recommendations",
-  "infer_risk_score",
-  "infer_sandbox",
-  "infer_shell_hooks",
-  "mark_owned",
-  "merge_scans",
-  "models",
-  "neo4j_connection",
-  "opengraph_export",
-  "query_runner",
-  "report",
-  "report_assembly",
-  "report_diagrams",
-  "report_formatters",
-  "report_graphviz",
-  "report_html",
-  "report_recommendations",
-  "report_sections",
-  "scan_loader",
-  "server",
-  "setup_schema",
-  "test_connection",
-  "tier_classification",
-  "utils",
-  "version_matcher",
-  "viewer",
-  "viewer_layout",
-]
+py-modules = []
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"
-pythonpath = ["."]

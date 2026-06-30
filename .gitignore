@@ -4,7 +4,6 @@
 *.xcodeproj/
 xcuserdata/
 DerivedData/
-.codegraph/
 .serena/
 .env
 .env.*
@@ -42,13 +41,11 @@ SECURITY_REVIEW.md
 /docs/generated/
 /deprecated/
 /archive/
-/private/
 /screenshots/
 /reports/
 trivy-default.yaml
 /examples/generated/
 /graph/generated/
-/graph/build/
 /graph/runs/
 /modules/cve-scan/runs/
 /modules/cve-scan/.cache/
@@ -65,7 +62,7 @@ trivy-default.yaml
 /*-remediation*.md
 /overengineering-index.md
 /docs/*-plan.md
-/docs/*-status.md
+/docs/docs/*-status.md
 /docs/*-audit.md
 /docs/*-investigations.md
 /docs/*-remediation*.md

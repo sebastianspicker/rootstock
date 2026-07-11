@@ -33,6 +33,11 @@ deprecated drafts, generated reports, generated viewers, real scan outputs,
 and historical roadmaps are not part of public documentation set. Keep local
 copies in ignored private or archive paths.
 
+The repository intentionally tracks synthetic fixtures, synthetic screenshots,
+the public `.env.example`, and analyzer scope in `.codacy.yaml`. Local analyzer
+state, benchmark results, release binaries, databases, real host inventories,
+and security reports are ignored.
+
 ## Architecture
 
 Rootstock has three active components:
@@ -180,6 +185,7 @@ python3 scripts/validate-scan.py examples/demo-scan.json
 # Shell entry points
 shellcheck examples/regenerate.sh graph/pipeline.sh scripts/*.sh tests/integration/*.sh
 shellcheck modules/cve-scan/scripts/perf-smoke.sh
+bash tests/integration/test_benchmark_script.sh
 ```
 
 Graph behavior that depends on import, inference, query, report, or API

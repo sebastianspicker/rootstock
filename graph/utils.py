@@ -71,7 +71,17 @@ def _strip_cypher_comments(cypher: str) -> str:
     no_line_comments = "\n".join(
         line for line in cypher.splitlines() if not line.strip().startswith("//")
     )
-    return re.sub(r"/\*.*?\*/", " ", no_line_comments, flags=re.DOTALL)
+    parts: list[str] = []
+    cursor = 0
+    while (comment_start := no_line_comments.find("/*", cursor)) >= 0:
+        comment_end = no_line_comments.find("*/", comment_start + 2)
+        if comment_end < 0:
+            break
+        parts.append(no_line_comments[cursor:comment_start])
+        parts.append(" ")
+        cursor = comment_end + 2
+    parts.append(no_line_comments[cursor:])
+    return "".join(parts)
 
 
 def run_query(session, cypher: str, params: dict | None = None) -> list[dict]:

@@ -4,6 +4,8 @@
 *.xcodeproj/
 xcuserdata/
 DerivedData/
+.idea/
+.vscode/
 .codegraph/
 .serena/
 .env
@@ -20,6 +22,7 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+.cache/
 .venv/
 .tox/
 .coverage
@@ -45,6 +48,7 @@ SECURITY_REVIEW.md
 /private/
 /screenshots/
 /reports/
+/release/
 trivy-default.yaml
 /examples/generated/
 /graph/generated/
@@ -83,9 +87,14 @@ rootstock-report.md
 rootstock-report-*.md
 rootstock-report.html
 rootstock-report-*.html
-findings.sarif
-sbom.cdx.json
-vdr.cdx.json
+*.sarif
+*.cdx.json
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
 diff.json
 diff.md
 diff.html

@@ -1,3 +1,11 @@
+/* global H, W, activeEdgeKinds, adjIn, adjOut, computeVisibility, container */
+/* global edgeKinds, el, kindMeta, linkKey, markDirty, nodeById, propRow */
+/* global sectionHeader, selectedNode, transform */
+/* global focusNodeId:writable, pathMode:writable, pathResult:writable */
+/* global pathSource:writable, pathTarget:writable */
+/* exported closeInspector, handlePathClick, showContextMenu, togglePathMode */
+/* exported selectedNode, transform */
+
 // ── BFS shortest path ───────────────────────────────────────────────────────
 function findPathParents(sourceId, targetId) {
   const visited = new Set([sourceId]);

@@ -1,3 +1,13 @@
+/* global SESSION_STORAGE_NAME, activeEdgeKinds, activeNodeKinds, apiFetch */
+/* global buildFilters, closeInspector, closeResults, computeVisibility */
+/* global edgeKinds, el, exitFocusMode, exitPathMode, exportPNG */
+/* global highlightQueryResult, inspectNode, isLive, kindMeta, liveRefresh */
+/* global liveShowOwned, liveTierClassify, markDirty, resetZoom, resizeCanvas */
+/* global selectedNode, setLiveStatus, startLiveSession, toggleAttackPaths */
+/* global toggleClustering, toggleLabels, togglePathMode, toggleVulnFilter */
+/* global searchTerm:writable, toggleOwned:writable */
+/* exported searchTerm, toggleOwned */
+
 // ── Custom Cypher console ────────────────────────────────────────────────
 function runCustomCypher() {
   if (!isLive) return;
@@ -58,9 +68,10 @@ function runCustomCypher() {
       const tbody = document.createElement('tbody');
       data.rows.forEach(row => {
         const tr = document.createElement('tr');
+        const rowValues = new Map(Object.entries(row));
         headers.forEach(h => {
           const td = document.createElement('td');
-          const val = row[h];
+          const val = rowValues.get(h);
           td.textContent = Array.isArray(val) ? val.join(', ') : String(val ?? '');
           td.title = td.textContent;
           tr.appendChild(td);
@@ -127,7 +138,6 @@ if (isLive) {
     }
 
     const path = wasOwned ? '/api/clear-owned' : '/api/mark-owned';
-    const countKey = wasOwned ? 'cleared' : 'marked';
     const action = wasOwned ? 'Clear owned' : 'Mark owned';
     setLiveStatus(action + ' pending...', 'pending');
     apiFetch(path, {
@@ -137,17 +147,18 @@ if (isLive) {
     })
       .then(r => r.json())
       .then(data => {
-        if (!data || typeof data[countKey] !== 'number') {
+        const responseCount = wasOwned ? data?.cleared : data?.marked;
+        if (typeof responseCount !== 'number') {
           throw new Error('Malformed owned update response');
         }
-        if (data[countKey] <= 0) {
+        if (responseCount <= 0) {
           throw new Error('No matching nodes changed');
         }
         if (!d.properties) d.properties = {};
         d.properties.owned = !wasOwned;
         markDirty();
         if (selectedNode?.id === d.id) inspectNode(d);
-        setLiveStatus(action + ' saved for ' + data[countKey] + ' node(s).', 'ok');
+        setLiveStatus(action + ' saved for ' + responseCount + ' node(s).', 'ok');
       })
       .catch(err => {
         if (!d.properties) d.properties = {};
@@ -258,4 +269,3 @@ document.getElementById('connection-form').addEventListener('submit', event => {
   input.value = '';
   startLiveSession();
 });
-

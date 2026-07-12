@@ -1,3 +1,6 @@
+/* global module, nodeRadius, nodes, visibleNodeIds */
+/* exported spatialIndex */
+
 // ── Spatial grid for bounded hit-testing ────────────────────────────────────
 class SpatialGrid {
   constructor(nodes, options = {}) {

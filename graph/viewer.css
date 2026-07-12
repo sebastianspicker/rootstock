@@ -92,8 +92,8 @@ body {
   color: var(--text);
   font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
 }
-button, input, select, textarea { font: inherit; }
 button, select, input, textarea {
+  font: inherit;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface);

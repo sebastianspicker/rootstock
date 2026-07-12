@@ -1,3 +1,9 @@
+/* global SpatialGrid, centerOnNode, closeInspector, draw, handlePathClick */
+/* global hideContextMenu, hideTooltip, inspectNode, showContextMenu */
+/* global showTooltip, updateRiskSummary, updateStats */
+/* global spatialIndex:writable */
+/* exported clusterByType, ctx, dirty, nodeRadius, pathSource, pathTarget */
+/* exported propRow, replaceGraphData, sectionHeader, showLabels */
 
 // ── Data (with pre-computed x,y positions) ──────────────────────────────────
 let DATA = null /* VIEWER_DATA */;
@@ -129,7 +135,7 @@ let mouseDownPos = {x: 0, y: 0};
 
 function rebuildDerivedData(resetFilters = false) {
   nodeById.clear();
-  nodes.forEach((n, i) => nodeById.set(n.id, n));
+  nodes.forEach(n => nodeById.set(n.id, n));
 
   searchTextById.clear();
   nodes.forEach(node => searchTextById.set(node.id, searchableNodeText(node)));
@@ -411,13 +417,6 @@ function screenToWorld(sx, sy) {
   };
 }
 
-function worldToScreen(wx, wy) {
-  return {
-    x: wx * transform.k + transform.x,
-    y: wy * transform.k + transform.y
-  };
-}
-
 // ── Pan & Zoom (mouse/trackpad) ─────────────────────────────────────────────
 let isPanning = false;
 let panStart = {x: 0, y: 0};
@@ -508,7 +507,7 @@ canvas.addEventListener('mousemove', event => {
   updateHoveredNode(event, x, y);
 });
 
-canvas.addEventListener('mouseup', e => {
+canvas.addEventListener('mouseup', () => {
   if (dragNode) {
     // If barely moved, treat as click
     dragNode = null;

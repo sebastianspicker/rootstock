@@ -75,7 +75,7 @@ function toggleClustering() {
 function deterministicJitter(value, salt) {
   let hash = salt;
   for (const character of String(value)) hash = (hash * 33 + character.charCodeAt(0)) >>> 0;
-  return (hash / 0xffffffff - 0.5) * 40;
+  return (hash / 4294967295 - 0.5) * 40;
 }
 
 let vulnFilterActive = false;
@@ -183,9 +183,18 @@ function isTextEntryActive() {
 }
 
 function handleEscapeKey(isInput) {
-  if (pathMode) return exitPathMode();
-  if (focusNodeId) return exitFocusMode();
-  if (document.getElementById('inspector').classList.contains('open')) return closeInspector();
+  if (pathMode) {
+    exitPathMode();
+    return;
+  }
+  if (focusNodeId) {
+    exitFocusMode();
+    return;
+  }
+  if (document.getElementById('inspector').classList.contains('open')) {
+    closeInspector();
+    return;
+  }
   if (searchTerm) {
     document.getElementById('search').value = '';
     searchTerm = '';
@@ -195,6 +204,20 @@ function handleEscapeKey(isInput) {
   }
   if (isInput) document.activeElement.blur();
 }
+
+function handleSearchShortcut(event) {
+  if (!(event.ctrlKey || event.metaKey) || event.key !== 'f') return false;
+  event.preventDefault();
+  document.getElementById('search').focus();
+  return true;
+}
+
+const KEYBOARD_ACTIONS = new Map([
+  ['p', togglePathMode],
+  ['a', toggleAttackPaths],
+  ['l', toggleLabels],
+  ['r', resetZoom],
+]);
 
 function toggleNumberedKind(key) {
   const number = Number.parseInt(key);
@@ -213,18 +236,15 @@ function toggleNumberedKind(key) {
 
 function handleGlobalKeydown(event) {
   const isInput = isTextEntryActive();
-  if ((event.ctrlKey || event.metaKey) && event.key === 'f') {
-    event.preventDefault();
-    document.getElementById('search').focus();
+  if (handleSearchShortcut(event)) return;
+  if (event.key === 'Escape') {
+    handleEscapeKey(isInput);
     return;
   }
-  if (event.key === 'Escape') return handleEscapeKey(isInput);
   if (isInput) return;
-  if (event.key === 'p') return togglePathMode();
-  if (event.key === 'a') return toggleAttackPaths();
-  if (event.key === 'l') return toggleLabels();
-  if (event.key === 'r') return resetZoom();
-  toggleNumberedKind(event.key);
+  const action = KEYBOARD_ACTIONS.get(event.key);
+  if (action) action();
+  else toggleNumberedKind(event.key);
 }
 
 document.addEventListener('keydown', handleGlobalKeydown);

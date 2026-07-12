@@ -1,6 +1,7 @@
 /* global H, W, activeEdgeKinds, adjIn, adjOut, computeVisibility, container */
 /* global edgeKinds, el, kindMeta, linkKey, markDirty, nodeById, propRow */
-/* global sectionHeader, selectedNode, transform */
+/* global sectionHeader */
+/* global selectedNode:writable, transform:writable */
 /* global focusNodeId:writable, pathMode:writable, pathResult:writable */
 /* global pathSource:writable, pathTarget:writable */
 /* exported closeInspector, handlePathClick, showContextMenu, togglePathMode */

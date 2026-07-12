@@ -395,30 +395,20 @@ function prepareCanvas() {
   ctx.scale(transform.k, transform.k);
 }
 
-function drawFrame() {
-  frameRequested = false;
-  if (!dirty) return;
-  dirty = false;
-  prepareCanvas();
-  const viewport = viewportBounds();
-  const highlight = neighborHighlightState();
-  const labels = {
-    showAll: showLabels && transform.k >= 0.4,
-    showHighDegree: showLabels && transform.k >= 0.2 && transform.k < 0.4,
-  };
-  links.forEach((link, index) => drawGraphEdge(link, index, viewport, highlight));
-  ctx.globalAlpha = 1;
-  nodes.forEach(node => drawGraphNode(node, viewport, highlight, labels));
-  drawEdgeLabels(highlight);
-  ctx.globalAlpha = 1;
-  ctx.restore();
+function drawVisibleEdges(viewport, highlight) {
+  for (const [index, link] of links.entries()) {
+    drawGraphEdge(link, index, viewport, highlight);
+  }
 }
 
+function drawVisibleNodes(viewport, highlight, labels) {
+  for (const node of nodes) drawGraphNode(node, viewport, highlight, labels);
+}
+
+const tooltip = document.getElementById('tooltip');
 markDirty();
 
 // ── Tooltip ─────────────────────────────────────────────────────────────────
-const tooltip = document.getElementById('tooltip');
-
 function appendTooltipBadge(parent, className, text) {
   parent.appendChild(el('span', {className: 'tt-risk ' + className, textContent: text}));
 }
@@ -495,4 +485,23 @@ function showTooltip(event, node) {
 function hideTooltip() {
   tooltip.classList.remove('visible');
   tooltip.hidden = true;
+}
+
+function drawFrame() {
+  frameRequested = false;
+  if (!dirty) return;
+  dirty = false;
+  prepareCanvas();
+  const viewport = viewportBounds();
+  const highlight = neighborHighlightState();
+  const labels = {
+    showAll: showLabels && transform.k >= 0.4,
+    showHighDegree: showLabels && transform.k >= 0.2 && transform.k < 0.4,
+  };
+  drawVisibleEdges(viewport, highlight);
+  ctx.globalAlpha = 1;
+  drawVisibleNodes(viewport, highlight, labels);
+  drawEdgeLabels(highlight);
+  ctx.globalAlpha = 1;
+  ctx.restore();
 }

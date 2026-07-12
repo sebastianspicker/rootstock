@@ -1,3 +1,9 @@
+/* global API_BASE, centerOnNode, el, inspectNode, markDirty, nodes */
+/* global replaceGraphData, resetZoom */
+/* global selectedNode:writable */
+/* exported closeResults, liveShowOwned, liveTierClassify */
+/* exported selectedNode */
+
 // ── Live API integration ─────────────────────────────────────────────────
 const isLive = typeof __ROOTSTOCK_LIVE__ !== 'undefined';
 const SESSION_STORAGE_NAME = '__rootstock_api_token__';
@@ -172,9 +178,10 @@ function runLiveQuery(q) {
       const tbody = document.createElement('tbody');
       data.rows.forEach(row => {
         const tr = document.createElement('tr');
+        const rowValues = new Map(Object.entries(row));
         headers.forEach(h => {
           const td = document.createElement('td');
-          const val = row[h];
+          const val = rowValues.get(h);
           td.textContent = Array.isArray(val) ? val.join(', ') : String(val ?? '');
           td.title = td.textContent;
           tr.appendChild(td);

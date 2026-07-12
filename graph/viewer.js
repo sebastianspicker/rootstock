@@ -1,4 +1,4 @@
-/* global SpatialGrid, centerOnNode, closeInspector, draw, handlePathClick */
+/* global SpatialGrid, centerOnNode, closeInspector, drawFrame, handlePathClick */
 /* global hideContextMenu, hideTooltip, inspectNode, showContextMenu */
 /* global showTooltip, updateRiskSummary, updateStats */
 /* global spatialIndex:writable */
@@ -269,7 +269,7 @@ function markDirty() {
   dirty = true;
   if (!frameRequested) {
     frameRequested = true;
-    requestAnimationFrame(draw);
+    requestAnimationFrame(drawFrame);
   }
 }
 

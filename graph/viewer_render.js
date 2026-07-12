@@ -1,5 +1,13 @@
+/* global H, W, adjIn, adjOut, container, ctx, degreeMap, dpr, edgeKinds, el */
+/* global focusNodeId, hoverNode, kindMeta, linkKey, links, nodeById, nodeRadius */
+/* global nodes, pathMode, pathResult, pathSource, pathTarget, pinnedNode */
+/* global selectedNode, showLabels, transform, visibleLinkSet, visibleNodeIds */
+/* global dirty:writable, frameRequested:writable, markDirty */
+/* exported draw, hideTooltip, showTooltip */
+/* exported frameRequested */
+
 // ── Node shapes ─────────────────────────────────────────────────────────────
-const SHAPE_MAP = {
+const SHAPE_MAP = new Map(Object.entries({
   'rs_Vulnerability': 'diamond',
   'rs_AttackTechnique': 'diamond',
   'rs_ThreatGroup': 'diamond',
@@ -21,7 +29,7 @@ const SHAPE_MAP = {
   'rs_LoginSession': 'roundrect',
   'rs_SystemExt': 'roundrect',
   'rs_Recommendation': 'roundrect',
-};
+}));
 
 function drawDiamond(context, x, y, radius) {
   const size = radius * 1.3;
@@ -78,20 +86,22 @@ function drawCircle(context, x, y, radius) {
   context.arc(x, y, radius, 0, Math.PI * 2);
 }
 
-const NODE_SHAPE_DRAWERS = {
+const NODE_SHAPE_DRAWERS = new Map(Object.entries({
   diamond: drawDiamond,
   hexagon: drawHexagon,
   square: drawSquare,
   triangle: drawTriangle,
   roundrect: drawRoundRect,
-};
+}));
+const TIER_CLASSES = new Map([[0, 'critical'], [1, 'high'], [2, 'medium']]);
 
 function drawNodeShape(context, x, y, radius, shape) {
-  (NODE_SHAPE_DRAWERS[shape] || drawCircle)(context, x, y, radius);
+  const drawer = NODE_SHAPE_DRAWERS.get(shape) || drawCircle;
+  drawer(context, x, y, radius);
 }
 
 function getNodeShape(kind) {
-  return SHAPE_MAP[kind] || 'circle';
+  return SHAPE_MAP.get(kind) || 'circle';
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
@@ -416,8 +426,8 @@ function appendTooltipBadge(parent, className, text) {
 function appendTooltipRisk(parent, node) {
   if (node.properties?.owned) appendTooltipBadge(parent, 'owned', 'OWNED');
   const tier = node.properties?.tier;
-  const tierClasses = {0: 'critical', 1: 'high', 2: 'medium'};
-  if (tier in tierClasses) appendTooltipBadge(parent, tierClasses[tier], 'TIER ' + tier);
+  const tierClass = TIER_CLASSES.get(tier);
+  if (tierClass) appendTooltipBadge(parent, tierClass, 'TIER ' + tier);
   const level = node.properties?.risk_level;
   if (level) appendTooltipBadge(parent, ['critical', 'high', 'medium'].includes(level) ? level : 'low', level.toUpperCase());
 }

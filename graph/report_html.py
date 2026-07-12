@@ -249,7 +249,7 @@ def markdown_to_html(md: str) -> str:
 
     except ImportError as exc:
         raise RuntimeError(
-            "HTML report rendering requires Markdown>=3,<4; install graph dependencies."
+            "HTML report rendering requires Markdown>=3.8.1,<4; install graph dependencies."
         ) from exc
 
     body = md_lib.markdown(md, extensions=["tables", "fenced_code", "sane_lists"])

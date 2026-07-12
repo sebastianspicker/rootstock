@@ -3,8 +3,21 @@ from unittest import TestCase
 
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "viewer_template.html"
-SCRIPT = Path(__file__).resolve().parents[1] / "viewer.js"
+ASSET_DIR = Path(__file__).resolve().parents[1]
+SCRIPT_FILES = (
+    "viewer.js",
+    "viewer_spatial.js",
+    "viewer_render.js",
+    "viewer_analysis.js",
+    "viewer_controls.js",
+    "viewer_live.js",
+    "viewer_shell.js",
+)
 STYLES = Path(__file__).resolve().parents[1] / "viewer.css"
+
+
+def _script_source() -> str:
+    return "\n".join((ASSET_DIR / name).read_text() for name in SCRIPT_FILES)
 
 
 def _between(source: str, start: str, end: str) -> str:
@@ -17,10 +30,10 @@ checks = TestCase()
 
 
 def test_viewer_renders_graph_values_through_text_sinks():
-    source = SCRIPT.read_text()
+    source = _script_source()
 
     checks.assertNotIn(".innerHTML", source)
-    checks.assertIn("textContent: d.label || '?'", source)
+    checks.assertIn("textContent: node.label || '?'", source)
     checks.assertIn("title.textContent = d.label || d.id", source)
     checks.assertIn(
         "td.textContent = Array.isArray(val) ? val.join(', ') : String(val ?? '')",
@@ -30,7 +43,7 @@ def test_viewer_renders_graph_values_through_text_sinks():
 
 
 def test_live_query_failures_render_error_instead_of_positive_no_findings():
-    source = SCRIPT.read_text()
+    source = _script_source()
     run_live_query = _between(
         source, "function runLiveQuery", "function highlightQueryResult"
     )
@@ -52,7 +65,7 @@ def test_live_query_failures_render_error_instead_of_positive_no_findings():
 
 
 def test_live_actions_fail_visibly_and_preserve_unsaved_owned_state():
-    source = SCRIPT.read_text()
+    source = _script_source()
     live_refresh = _between(source, "function liveRefresh", "function liveTierClassify")
     live_tier = _between(source, "function liveTierClassify", "function liveShowOwned")
     live_show_owned = _between(
@@ -116,7 +129,7 @@ def test_viewer_controls_are_labelled_and_stateful():
 
 
 def test_viewer_assets_define_theme_reflow_and_event_driven_rendering():
-    script = SCRIPT.read_text()
+    script = _script_source()
     styles = STYLES.read_text()
 
     checks.assertIn("rootstock.theme", script)

@@ -137,7 +137,7 @@ class TestHtmlReportEscaping:
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=unavailable_markdown):
-            with pytest.raises(RuntimeError, match="requires Markdown>=3,<4"):
+            with pytest.raises(RuntimeError, match=r"requires Markdown>=3\.8\.1,<4"):
                 render_report_html("# Report")
 
 

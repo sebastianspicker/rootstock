@@ -1,11 +1,5 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const {performance} = require('node:perf_hooks');
-
-const source = fs.readFileSync(new URL('../viewer.js', `file://${__filename}`).pathname, 'utf8');
-const classStart = source.indexOf('class SpatialGrid');
-const classEnd = source.indexOf('let spatialIndex', classStart);
-assert.ok(classStart >= 0 && classEnd > classStart, 'SpatialGrid source not found');
 
 const nodes = Array.from({length: 10000}, (_, index) => ({
   id: `n${index}`,
@@ -16,13 +10,12 @@ const nodes = Array.from({length: 10000}, (_, index) => ({
 }));
 const visibleNodeIds = new Set(nodes.map(node => node.id));
 const nodeRadius = () => 8;
-const SpatialGrid = Function(
-  'visibleNodeIds',
-  'nodeRadius',
-  `${source.slice(classStart, classEnd)}; return SpatialGrid;`,
-)(visibleNodeIds, nodeRadius);
+global.nodes = nodes;
+global.visibleNodeIds = visibleNodeIds;
+global.nodeRadius = nodeRadius;
+const {SpatialGrid} = require('../../graph/viewer_spatial.js');
 
-const index = new SpatialGrid(nodes);
+const index = new SpatialGrid(nodes, {isVisible: node => visibleNodeIds.has(node.id), radiusFor: nodeRadius});
 const hitDurations = [];
 for (let sample = 0; sample < 2000; sample++) {
   const started = performance.now();

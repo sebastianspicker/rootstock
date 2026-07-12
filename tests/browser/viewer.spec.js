@@ -1,11 +1,8 @@
 const http = require('node:http');
 const fs = require('node:fs');
-const path = require('node:path');
 const {test, expect} = require('@playwright/test');
 const AxeBuilder = require('@axe-core/playwright').default;
 
-const root = path.resolve(__dirname, '../..');
-const graphDir = path.join(root, 'graph');
 const graph = {
   metadata: {hostname: 'synthetic-browser-fixture', generated_at: '2026-07-11T00:00:00Z'},
   graph: {
@@ -18,15 +15,23 @@ const graph = {
 };
 
 function assembledViewer(live) {
-  let script = fs.readFileSync(path.join(graphDir, 'viewer.js'), 'utf8');
+  let script = [
+    fs.readFileSync('graph/viewer.js', 'utf8'),
+    fs.readFileSync('graph/viewer_spatial.js', 'utf8'),
+    fs.readFileSync('graph/viewer_render.js', 'utf8'),
+    fs.readFileSync('graph/viewer_analysis.js', 'utf8'),
+    fs.readFileSync('graph/viewer_controls.js', 'utf8'),
+    fs.readFileSync('graph/viewer_live.js', 'utf8'),
+    fs.readFileSync('graph/viewer_shell.js', 'utf8'),
+  ].join('\n');
   const payload = live ? {metadata: {}, graph: {nodes: [], edges: []}} : graph;
   script = script.replace(
-    'let DATA = {{VIEWER_DATA}};',
+    'let DATA = null /* VIEWER_DATA */;',
     `${live ? "const __ROOTSTOCK_LIVE__ = true; const API_BASE = '';" : ''}\nlet DATA = ${JSON.stringify(payload)};`,
   );
-  return fs.readFileSync(path.join(graphDir, 'viewer_template.html'), 'utf8')
+  return fs.readFileSync('graph/viewer_template.html', 'utf8')
     .replace('{{VIEWER_TITLE}}', live ? 'Live fixture' : 'Static fixture')
-    .replace('{{VIEWER_CSS}}', fs.readFileSync(path.join(graphDir, 'viewer.css'), 'utf8'))
+    .replace('{{VIEWER_CSS}}', fs.readFileSync('graph/viewer.css', 'utf8'))
     .replace('{{VIEWER_JS}}', script);
 }
 

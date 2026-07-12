@@ -3,6 +3,7 @@ import os
 import select
 import shutil
 import time
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,7 @@ def test_large_graph_interaction_budget():
     if node is None:
         pytest.skip("Node.js is required for the viewer performance contract")
 
+    runner = os.fspath(Path(__file__).with_name("viewer_performance.js"))
     read_fd, write_fd = os.pipe()
     pid = os.fork()
     if pid == 0:
@@ -19,7 +21,7 @@ def test_large_graph_interaction_budget():
         os.dup2(write_fd, 2)
         os.close(read_fd)
         os.close(write_fd)
-        os.execv("/usr/bin/env", ["env", "node", "graph/tests/viewer_performance.js"])
+        os.execv("/usr/bin/env", ["env", "node", runner])
     os.close(write_fd)
     deadline = time.monotonic() + 30
     output = bytearray()

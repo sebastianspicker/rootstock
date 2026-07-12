@@ -1,3 +1,13 @@
+/* global H, SpatialGrid, W, activeNodeKinds, closeInspector */
+/* global computeVisibility, drawNodeShape, edgeKinds, el, exitFocusMode */
+/* global exitPathMode, focusNodeId, getNodeShape, kindMeta, links, markDirty */
+/* global nodeById, nodeRadius, nodes, pathMode, togglePathMode */
+/* global updateAccessibleNodeList, visibleLinkSet, visibleNodeIds */
+/* global attackPathMode:writable, clusterByType:writable, searchTerm:writable */
+/* global showLabels:writable, spatialIndex:writable, transform:writable */
+/* exported exportPNG, toggleClustering, toggleVulnFilter */
+/* exported spatialIndex */
+
 // ── Controls ────────────────────────────────────────────────────────────────
 function resetZoom() {
   // Fit all visible nodes
@@ -195,8 +205,8 @@ function toggleNumberedKind(key) {
   const checkbox = document.querySelector('#node-filters input[data-kind="' + kind + '"]');
   if (!checkbox) return;
   checkbox.checked = !checkbox.checked;
-  const operation = checkbox.checked ? 'add' : 'delete';
-  activeNodeKinds[operation](kind);
+  if (checkbox.checked) activeNodeKinds.add(kind);
+  else activeNodeKinds.delete(kind);
   computeVisibility();
   markDirty();
 }
@@ -285,4 +295,3 @@ function updateRiskSummary() {
   }
 }
 updateRiskSummary();
-

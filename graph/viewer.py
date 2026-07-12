@@ -83,9 +83,13 @@ def _viewer_html(data: dict) -> str:
     title = f"{hostname} Attack Graph"
     safe_title = html_mod.escape(title)
     safe_json = json.dumps(data).replace("</", "<\\/")
-    template = (Path(__file__).parent / "viewer_template.html").read_text()
-    return template.replace("{{VIEWER_TITLE}}", safe_title).replace(
-        "{{VIEWER_DATA}}", safe_json
+    asset_dir = Path(__file__).parent
+    template = (asset_dir / "viewer_template.html").read_text()
+    return (
+        template.replace("{{VIEWER_TITLE}}", safe_title)
+        .replace("{{VIEWER_CSS}}", (asset_dir / "viewer.css").read_text())
+        .replace("{{VIEWER_JS}}", (asset_dir / "viewer.js").read_text())
+        .replace("{{VIEWER_DATA}}", safe_json)
     )
 
 

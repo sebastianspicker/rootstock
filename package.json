@@ -1,0 +1,11 @@
+{
+  "name": "rootstock-browser-tests",
+  "private": true,
+  "scripts": {
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": ">=4.10 <5",
+    "@playwright/test": ">=1.50 <2"
+  }
+}

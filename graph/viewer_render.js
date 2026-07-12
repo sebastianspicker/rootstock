@@ -3,7 +3,7 @@
 /* global nodes, pathMode, pathResult, pathSource, pathTarget, pinnedNode */
 /* global selectedNode, showLabels, transform, visibleLinkSet, visibleNodeIds */
 /* global dirty:writable, frameRequested:writable, markDirty */
-/* exported draw, hideTooltip, showTooltip */
+/* exported drawFrame, hideTooltip, showTooltip */
 /* exported frameRequested */
 
 // ── Node shapes ─────────────────────────────────────────────────────────────
@@ -395,7 +395,7 @@ function prepareCanvas() {
   ctx.scale(transform.k, transform.k);
 }
 
-function draw() {
+function drawFrame() {
   frameRequested = false;
   if (!dirty) return;
   dirty = false;

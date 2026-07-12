@@ -75,7 +75,7 @@ function toggleClustering() {
 function deterministicJitter(value, salt) {
   let hash = salt;
   for (const character of String(value)) hash = (hash * 33 + character.charCodeAt(0)) >>> 0;
-  return (hash / 4294967295 - 0.5) * 40;
+  return (hash / (2 ** 32 - 1) - 0.5) * 40;
 }
 
 let vulnFilterActive = false;

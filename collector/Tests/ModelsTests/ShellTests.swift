@@ -37,6 +37,10 @@ final class ShellTests: XCTestCase {
         XCTAssertNil(output)
     }
 
+    func testDefaultDeadlineIsFinite() {
+        XCTAssertGreaterThan(Shell.defaultTimeoutSeconds, 0)
+    }
+
     func testRunProcessTimeoutTerminatesStdoutOnlyChild() throws {
         let result = try runTimedOutChild(
             body: "sys.stdout.write('stdout-before-timeout\\n'); sys.stdout.flush()"
@@ -126,6 +130,59 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(result?.stderr.count, 100000)
     }
 
+    func testRunProcessDeadlineIncludesInheritedPipeDrain() throws {
+        let pidPath = temporaryPath("shell-descendant-pid")
+        defer {
+            terminateProcessRecorded(at: pidPath)
+            try? FileManager.default.removeItem(atPath: pidPath)
+        }
+        let script = """
+        import pathlib
+        import subprocess
+        import sys
+
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(5)'])
+        pathlib.Path(sys.argv[1]).write_text(str(child.pid))
+        print('parent-complete')
+        """
+
+        let startedAt = Date()
+        let result = Shell.runProcess(
+            python3Path,
+            ["-c", script, pidPath],
+            timeoutSeconds: 2
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertEqual(result?.terminationStatus, 0)
+        XCTAssertEqual(result?.timedOut, false)
+        XCTAssertTrue(result?.stdout.contains("parent-complete") == true)
+        XCTAssertLessThan(elapsed, 3.5, "Inherited pipes must not outlive the command deadline")
+    }
+
+    func testRunProcessHardKillsChildThatIgnoresTermination() {
+        let script = """
+        import signal
+        import time
+
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        print('ready', flush=True)
+        time.sleep(5)
+        """
+
+        let startedAt = Date()
+        let result = Shell.runProcess(
+            python3Path,
+            ["-c", script],
+            timeoutSeconds: 0.5
+        )
+        let elapsed = Date().timeIntervalSince(startedAt)
+
+        XCTAssertEqual(result?.timedOut, true)
+        XCTAssertTrue(result?.stdout.contains("ready") == true)
+        XCTAssertLessThan(elapsed, 1.5, "A child that ignores SIGTERM must still be bounded")
+    }
+
     private func runTimedOutChild(body: String, file: StaticString = #filePath, line: UInt = #line) throws -> ShellResult {
         let pidPath = temporaryPath("shell-child-pid")
         defer { try? FileManager.default.removeItem(atPath: pidPath) }
@@ -180,6 +237,14 @@ final class ShellTests: XCTestCase {
             }
             Thread.sleep(forTimeInterval: 0.05)
         }
+    }
+
+    private func terminateProcessRecorded(at path: String) {
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8),
+              let pid = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return
+        }
+        _ = kill(pid, SIGKILL)
     }
 
     private enum ShellTestError: Error {

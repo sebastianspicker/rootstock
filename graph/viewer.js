@@ -1,9 +1,9 @@
 /* global SpatialGrid, centerOnNode, closeInspector, drawFrame, handlePathClick */
 /* global hideContextMenu, hideTooltip, inspectNode, showContextMenu */
 /* global showTooltip, updateRiskSummary, updateStats */
-/* global spatialIndex:writable */
+/* global spatialIndex:writable, vulnFilterActive:writable */
 /* exported clusterByType, ctx, dirty, nodeRadius, pathSource, pathTarget */
-/* exported propRow, replaceGraphData, sectionHeader, showLabels */
+/* exported replaceGraphData, showLabels */
 
 // ── Data (with pre-computed x,y positions) ──────────────────────────────────
 let DATA = null /* VIEWER_DATA */;
@@ -26,28 +26,6 @@ function el(tag, attrs, children) {
   });
   if (children) children.forEach(c => { if (c) e.appendChild(c); });
   return e;
-}
-
-function propRow(key, value) {
-  const row = el('div', {className: 'prop-row'});
-  row.appendChild(el('span', {className: 'prop-key', textContent: String(key)}));
-  let cls = 'prop-val';
-  let display;
-  if (typeof value === 'boolean') {
-    cls += value ? ' bool-true' : ' bool-false';
-    display = value ? 'true' : 'false';
-  } else if (Array.isArray(value)) {
-    display = value.join(', ') || '(empty)';
-  } else if (value === null || value === undefined) {
-    cls += ' bool-false'; display = '(null)';
-  } else { display = String(value); }
-  row.appendChild(el('span', {className: cls, textContent: display}));
-  return row;
-}
-
-function sectionHeader(text) {
-  const h = el('h4', {textContent: text});
-  return el('div', {className: 'prop-section'}, [h]);
 }
 
 // ── Derived data ────────────────────────────────────────────────────────────
@@ -206,10 +184,41 @@ function rebuildDerivedData(resetFilters = false) {
 }
 
 function replaceGraphData(data) {
+  resetGraphInteractionState();
   DATA = data;
   nodes.splice(0, nodes.length, ...(data.graph?.nodes || []));
   edges.splice(0, edges.length, ...(data.graph?.edges || []));
   rebuildDerivedData(true);
+}
+
+function resetGraphInteractionState() {
+  selectedNode = null;
+  hoverNode = null;
+  pinnedNode = null;
+  focusNodeId = null;
+  pathMode = false;
+  pathSource = null;
+  pathTarget = null;
+  pathResult = null;
+  dragNode = null;
+  didDrag = false;
+  clusterByType = false;
+  vulnFilterActive = false;
+
+  document.getElementById('focus-banner').classList.remove('visible');
+  document.getElementById('path-banner').classList.remove('visible');
+  const pathButton = document.getElementById('btn-path');
+  pathButton.classList.remove('active');
+  pathButton.setAttribute('aria-pressed', 'false');
+  const clusterButton = document.getElementById('btn-cluster');
+  clusterButton.classList.remove('active');
+  clusterButton.setAttribute('aria-pressed', 'false');
+  const vulnButton = document.getElementById('btn-vuln');
+  vulnButton.classList.remove('active');
+  vulnButton.setAttribute('aria-pressed', 'false');
+  document.getElementById('inspector').classList.remove('open');
+  document.getElementById('results-panel').classList.remove('open');
+  document.getElementById('detail-empty').hidden = false;
 }
 
 // Transform state (pan/zoom)

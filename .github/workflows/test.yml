@@ -92,6 +92,19 @@ jobs:
       - name: ruff check
         run: ruff check graph/ scripts/ examples/ docs/ --exclude docs/archive --exclude docs/private
 
+  browser-tests:
+    name: Browser Viewer Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install browser test dependencies
+        run: npm install
+      - name: Install Chrome for Playwright
+        run: npx playwright install --with-deps chrome
+      - name: Browser viewer tests
+        run: npm run test:browser
+
   cve-scan-tests:
     name: cve-scan Module
     runs-on: ubuntu-latest

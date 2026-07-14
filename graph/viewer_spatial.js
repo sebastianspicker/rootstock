@@ -32,26 +32,30 @@ class SpatialGrid {
     return candidates;
   }
 
-  distanceFromNode(node, px, py, maxDist, bestDist) {
+  distanceFromNode(node, px, py, maxDist) {
     if (!this.isVisible(node)) return null;
     const dx = node.x - px;
     const dy = node.y - py;
     const radius = this.radiusFor(node);
-    const squaredDistance = dx * dx + dy * dy;
-    const withinNode = squaredDistance < (radius + maxDist) ** 2;
-    const couldBeCloser = squaredDistance < bestDist + radius * radius;
-    if (!withinNode || !couldBeCloser) return null;
-    return Math.sqrt(squaredDistance) - radius;
+    const centerDistance = Math.hypot(dx, dy);
+    if (centerDistance > radius + maxDist) return null;
+    // A point inside a node is equally close to its clickable area.  This
+    // keeps node selection geometric instead of preferring an arbitrary
+    // center when clickable regions overlap.
+    return Math.max(0, centerDistance - radius);
   }
 
   findNearest(px, py, maxDist) {
     let best = null;
-    let bestDist = maxDist * maxDist;
+    let bestDistance = Infinity;
     for (const node of this.candidatesNear(px, py, maxDist)) {
-      const distance = this.distanceFromNode(node, px, py, maxDist, bestDist);
-      if (distance === null || distance >= Math.sqrt(bestDist)) continue;
-      bestDist = distance * distance;
-      best = node;
+      const distance = this.distanceFromNode(node, px, py, maxDist);
+      if (distance === null) continue;
+      if (distance < bestDistance ||
+          (distance === bestDistance && best && String(node.id) < String(best.id))) {
+        bestDistance = distance;
+        best = node;
+      }
     }
     return best;
   }

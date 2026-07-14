@@ -1,11 +1,33 @@
 /* global H, W, activeEdgeKinds, adjIn, adjOut, computeVisibility, container */
-/* global edgeKinds, el, kindMeta, linkKey, markDirty, nodeById, propRow */
-/* global sectionHeader */
+/* global edgeKinds, el, kindMeta, linkKey, markDirty, nodeById */
 /* global selectedNode:writable, transform:writable */
 /* global focusNodeId:writable, pathMode:writable, pathResult:writable */
 /* global pathSource:writable, pathTarget:writable */
 /* exported closeInspector, handlePathClick, showContextMenu, togglePathMode */
 /* exported selectedNode, transform */
+
+// ── Inspector DOM helpers (used only by this analysis fragment) ────────────
+function propRow(key, value) {
+  const row = el('div', {className: 'prop-row'});
+  row.appendChild(el('span', {className: 'prop-key', textContent: String(key)}));
+  let cls = 'prop-val';
+  let display;
+  if (typeof value === 'boolean') {
+    cls += value ? ' bool-true' : ' bool-false';
+    display = value ? 'true' : 'false';
+  } else if (Array.isArray(value)) {
+    display = value.join(', ') || '(empty)';
+  } else if (value === null || value === undefined) {
+    cls += ' bool-false'; display = '(null)';
+  } else { display = String(value); }
+  row.appendChild(el('span', {className: cls, textContent: display}));
+  return row;
+}
+
+function sectionHeader(text) {
+  const h = el('h4', {textContent: text});
+  return el('div', {className: 'prop-section'}, [h]);
+}
 
 // ── BFS shortest path ───────────────────────────────────────────────────────
 function findPathParents(sourceId, targetId) {

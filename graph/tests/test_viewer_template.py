@@ -82,6 +82,11 @@ def test_live_actions_fail_visibly_and_preserve_unsaved_owned_state():
         live_refresh.index("throw new Error('Malformed graph response')"),
         live_refresh.index("replaceGraphData(data)"),
     )
+    checks.assertIn("let liveRefreshGeneration = 0", source)
+    checks.assertIn("const refreshGeneration = ++liveRefreshGeneration", live_refresh)
+    checks.assertIn(
+        "if (refreshGeneration !== liveRefreshGeneration) return;", live_refresh
+    )
     checks.assertIn("throw new Error('Malformed tier response')", live_tier)
     checks.assertIn(
         "setLiveStatus('Tier classification failed: ' + err.message, 'error')",
@@ -99,6 +104,20 @@ def test_live_actions_fail_visibly_and_preserve_unsaved_owned_state():
         "setLiveStatus(action + ' failed: ' + err.message, 'error')",
         toggle_override,
     )
+
+
+def test_graph_replacement_resets_cluster_and_vulnerability_controls():
+    source = _script_source()
+    reset = _between(source, "function resetGraphInteractionState", "// Transform state")
+
+    checks.assertIn("clusterByType = false", reset)
+    checks.assertIn("vulnFilterActive = false", reset)
+    checks.assertIn("const clusterButton = document.getElementById('btn-cluster')", reset)
+    checks.assertIn("clusterButton.classList.remove('active')", reset)
+    checks.assertIn("clusterButton.setAttribute('aria-pressed', 'false')", reset)
+    checks.assertIn("const vulnButton = document.getElementById('btn-vuln')", reset)
+    checks.assertIn("vulnButton.classList.remove('active')", reset)
+    checks.assertIn("vulnButton.setAttribute('aria-pressed', 'false')", reset)
 
 
 def test_viewer_shell_has_valid_landmarks_and_no_inline_handlers():

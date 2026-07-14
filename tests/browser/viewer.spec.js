@@ -37,26 +37,48 @@ function assembledViewer(live) {
 
 let server;
 let origin;
+
+const apiPayloads = new Map([
+  ['/api/queries', [
+    {id: '01', name: 'Fixture query', purpose: 'Browser result fixture', category: 'Blue Team', severity: 'Informational'},
+  ]],
+  ['/api/queries/01/run', {rows: [{name: 'Demo App'}], count: 1}],
+  ['/api/owned', {owned: [], count: 0}],
+]);
+
+function isViewerPage(url) {
+  return url === '/static' || url === '/live';
+}
+
+function hasFixtureToken(request) {
+  return request.headers.authorization === 'Bearer browser-fixture-token';
+}
+
+function serveFixtureApi(request, response) {
+  response.setHeader('Content-Type', 'application/json');
+  if (request.url === '/api/graph') {
+    return response.end(JSON.stringify(graph));
+  }
+  const payload = apiPayloads.get(request.url);
+  if (payload) return response.end(JSON.stringify(payload));
+  response.writeHead(404);
+  return response.end(JSON.stringify({detail: 'Not found'}));
+}
+
+function handleFixtureRequest(request, response) {
+  if (isViewerPage(request.url)) {
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return response.end(assembledViewer(request.url === '/live'));
+  }
+  if (!hasFixtureToken(request)) {
+    response.writeHead(401, {'Content-Type': 'application/json'});
+    return response.end(JSON.stringify({detail: 'Missing or invalid bearer token'}));
+  }
+  return serveFixtureApi(request, response);
+}
+
 test.beforeAll(async () => {
-  server = http.createServer((request, response) => {
-    if (request.url === '/static' || request.url === '/live') {
-      response.setHeader('Content-Type', 'text/html; charset=utf-8');
-      return response.end(assembledViewer(request.url === '/live'));
-    }
-    if (request.headers.authorization !== 'Bearer browser-fixture-token') {
-      response.writeHead(401, {'Content-Type': 'application/json'});
-      return response.end(JSON.stringify({detail: 'Missing or invalid bearer token'}));
-    }
-    response.setHeader('Content-Type', 'application/json');
-    if (request.url === '/api/graph') return response.end(JSON.stringify(graph));
-    if (request.url === '/api/queries') return response.end(JSON.stringify([
-      {id: '01', name: 'Fixture query', purpose: 'Browser result fixture', category: 'Blue Team', severity: 'Informational'},
-    ]));
-    if (request.url === '/api/queries/01/run') return response.end(JSON.stringify({rows: [{name: 'Demo App'}], count: 1}));
-    if (request.url === '/api/owned') return response.end(JSON.stringify({owned: [], count: 0}));
-    response.writeHead(404);
-    return response.end(JSON.stringify({detail: 'Not found'}));
-  });
+  server = http.createServer(handleFixtureRequest);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   origin = `http://127.0.0.1:${server.address().port}`;
 });
@@ -99,6 +121,81 @@ test('live viewer uses an inline session-only token gate', async ({page}) => {
   await expect(page.getByRole('heading', {name: /Fixture query/})).toBeVisible();
   await expect(page.getByRole('button', {name: 'Highlight node'})).toBeVisible();
   await expectNoSeriousAxeFindings(page);
+});
+
+test('live refresh clears interaction state from the graph it replaces', async ({page}) => {
+  await page.goto(`${origin}/live`);
+  await page.getByLabel('API token').fill('browser-fixture-token');
+  await page.getByRole('button', {name: 'Connect'}).click();
+  const app = page.getByRole('button', {name: /Demo App/});
+  await expect(app).toBeVisible();
+
+  await page.getByRole('button', {name: 'Cluster'}).click();
+  await page.getByRole('button', {name: 'Vulnerable only'}).click();
+  await expect(page.locator('#btn-cluster')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#btn-vuln')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', {name: 'Refresh graph'}).click();
+  await expect(page.locator('#btn-cluster')).not.toHaveClass(/active/);
+  await expect(page.locator('#btn-cluster')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#btn-vuln')).not.toHaveClass(/active/);
+  await expect(page.locator('#btn-vuln')).toHaveAttribute('aria-pressed', 'false');
+  await expect(app).toBeVisible();
+
+  await app.click();
+  await expect(page.locator('#inspector')).toHaveClass(/open/);
+  await page.evaluate(() => enterFocusMode('app'));
+  await expect(page.locator('#focus-banner')).toHaveClass(/visible/);
+  await page.getByRole('button', {name: 'Refresh graph'}).click();
+  await expect(page.locator('#focus-banner')).not.toHaveClass(/visible/);
+  await expect(page.locator('#inspector')).not.toHaveClass(/open/);
+  await expect(page.locator('[aria-current="true"]')).toHaveCount(0);
+
+  await page.getByRole('button', {name: 'Build path'}).click();
+  await app.click();
+  await page.getByRole('button', {name: /Full Disk Access/}).click();
+  await expect(page.locator('#path-banner')).toHaveClass(/visible/);
+  await page.getByRole('button', {name: 'Refresh graph'}).click();
+  await expect(page.locator('#path-banner')).not.toHaveClass(/visible/);
+  await expect(page.locator('#detail-empty')).toBeVisible();
+});
+
+test('live refresh keeps the newest graph when responses finish out of order', async ({page}) => {
+  await page.goto(`${origin}/live`);
+  await page.getByLabel('API token').fill('browser-fixture-token');
+  await page.getByRole('button', {name: 'Connect'}).click();
+  await expect(page.getByRole('button', {name: /Demo App/})).toBeVisible();
+
+  const pendingGraphRoutes = [];
+  await page.route('**/api/graph', route => pendingGraphRoutes.push(route));
+  await page.evaluate(() => {
+    liveRefresh();
+    liveRefresh();
+  });
+  await expect.poll(() => pendingGraphRoutes.length).toBe(2);
+
+  const olderResponse = pendingGraphRoutes.shift();
+  const newerResponse = pendingGraphRoutes.shift();
+  await newerResponse.fulfill({json: {
+    metadata: {hostname: 'newer-graph'},
+    graph: {
+      nodes: [{id: 'newer', kind: 'rs_Application', label: 'Newer App', x: 300, y: 200, properties: {}}],
+      edges: [],
+    },
+  }});
+  await expect(page.getByRole('button', {name: /Newer App/})).toBeVisible();
+  await expect(page.locator('#live-status')).toHaveText('Graph refreshed.');
+
+  await olderResponse.fulfill({json: {
+    metadata: {hostname: 'older-graph'},
+    graph: {
+      nodes: [{id: 'older', kind: 'rs_Application', label: 'Older App', x: 100, y: 100, properties: {}}],
+      edges: [],
+    },
+  }});
+  await expect(page.getByRole('button', {name: /Newer App/})).toBeVisible();
+  await expect(page.getByRole('button', {name: /Older App/})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: /Demo App/})).toHaveCount(0);
+  await expect(page.locator('#live-status')).toHaveText('Graph refreshed.');
 });
 
 test('narrow layout does not create page-level horizontal clipping', async ({page}) => {

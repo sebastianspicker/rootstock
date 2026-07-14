@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const {performance} = require('node:perf_hooks');
+const vm = require('node:vm');
 
 const nodes = Array.from({length: 10000}, (_, index) => ({
   id: `n${index}`,
@@ -16,6 +18,18 @@ global.nodeRadius = nodeRadius;
 const {SpatialGrid} = require('../../graph/viewer_spatial.js');
 
 const index = new SpatialGrid(nodes, {isVisible: node => visibleNodeIds.has(node.id), radiusFor: nodeRadius});
+const nestedHits = new SpatialGrid([
+  {id: 'a', x: 0, y: 0},
+  {id: 'z', x: 0, y: 0},
+], {isVisible: () => true, radiusFor: () => 8});
+assert.equal(nestedHits.findNearest(0, 0, 20).id, 'a',
+  'overlapping clickable nodes use a deterministic id tie-break');
+const nearestBoundary = new SpatialGrid([
+  {id: 'near-center', x: 3, y: 0},
+  {id: 'near-boundary', x: 10, y: 0},
+], {isVisible: () => true, radiusFor: node => node.id === 'near-center' ? 1 : 9.5});
+assert.equal(nearestBoundary.findNearest(0, 0, 20).id, 'near-boundary',
+  'hit testing chooses the nearest clickable boundary, not the nearest center');
 const hitDurations = [];
 for (let sample = 0; sample < 2000; sample++) {
   const started = performance.now();
@@ -26,21 +40,44 @@ for (let sample = 0; sample < 2000; sample++) {
 const edges = Array.from({length: 50000}, (_, index) => ({
   source: `n${index % nodes.length}`,
   target: `n${(index * 17 + 3) % nodes.length}`,
+  kind: 'rs_RELATES_TO',
+  properties: {_traversable: true},
 }));
-const searchTextById = new Map(nodes.map(node => [node.id, node.label.toLowerCase()]));
+const viewerSource = fs.readFileSync('viewer.js', 'utf8');
+const viewerCore = viewerSource.slice(0, viewerSource.indexOf('// ── Metadata'));
+const elements = new Map();
+function element() {
+  return {
+    classList: {add() {}, remove() {}},
+    setAttribute() {},
+    textContent: '',
+  };
+}
+const viewerContext = {
+  DATA: undefined,
+  SpatialGrid,
+  document: {getElementById(id) {
+    if (!elements.has(id)) elements.set(id, element());
+    return elements.get(id);
+  }},
+  requestAnimationFrame() {},
+  drawFrame() {},
+  updateStats() {},
+  updateRiskSummary() {},
+};
+vm.runInNewContext(
+  viewerCore.replace('let DATA = null /* VIEWER_DATA */;', `let DATA = ${JSON.stringify({graph: {nodes, edges}})};`) +
+  '\nfunction updateAccessibleNodeList() {}\n' +
+  'globalThis.__viewer = {activeNodeKinds, computeVisibility, setSearchTerm(value) { searchTerm = value; }};',
+  viewerContext,
+);
+viewerContext.__viewer.activeNodeKinds.add('rs_User');
 const filterDurations = [];
 for (let sample = 0; sample < 20; sample++) {
   const started = performance.now();
   const term = sample % 2 ? 'synthetic node 9' : '';
-  const visible = new Set();
-  for (const node of nodes) {
-    if (!term || searchTextById.get(node.id).includes(term)) visible.add(node.id);
-  }
-  let visibleEdges = 0;
-  for (const edge of edges) {
-    if (visible.has(edge.source) && visible.has(edge.target)) visibleEdges++;
-  }
-  assert.ok(visibleEdges >= 0);
+  viewerContext.__viewer.setSearchTerm(term);
+  viewerContext.__viewer.computeVisibility();
   filterDurations.push(performance.now() - started);
 }
 

@@ -231,12 +231,16 @@ function setLiveStatus(message, state = '') {
   status.className = 'live-status' + (state ? ' ' + state : '');
 }
 
+let liveRefreshGeneration = 0;
+
 function liveRefresh() {
   if (!isLive) return;
+  const refreshGeneration = ++liveRefreshGeneration;
   setLiveStatus('Refreshing graph...', 'pending');
   apiFetch('/api/graph')
     .then(r => r.json())
     .then(data => {
+      if (refreshGeneration !== liveRefreshGeneration) return;
       if (!data || !data.graph || !Array.isArray(data.graph.nodes) || !Array.isArray(data.graph.edges)) {
         throw new Error('Malformed graph response');
       }
@@ -245,6 +249,7 @@ function liveRefresh() {
       setLiveStatus('Graph refreshed.', 'ok');
     })
     .catch(err => {
+      if (refreshGeneration !== liveRefreshGeneration) return;
       setLiveStatus('Graph refresh failed: ' + err.message, 'error');
     });
 }

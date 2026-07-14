@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import Entitlements
 import Models
 
@@ -130,6 +131,126 @@ final class EntitlementTests: XCTestCase {
         XCTAssertEqual(app?.version, "1.0")
     }
 
+    func testDiscoveryFindsAppsExactlyOneNestedDirectoryDeep() throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("nested-discovery-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        try createFakeApplication(
+            at: tempDir.appendingPathComponent("Direct.app"),
+            bundleIdentifier: "com.test.direct"
+        )
+        try createFakeApplication(
+            at: tempDir.appendingPathComponent("Category/Nested.app"),
+            bundleIdentifier: "com.test.nested"
+        )
+        try createFakeApplication(
+            at: tempDir.appendingPathComponent("Category/Deeper/TooDeep.app"),
+            bundleIdentifier: "com.test.too-deep"
+        )
+
+        let result = AppDiscovery(directories: [tempDir], limits: .default).discover()
+        let identifiers = Set(result.applications.map(\.bundleId))
+
+        XCTAssertTrue(identifiers.contains("com.test.direct"))
+        XCTAssertTrue(identifiers.contains("com.test.nested"))
+        XCTAssertFalse(identifiers.contains("com.test.too-deep"))
+    }
+
+    func testDiscoveryStopsAtConfiguredEntryLimit() throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("entry-limit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        for index in 0..<3 {
+            FileManager.default.createFile(
+                atPath: tempDir.appendingPathComponent("placeholder-\(index)").path,
+                contents: Data()
+            )
+        }
+
+        let result = AppDiscovery(
+            directories: [tempDir],
+            limits: AppDiscoveryLimits(maximumEntries: 2, maximumInfoPlistBytes: 1024)
+        ).discover()
+
+        XCTAssertTrue(result.errors.contains { $0.message.contains("2-entry scan limit") })
+    }
+
+    func testDiscoveryRejectsInfoPlistBeyondByteBudget() throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("plist-budget-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        let appDir = tempDir.appendingPathComponent("Large.app")
+        let contentsDir = appDir.appendingPathComponent("Contents")
+        let macosDir = contentsDir.appendingPathComponent("MacOS")
+        try FileManager.default.createDirectory(at: macosDir, withIntermediateDirectories: true)
+        try Data(repeating: 0, count: 1025).write(to: contentsDir.appendingPathComponent("Info.plist"))
+        FileManager.default.createFile(atPath: macosDir.appendingPathComponent("Large").path, contents: Data())
+
+        let result = AppDiscovery(
+            directories: [tempDir],
+            limits: AppDiscoveryLimits(maximumEntries: 10, maximumInfoPlistBytes: 1024)
+        ).discover()
+
+        XCTAssertTrue(result.applications.isEmpty)
+        XCTAssertTrue(result.errors.contains { $0.message.contains("discovery budget") })
+    }
+
+    func testDiscoveryRejectsInfoPlistFifoWithoutBlocking() throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("plist-fifo-\(UUID().uuidString)")
+        let appDir = tempDir.appendingPathComponent("Fifo.app")
+        let contentsDir = appDir.appendingPathComponent("Contents")
+        let macosDir = contentsDir.appendingPathComponent("MacOS")
+        try FileManager.default.createDirectory(at: macosDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let plistURL = contentsDir.appendingPathComponent("Info.plist")
+        let fifoResult = plistURL.path.withCString { Darwin.mkfifo($0, mode_t(0o600)) }
+        XCTAssertEqual(fifoResult, 0)
+        FileManager.default.createFile(
+            atPath: macosDir.appendingPathComponent("Fifo").path,
+            contents: Data()
+        )
+
+        let start = Date()
+        let result = AppDiscovery(directories: [tempDir], limits: .default).discover()
+
+        XCTAssertLessThan(Date().timeIntervalSince(start), 1.0)
+        XCTAssertTrue(result.applications.isEmpty)
+        XCTAssertTrue(result.errors.contains { $0.message.contains("not a regular file") })
+    }
+
+    func testDiscoveryBoundsSparseInfoPlistReadToRemainingBudget() throws {
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("plist-sparse-\(UUID().uuidString)")
+        let appDir = tempDir.appendingPathComponent("Sparse.app")
+        let contentsDir = appDir.appendingPathComponent("Contents")
+        let macosDir = contentsDir.appendingPathComponent("MacOS")
+        try FileManager.default.createDirectory(at: macosDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let plistURL = contentsDir.appendingPathComponent("Info.plist")
+        FileManager.default.createFile(atPath: plistURL.path, contents: Data())
+        let handle = try FileHandle(forWritingTo: plistURL)
+        try handle.truncate(atOffset: 512 * 1024 * 1024)
+        try handle.close()
+        FileManager.default.createFile(
+            atPath: macosDir.appendingPathComponent("Sparse").path,
+            contents: Data()
+        )
+
+        let result = AppDiscovery(
+            directories: [tempDir],
+            limits: AppDiscoveryLimits(maximumEntries: 10, maximumInfoPlistBytes: 1024)
+        ).discover()
+
+        XCTAssertTrue(result.applications.isEmpty)
+        XCTAssertTrue(result.errors.contains { $0.message.contains("discovery budget") })
+    }
+
     func testDiscoverySkipsBundleWithoutInfoPlist() throws {
         let tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("test-discovery-\(UUID().uuidString)")
@@ -230,6 +351,28 @@ final class EntitlementTests: XCTestCase {
         XCTAssertTrue(
             result.errors.contains { $0.message.contains("executable missing") },
             "Missing executable should produce a discovery diagnostic"
+        )
+    }
+
+    private func createFakeApplication(at appURL: URL, bundleIdentifier: String) throws {
+        let name = appURL.deletingPathExtension().lastPathComponent
+        let contentsURL = appURL.appendingPathComponent("Contents")
+        let macOSURL = contentsURL.appendingPathComponent("MacOS")
+        try FileManager.default.createDirectory(at: macOSURL, withIntermediateDirectories: true)
+        let plist: [String: Any] = [
+            "CFBundleIdentifier": bundleIdentifier,
+            "CFBundleName": name,
+            "CFBundleExecutable": name,
+        ]
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: plist,
+            format: .xml,
+            options: 0
+        )
+        try data.write(to: contentsURL.appendingPathComponent("Info.plist"))
+        FileManager.default.createFile(
+            atPath: macOSURL.appendingPathComponent(name).path,
+            contents: Data()
         )
     }
 

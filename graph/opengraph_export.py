@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-opengraph_export.py — Export Rootstock graph data as BloodHound OpenGraph JSON.
+opengraph_export.py - Export Rootstock graph data as BloodHound OpenGraph JSON.
 
 Queries Neo4j and produces a JSON file compatible with BloodHound CE v8+
 OpenGraph ingest format. Upload via: Administration > File Ingest > Upload.
@@ -133,6 +133,11 @@ NODE_TYPE_MAP: dict[str, dict] = {
         "icon": "fa-magnifying-glass-chart",
         "color": "#ff7b72",
     },
+    "Protection": {
+        "kind": "rs_Protection",
+        "icon": "fa-shield",
+        "color": "#3fb950",
+    },
     "Certificate": {
         "kind": "rs_CveCertificate",
         "icon": "fa-certificate",
@@ -161,6 +166,32 @@ NODE_TYPE_MAP: dict[str, dict] = {
         "icon": "fa-database",
         "color": "#f778ba",
     },
+}
+
+# Family open-export (rootstock-red / rootstock-blue) disambiguates labels that
+# are shared with cve-scan (Finding, Host) so the canvas legend stays honest.
+FAMILY_FINDING_TYPE: dict[str, dict] = {
+    "rootstock-red": {
+        "kind": "rs_RedFinding",
+        "icon": "fa-user-secret",
+        "color": "#e05260",
+    },
+    "rootstock-blue": {
+        "kind": "rs_BlueFinding",
+        "icon": "fa-shield-halved",
+        "color": "#58a6ff",
+    },
+}
+
+FAMILY_HOST_TYPE: dict = {
+    "kind": "rs_FamilyHost",
+    "icon": "fa-laptop",
+    "color": "#39c5cf",
+}
+
+FAMILY_HAS_FINDING_TYPE: dict[str, dict] = {
+    "rootstock-red": {"kind": "rs_RedHasFinding", "traversable": False},
+    "rootstock-blue": {"kind": "rs_BlueHasFinding", "traversable": False},
 }
 
 # ── Edge type mapping ───────────────────────────────────────────────────────
@@ -227,6 +258,8 @@ EDGE_TYPE_MAP: dict[str, dict] = {
     "HAS_CONTEXT": {"kind": "rs_CveHasContext", "traversable": False},
     "HAS_DATA_CONTEXT": {"kind": "rs_CveHasDataContext", "traversable": False},
     "HAS_FINDING": {"kind": "rs_CveHasFinding", "traversable": False},
+    "HAS_LAUNCH_ITEM": {"kind": "rs_HasLaunchItem", "traversable": False},
+    "HAS_PROTECTION": {"kind": "rs_HasProtection", "traversable": False},
     "HAS_IDENTITY_CONTEXT": {
         "kind": "rs_CveHasIdentityContext",
         "traversable": False,
@@ -238,6 +271,155 @@ EDGE_TYPE_MAP: dict[str, dict] = {
     "RUN": {"kind": "rs_CveRun", "traversable": True},
     "SERVES": {"kind": "rs_CveServes", "traversable": True},
 }
+
+
+def _truthy_family_export(props: dict | None) -> bool:
+    """Return True when props mark an optional family open-export artifact."""
+    if not props:
+        return False
+    value = props.get("family_export")
+    return value is True or value == "true" or value == 1
+
+
+def family_source(props: dict | None) -> str | None:
+    """Return rootstock-red / rootstock-blue when props carry family provenance."""
+    if not props:
+        return None
+    source = props.get("source")
+    if source in FAMILY_FINDING_TYPE:
+        return str(source)
+    return None
+
+
+def resolve_node_type_info(label: str, props: dict | None = None) -> dict | None:
+    """Map a Neo4j label (+ optional props) to OpenGraph/viewer kind metadata.
+
+    Family findings and hosts share labels with cve-scan. Disambiguate by
+    ``family_export`` + ``source`` so red/blue are not painted as CVE findings.
+    """
+    props = props or {}
+    if label == "Finding" and _truthy_family_export(props):
+        source = family_source(props)
+        if source is not None:
+            return FAMILY_FINDING_TYPE[source]
+    if label == "Host" and _truthy_family_export(props):
+        return FAMILY_HOST_TYPE
+    return NODE_TYPE_MAP.get(label)
+
+
+def resolve_edge_type_info(rel_type: str, props: dict | None = None) -> dict | None:
+    """Map a relationship type (+ optional props) to OpenGraph edge kind metadata."""
+    props = props or {}
+    if rel_type == "HAS_FINDING" and _truthy_family_export(props):
+        source = family_source(props)
+        if source is not None:
+            return FAMILY_HAS_FINDING_TYPE[source]
+    return EDGE_TYPE_MAP.get(rel_type)
+
+
+def map_node_for_opengraph(hostname: str, label: str, props: dict) -> dict | None:
+    """Build one OpenGraph/viewer node from a label and property dict (no Neo4j)."""
+    type_info = resolve_node_type_info(label, props)
+    if not type_info:
+        return None
+    key = _node_key(label, props)
+    return {
+        "id": make_node_id(hostname, label, key),
+        "kind": type_info["kind"],
+        "label": _node_display_name(label, props),
+        "properties": {
+            **_serialize_props(props),
+            "_icon": type_info["icon"],
+            "_color": type_info["color"],
+        },
+    }
+
+
+def map_edge_for_opengraph(
+    hostname: str,
+    *,
+    src_label: str,
+    src_props: dict,
+    tgt_label: str,
+    tgt_props: dict,
+    rel_type: str,
+    rel_props: dict | None = None,
+) -> dict | None:
+    """Build one OpenGraph/viewer edge from endpoint props and relationship type."""
+    rel_props = rel_props or {}
+    type_info = resolve_edge_type_info(rel_type, rel_props)
+    if not type_info:
+        return None
+    return {
+        "source": make_node_id(hostname, src_label, _node_key(src_label, src_props)),
+        "target": make_node_id(hostname, tgt_label, _node_key(tgt_label, tgt_props)),
+        "kind": type_info["kind"],
+        "properties": {
+            **_serialize_props(rel_props),
+            "_traversable": type_info["traversable"],
+        },
+    }
+
+
+def family_export_to_opengraph(export) -> dict:
+    """Convert a validated FamilyExport into an OpenGraph/viewer payload (no Neo4j).
+
+    Uses the same node/edge builders as Neo4j import so ``source`` and
+    ``family_export`` survive into canvas kinds.
+    """
+    from import_family_export import build_edge_records, build_node_records
+
+    node_groups = build_node_records(export)
+    id_to_record: dict[str, tuple[str, dict]] = {}
+    nodes: list[dict] = []
+    hostname = export.scope_name or export.source
+
+    for label, records in node_groups.items():
+        for record in records:
+            props = dict(record["props"])
+            node_id = str(record["id"])
+            id_to_record[node_id] = (label, props)
+            mapped = map_node_for_opengraph(hostname, label, props)
+            if mapped is not None:
+                nodes.append(mapped)
+
+    edges: list[dict] = []
+    for rel_type, records in build_edge_records(export).items():
+        for record in records:
+            src = id_to_record.get(record["source_id"])
+            tgt = id_to_record.get(record["target_id"])
+            if src is None or tgt is None:
+                continue
+            rel_props = {
+                "source": export.source,
+                "family_export": True,
+            }
+            mapped = map_edge_for_opengraph(
+                hostname,
+                src_label=src[0],
+                src_props=src[1],
+                tgt_label=tgt[0],
+                tgt_props=tgt[1],
+                rel_type=rel_type,
+                rel_props=rel_props,
+            )
+            if mapped is not None:
+                edges.append(mapped)
+
+    return {
+        "metadata": {
+            "source_kind": "RootstockFamily",
+            "family_source": export.source,
+            "scope_name": export.scope_name,
+            "hostname": hostname,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+        },
+        "graph": {
+            "nodes": nodes,
+            "edges": edges,
+        },
+    }
 
 
 # ── Node ID generation ──────────────────────────────────────────────────────
@@ -286,6 +468,17 @@ def _node_display_name(label: str, props: dict) -> str:
         return props.get("label", "Unknown XPC")
     if label == "Keychain_Item":
         return props.get("label", "Unknown Keychain Item")
+    if label == "Finding":
+        return str(
+            props.get("name")
+            or props.get("finding_id")
+            or props.get("id")
+            or "Finding"
+        )
+    if label == "Host":
+        return str(props.get("hostname") or props.get("name") or props.get("id") or "Host")
+    if label == "Protection":
+        return str(props.get("name") or props.get("id") or "Protection")
     return props.get("name", props.get("display_name", props.get("label", "Unknown")))
 
 
@@ -305,7 +498,11 @@ def _serialize_props(props: dict) -> dict:
 # ── Export functions ─────────────────────────────────────────────────────────
 
 
-def export_nodes(session, hostname: str) -> list[dict]:
+def export_nodes(
+    session,
+    hostname: str,
+    maximum_records: int | None = None,
+) -> list[dict]:
     """Export all graph nodes as OpenGraph node objects (single query)."""
     known_labels = list(NODE_TYPE_MAP.keys())
     result = session.run(
@@ -319,31 +516,22 @@ def export_nodes(session, hostname: str) -> list[dict]:
 
     nodes = []
     for record in result:
+        if maximum_records is not None and len(nodes) >= maximum_records:
+            break
         label = _primary_label(record["labels"])
-        type_info = NODE_TYPE_MAP.get(label)
-        if not type_info:
-            continue
-
         props = dict(record["n"])
-        key = _node_key(label, props)
-
-        nodes.append(
-            {
-                "id": make_node_id(hostname, label, key),
-                "kind": type_info["kind"],
-                "label": _node_display_name(label, props),
-                "properties": {
-                    **_serialize_props(props),
-                    "_icon": type_info["icon"],
-                    "_color": type_info["color"],
-                },
-            }
-        )
+        mapped = map_node_for_opengraph(hostname, label, props)
+        if mapped is not None:
+            nodes.append(mapped)
 
     return nodes
 
 
-def export_edges(session, hostname: str) -> list[dict]:
+def export_edges(
+    session,
+    hostname: str,
+    maximum_records: int | None = None,
+) -> list[dict]:
     """Export all graph edges as OpenGraph edge objects (single query)."""
     known_types = list(EDGE_TYPE_MAP.keys())
     result = session.run(
@@ -359,32 +547,25 @@ def export_edges(session, hostname: str) -> list[dict]:
 
     edges = []
     for record in result:
+        if maximum_records is not None and len(edges) >= maximum_records:
+            break
         rel_type = record["rel_type"]
-        type_info = EDGE_TYPE_MAP.get(rel_type)
-        if not type_info:
-            continue
-
         src_label = _primary_label(record["src_labels"])
         tgt_label = _primary_label(record["tgt_labels"])
         src_props = dict(record["src"])
         tgt_props = dict(record["tgt"])
         rel_props = dict(record["rel"])
-
-        edges.append(
-            {
-                "source": make_node_id(
-                    hostname, src_label, _node_key(src_label, src_props)
-                ),
-                "target": make_node_id(
-                    hostname, tgt_label, _node_key(tgt_label, tgt_props)
-                ),
-                "kind": type_info["kind"],
-                "properties": {
-                    **_serialize_props(rel_props),
-                    "_traversable": type_info["traversable"],
-                },
-            }
+        mapped = map_edge_for_opengraph(
+            hostname,
+            src_label=src_label,
+            src_props=src_props,
+            tgt_label=tgt_label,
+            tgt_props=tgt_props,
+            rel_type=rel_type,
+            rel_props=rel_props,
         )
+        if mapped is not None:
+            edges.append(mapped)
 
     return edges
 
@@ -453,10 +634,16 @@ def _cross_domain_identity_edge(rs_id: str, username: str) -> dict:
     }
 
 
-def build_opengraph(session, hostname: str) -> dict:
+def build_opengraph(
+    session,
+    hostname: str,
+    *,
+    maximum_nodes: int | None = None,
+    maximum_edges: int | None = None,
+) -> dict:
     """Build the complete OpenGraph JSON structure."""
-    nodes = export_nodes(session, hostname)
-    edges = export_edges(session, hostname)
+    nodes = export_nodes(session, hostname, maximum_nodes)
+    edges = export_edges(session, hostname, maximum_edges)
 
     return {
         "metadata": {

@@ -1,10 +1,11 @@
 """
-Tests for report.py formatting functions — no Neo4j required.
+Tests for report.py formatting functions - no Neo4j required.
 All tested functions take query result dicts and return Markdown strings.
 """
 
 import sys
 import json
+import builtins
 from types import SimpleNamespace
 
 import pytest
@@ -17,6 +18,7 @@ from report import (
     run_all_queries,
 )
 from report_assembly import assemble_report, markdown_to_html
+from report_html import markdown_to_html as render_report_html
 from report_formatters import (
     format_apple_event_table,
     format_electron_table,
@@ -32,6 +34,21 @@ from unittest.mock import ANY, MagicMock, patch
 
 
 checks = TestCase()
+
+
+def assert_failed_report(output, driver, *uninvoked_mocks):
+    checks.assertEqual(1, main())
+    driver.close.assert_called_once()
+    for mock in uninvoked_mocks:
+        mock.assert_not_called()
+    checks.assertFalse(output.exists())
+
+
+def report_cli_setup(tmp_path, monkeypatch):
+    output = tmp_path / "report.md"
+    fake_driver = MagicMock()
+    monkeypatch.setattr("sys.argv", ["report.py", "--output", str(output)])
+    return output, fake_driver
 
 
 def assert_report_line_contains(lines, label, value):
@@ -69,15 +86,21 @@ def injectable_fda_query_results():
 
 
 def assert_injectable_report_order(report):
-    critical_heading = "## Critical Findings: Injectable Apps with Privileged TCC Grants"
+    critical_heading = (
+        "## Critical Findings: Injectable Apps with Privileged TCC Grants"
+    )
     electron_heading = "## High Findings: Electron TCC Inheritance"
 
-    checks.assertLess(report.index("## Executive Summary"), report.index(critical_heading))
+    checks.assertLess(
+        report.index("## Executive Summary"), report.index(critical_heading)
+    )
     checks.assertLess(report.index(critical_heading), report.index(electron_heading))
 
 
 def injectable_report_sections(report):
-    critical_heading = "## Critical Findings: Injectable Apps with Privileged TCC Grants"
+    critical_heading = (
+        "## Critical Findings: Injectable Apps with Privileged TCC Grants"
+    )
     electron_heading = "## High Findings: Electron TCC Inheritance"
     apple_event_heading = "## High Findings: Apple Event TCC Cascade"
 
@@ -101,6 +124,36 @@ class TestHtmlReportEscaping:
 
         checks.assertNotIn("<script>", html)
         checks.assertTrue("&lt;script&gt;" in html or "&amp;lt;script&amp;gt;" in html)
+
+    def test_html_report_uses_landmarks_language_and_accessible_tables(self):
+        html = render_report_html(
+            "# Report\n\n> Risk: review this finding.\n\n"
+            "| Name | Value |\n| --- | --- |\n| `item` | [details](https://example.test) |\n\n"
+            "```text\ncommand\n```"
+        )
+
+        checks.assertIn('<html lang="en">', html)
+        checks.assertIn('<main id="report-content">', html)
+        checks.assertIn("<blockquote>", html)
+        checks.assertIn(
+            '<div class="table-scroll" role="region" aria-label="Scrollable report data table" '
+            'tabindex="0"><figure><figcaption>Report data table</figcaption>',
+            html,
+        )
+        checks.assertIn("<pre><code", html)
+        checks.assertIn('href="https://example.test"', html)
+
+    def test_html_report_fails_clearly_without_the_required_markdown_dependency(self):
+        original_import = builtins.__import__
+
+        def unavailable_markdown(name, *args, **kwargs):
+            if name == "markdown":
+                raise ImportError("fixture dependency unavailable")
+            return original_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=unavailable_markdown):
+            with pytest.raises(RuntimeError, match=r"requires Markdown>=3\.8\.1,<4"):
+                render_report_html("# Report")
 
 
 class TestReportAssembly:
@@ -452,9 +505,7 @@ class TestReportQueries:
 
 class TestReportCli:
     def test_main_uses_shared_connection_helper(self, tmp_path, monkeypatch):
-        output = tmp_path / "report.md"
-        fake_driver = MagicMock()
-        monkeypatch.setattr("sys.argv", ["report.py", "--output", str(output)])
+        output, fake_driver = report_cli_setup(tmp_path, monkeypatch)
 
         with (
             patch("report.connect_from_args", return_value=fake_driver) as connect_mock,
@@ -484,20 +535,12 @@ class TestReportCli:
             patch("report.run_all_queries") as run_queries_mock,
             patch("report.assemble_report") as assemble_mock,
         ):
-            exit_code = main()
-
-        checks.assertEqual(exit_code, 1)
-        fake_driver.close.assert_called_once()
-        run_queries_mock.assert_not_called()
-        assemble_mock.assert_not_called()
-        checks.assertFalse(output.exists())
+            assert_failed_report(output, fake_driver, run_queries_mock, assemble_mock)
 
     def test_main_fails_when_neo4j_metadata_query_reports_uncertainty(
         self, tmp_path, monkeypatch
     ):
-        output = tmp_path / "report.md"
-        fake_driver = MagicMock()
-        monkeypatch.setattr("sys.argv", ["report.py", "--output", str(output)])
+        output, fake_driver = report_cli_setup(tmp_path, monkeypatch)
 
         with (
             patch("report.connect_from_args", return_value=fake_driver),
@@ -508,13 +551,7 @@ class TestReportCli:
             patch("report.run_all_queries") as run_queries_mock,
             patch("report.assemble_report") as assemble_mock,
         ):
-            exit_code = main()
-
-        checks.assertEqual(exit_code, 1)
-        fake_driver.close.assert_called_once()
-        run_queries_mock.assert_not_called()
-        assemble_mock.assert_not_called()
-        checks.assertFalse(output.exists())
+            assert_failed_report(output, fake_driver, run_queries_mock, assemble_mock)
 
     def test_main_fails_when_any_query_fails(self, tmp_path, monkeypatch):
         output = tmp_path / "report.md"
@@ -532,9 +569,4 @@ class TestReportCli:
             ),
             patch("report.assemble_report") as assemble_mock,
         ):
-            exit_code = main()
-
-        checks.assertEqual(exit_code, 1)
-        fake_driver.close.assert_called_once()
-        assemble_mock.assert_not_called()
-        checks.assertFalse(output.exists())
+            assert_failed_report(output, fake_driver, assemble_mock)

@@ -1,4 +1,4 @@
-"""report_assembly.py — Report assembly, recommendations, and HTML conversion."""
+"""report_assembly.py - Report assembly, recommendations, and HTML conversion."""
 
 from __future__ import annotations
 
@@ -17,7 +17,16 @@ from report_sections import (
     _append_vulnerability_mapping,
     _collect_active_categories,
 )
-from report_diagrams import mermaid_attack_paths_block, mermaid_tcc_pie
+from report_diagrams import (
+    format_family_findings_section,
+    format_multi_plane_campaign_section,
+    format_multi_plane_severity_board,
+    format_purple_engagement_matrix,
+    format_kill_chain_stage_timeline,
+    format_fleet_campaign_dashboard,
+    mermaid_attack_paths_block,
+    mermaid_tcc_pie,
+)
 from report_formatters import (
     escape_report_value,
     format_generic_table,
@@ -35,6 +44,8 @@ __all__ = ["assemble_report", "markdown_to_html"]
 
 @dataclass
 class ReportRows:
+    """Normalized query subsets shared by report sections and recommendations."""
+
     injectable: list[dict]
     path: list[dict]
     electron: list[dict]
@@ -141,9 +152,9 @@ def _count_scan_metadata_rows(metadata: dict) -> list[list[str]]:
             "Entitlements Extracted",
             _metadata_count(metadata, "entitlement_count", "unknown"),
         ],
-        ["Bluetooth Devices", _metadata_count(metadata, "bluetooth_device_count", "—")],
-        ["File ACLs Audited", _metadata_count(metadata, "file_acl_count", "—")],
-        ["Login Sessions", _metadata_count(metadata, "login_session_count", "—")],
+        ["Bluetooth Devices", _metadata_count(metadata, "bluetooth_device_count", " - ")],
+        ["File ACLs Audited", _metadata_count(metadata, "file_acl_count", " - ")],
+        ["Login Sessions", _metadata_count(metadata, "login_session_count", " - ")],
     ]
 
 
@@ -198,7 +209,7 @@ def _append_vulnerability_intelligence(sections: list[str]) -> None:
     except Exception as exc:
         sections.append("### Vulnerability Intelligence")
         sections.append(
-            "> **Warning:** CVE enrichment unavailable; vulnerability "
+            "> Warning: CVE enrichment unavailable; vulnerability "
             f"intelligence summary omitted. Detail: {escape_report_value(exc)}"
         )
         sections.append("")
@@ -279,8 +290,8 @@ def _append_critical_finding_section(
 ) -> None:
     sections.append("## Critical Findings: Injectable Apps with Privileged TCC Grants")
     sections.append(
-        "> **Risk:** An attacker who controls a dylib can inject it into these apps "
-        "and inherit their Full Disk Access grant — enabling read/write of TCC.db, "
+        "> Risk: An attacker who controls a dylib can inject it into these apps "
+        "and inherit their Full Disk Access grant - enabling read/write of TCC.db, "
         "Mail, SSH keys, and all user files without prompting the user."
     )
     sections.append("")
@@ -315,7 +326,7 @@ def _append_high_finding_sections(
 ) -> None:
     sections.append("## High Findings: Electron TCC Inheritance")
     sections.append(
-        "> **Risk:** Electron apps can be abused via the `ELECTRON_RUN_AS_NODE` environment "
+        "> Risk: Electron apps can be abused via the `ELECTRON_RUN_AS_NODE` environment "
         "variable to spawn a Node.js interpreter that inherits the parent process's TCC "
         "permissions. An attacker with local code execution can exploit this silently."
     )
@@ -325,7 +336,7 @@ def _append_high_finding_sections(
 
     sections.append("## High Findings: Apple Event TCC Cascade")
     sections.append(
-        "> **Risk:** An app with Apple Event automation permission over a privileged app "
+        "> Risk: An app with Apple Event automation permission over a privileged app "
         "can invoke that app's capabilities transitively, gaining effective access to the "
         "target's TCC grants without holding those grants directly."
     )
@@ -376,7 +387,7 @@ def _append_raw_query_appendix(
         if result is None:
             sections.append("_Not executed._")
         elif isinstance(result, str):
-            sections.append(f"> **Error:** {result}")
+            sections.append(f"> Error: {result}")
         elif not result:
             sections.append("_No results._")
         else:
@@ -385,6 +396,7 @@ def _append_raw_query_appendix(
 
 
 def _collect_report_rows(query_results: dict[str, list[dict] | str]) -> ReportRows:
+    """Collect known query results while treating missing or failed queries as empty."""
     return ReportRows(
         injectable=_get_query_rows(query_results, "01-injectable-fda-apps.cypher"),
         path=_get_query_rows(query_results, "02-shortest-path-to-fda.cypher"),
@@ -416,6 +428,7 @@ def _append_report_body(
     queries: list[dict],
     rows: ReportRows,
 ) -> None:
+    """Append sections in the stable public report order from normalized rows."""
     _append_vulnerability_intelligence(sections)
     _append_core_finding_sections(
         sections,
@@ -478,5 +491,62 @@ def assemble_report(
         sum(len(group) for group in rows.certificate),
     )
     _append_report_body(sections, query_results, queries, rows)
+
+    # Optional family open-export findings (red/blue multi-plane narrative)
+    family_findings = metadata.get("family_findings") or []
+    family_source = metadata.get("family_source")
+    if family_findings:
+        sections.append(
+            format_family_findings_section(
+                family_findings,
+                source=family_source,
+            )
+        )
+
+    campaign_planes = metadata.get("multi_plane_campaign") or []
+    campaign_name = metadata.get("multi_plane_campaign_name") or "Multi-plane campaign"
+    if campaign_planes:
+        sections.append(
+            format_multi_plane_campaign_section(
+                campaign_planes,
+                campaign=campaign_name,
+            )
+        )
+
+    severity_board = metadata.get("multi_plane_severity_board") or []
+    if severity_board:
+        sections.append(
+            format_multi_plane_severity_board(
+                severity_board,
+                title=metadata.get("multi_plane_severity_title") or "Multi-plane severity board",
+            )
+        )
+
+    purple_pairs = metadata.get("purple_engagement_pairs") or []
+    if purple_pairs:
+        sections.append(
+            format_purple_engagement_matrix(
+                purple_pairs,
+                title=metadata.get("purple_engagement_title") or "Purple engagement matrix",
+            )
+        )
+
+    kill_chain_stages = metadata.get("kill_chain_stages") or []
+    if kill_chain_stages:
+        sections.append(
+            format_kill_chain_stage_timeline(
+                kill_chain_stages,
+                title=metadata.get("kill_chain_title") or "Kill-chain stage timeline",
+            )
+        )
+
+    fleet_campaigns = metadata.get("fleet_campaigns") or []
+    if fleet_campaigns:
+        sections.append(
+            format_fleet_campaign_dashboard(
+                fleet_campaigns,
+                title=metadata.get("fleet_campaign_title") or "Fleet multi-plane campaign dashboard",
+            )
+        )
 
     return "\n".join(sections)

@@ -2,10 +2,18 @@
 
 import {linkKey, nodeRadius, safeNodeColor} from "./model";
 import type {Controller} from "./runtime";
-import type {ViewerNode} from "./types";
+import type {GraphEdge, ViewerNode} from "./types";
 
 type Point = {x: number; y: number};
 type NodeShape = "circle" | "diamond" | "square" | "triangle" | "hexagon";
+type EdgeDrawInput = {
+  controller: Controller;
+  edge: GraphEdge;
+  context: CanvasRenderingContext2D;
+  worldPosition: CanvasHandlers["worldPosition"];
+  labelColor: string;
+};
+type VisibleEdgeDrawInput = Pick<EdgeDrawInput, "controller" | "worldPosition">;
 
 const NODE_SHAPE_RULES: ReadonlyArray<{pattern: RegExp; shape: Exclude<NodeShape, "circle">}> = [
   {pattern: /Vulnerability|AttackTechnique|ThreatGroup|CWE/, shape: "diamond"},
@@ -79,7 +87,7 @@ export function drawFrame(controller: Controller, worldPosition: CanvasHandlers[
   context.clearRect(0, 0, state.viewport.width, state.viewport.height);
   context.translate(state.viewport.transform.x, state.viewport.transform.y);
   context.scale(state.viewport.transform.k, state.viewport.transform.k);
-  drawEdges(controller, worldPosition);
+  drawEdges({controller, worldPosition});
   drawNodes(controller, worldPosition);
   context.restore();
 }
@@ -88,31 +96,38 @@ export function canvasLabelColor(variable: "--muted" | "--subtle" | "--text", fa
   return getComputedStyle(document.documentElement).getPropertyValue(variable) || fallback;
 }
 
-export function drawEdges(controller: Controller, worldPosition: CanvasHandlers["worldPosition"]): void {
+export function drawEdges(input: VisibleEdgeDrawInput): void {
+  const {controller, worldPosition} = input;
   const {state, dom: {context}} = controller;
   const labelColor = canvasLabelColor("--muted", "#aeb8c4");
   state.graph.links.forEach((edge, index) => {
     if (!state.render.visibleLinkIndexes.has(index)) return;
-    const source = state.graph.nodeById.get(edge.source);
-    const target = state.graph.nodeById.get(edge.target);
-    if (!source || !target) return;
-    const sourcePosition = worldPosition(controller, source);
-    const targetPosition = worldPosition(controller, target);
-    const onPath = state.selection.path.result?.linkKeys.has(linkKey(edge)) === true;
-    const sourceRadius = nodeRadius(state.graph, source.id);
-    const targetRadius = nodeRadius(state.graph, target.id);
-    const segment = edgeSegment(sourcePosition, targetPosition, sourceRadius, targetRadius);
-    context.beginPath();
-    context.moveTo(segment.source.x, segment.source.y);
-    context.lineTo(segment.target.x, segment.target.y);
-    context.strokeStyle = onPath ? "#6aafff" : edge.properties?._traversable === true ? "#8ea6bf" : "#59697a";
-    context.globalAlpha = onPath ? 1 : 0.68;
-    context.lineWidth = onPath ? 2.4 : 1.35;
-    context.stroke();
-    drawArrowhead(context, segment.source, segment.target, onPath ? "#6aafff" : "#8ea6bf");
-    drawEdgeLabel(context, edge.kind, sourcePosition, targetPosition, state.selection.showLabels, labelColor);
+    drawEdge({controller, edge, context, worldPosition, labelColor});
   });
   context.globalAlpha = 1;
+}
+
+function drawEdge({controller, edge, context, worldPosition, labelColor}: EdgeDrawInput): void {
+  const source = controller.state.graph.nodeById.get(edge.source);
+  const target = controller.state.graph.nodeById.get(edge.target);
+  if (!source || !target) return;
+  const sourcePosition = worldPosition(controller, source);
+  const targetPosition = worldPosition(controller, target);
+  const onPath = controller.state.selection.path.result?.linkKeys.has(linkKey(edge)) === true;
+  const segment = edgeSegment(sourcePosition, targetPosition, nodeRadius(controller.state.graph, source.id), nodeRadius(controller.state.graph, target.id));
+  drawEdgeStroke(context, segment, onPath, edge.properties?._traversable === true);
+  drawArrowhead(context, segment.source, segment.target, onPath ? "#6aafff" : "#8ea6bf");
+  drawEdgeLabel({context, kind: edge.kind, source: sourcePosition, target: targetPosition, showLabels: controller.state.selection.showLabels, labelColor});
+}
+
+function drawEdgeStroke(context: CanvasRenderingContext2D, segment: {source: Point; target: Point}, onPath: boolean, traversable: boolean): void {
+  context.beginPath();
+  context.moveTo(segment.source.x, segment.source.y);
+  context.lineTo(segment.target.x, segment.target.y);
+  context.strokeStyle = onPath ? "#6aafff" : traversable ? "#8ea6bf" : "#59697a";
+  context.globalAlpha = onPath ? 1 : 0.68;
+  context.lineWidth = onPath ? 2.4 : 1.35;
+  context.stroke();
 }
 
 export function edgeSegment(source: Point, target: Point, sourceRadius: number, targetRadius: number): {source: Point; target: Point} {
@@ -138,14 +153,16 @@ export function drawArrowhead(context: CanvasRenderingContext2D, source: Point, 
   context.fill();
 }
 
-export function drawEdgeLabel(
-  context: CanvasRenderingContext2D,
-  kind: string,
-  source: Point,
-  target: Point,
-  showLabels: boolean,
-  labelColor: string,
-): void {
+type EdgeLabelInput = {
+  context: CanvasRenderingContext2D;
+  kind: string;
+  source: Point;
+  target: Point;
+  showLabels: boolean;
+  labelColor: string;
+};
+
+export function drawEdgeLabel({context, kind, source, target, showLabels, labelColor}: EdgeLabelInput): void {
   if (!showLabels || !kind) return;
   context.globalAlpha = 0.8;
   context.fillStyle = labelColor;
@@ -246,7 +263,7 @@ export function bindWheel(controller: Controller, handlers: CanvasHandlers): voi
     const screen = {x: event.clientX - rect.left, y: event.clientY - rect.top};
     const before = canvasPoint(controller, event);
     const transform = controller.state.viewport.transform;
-    const nextK = Math.max(0.08, Math.min(4, transform.k * Math.exp(-event.deltaY * 0.0015)));
+    const nextK = Math.max(0.08, Math.min(4, transform.k * Math.exp((-event.deltaY * 15) / 10_000)));
     transform.x = screen.x - before.x * nextK;
     transform.y = screen.y - before.y * nextK;
     transform.k = nextK;

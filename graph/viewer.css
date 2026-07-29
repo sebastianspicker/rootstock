@@ -599,7 +599,6 @@ kbd {
 #node-list-section .section-heading { padding-inline: 18px; }
 #node-list-empty { padding: 18px 16px; }
 .node-list-button {
-  width: 100%;
   min-height: 44px;
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto;

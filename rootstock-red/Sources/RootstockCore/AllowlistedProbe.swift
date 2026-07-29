@@ -42,6 +42,12 @@ public struct AllowlistedProbeResult: Sendable, Equatable {
 /// Unlike `ProcessRunner` (lab/agent only), this may run in assess - but only for the
 /// exact (executable, arguments) pairs listed below. No arbitrary shell, no PATH lookup.
 public enum AllowlistedProbe: Sendable {
+    private struct ProcessSetup {
+        let process: Process
+        let out: Pipe
+        let err: Pipe
+    }
+
     public enum Command: String, Sendable, CaseIterable {
         case csrutilStatus
         case spctlStatus
@@ -74,71 +80,46 @@ public enum AllowlistedProbe: Sendable {
     ) -> AllowlistedProbeResult {
         let executable = command.executable
         let arguments = command.arguments
-
         guard FileManager.default.isExecutableFile(atPath: executable) else {
-            return AllowlistedProbeResult(
-                executable: executable,
-                arguments: arguments,
-                errorDescription: "executable missing or not executable"
-            )
+            return failure(executable, arguments, "executable missing or not executable")
         }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-        process.standardInput = FileHandle.nullDevice
-
-        do {
-            try process.run()
-        } catch {
-            return AllowlistedProbeResult(
-                executable: executable,
-                arguments: arguments,
-                errorDescription: "failed to launch: \(error.localizedDescription)"
-            )
+        let setup = configuredProcess(executable, arguments)
+        if let errorDescription = launch(setup.process) {
+            return failure(executable, arguments, errorDescription)
         }
-
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-
-        if process.isRunning {
-            process.terminate()
-            // Brief grace, then hard kill if needed.
-            let killDeadline = Date().addingTimeInterval(0.5)
-            while process.isRunning, Date() < killDeadline {
-                Thread.sleep(forTimeInterval: 0.05)
-            }
-            if process.isRunning {
-                process.interrupt()
-            }
-            _ = try? outPipe.fileHandleForReading.readToEnd()
-            _ = try? errPipe.fileHandleForReading.readToEnd()
-            return AllowlistedProbeResult(
-                executable: executable,
-                arguments: arguments,
-                timedOut: true,
-                errorDescription: "timed out after \(timeoutSeconds)s"
-            )
-        }
-
-        let stdoutData = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = errPipe.fileHandleForReading.readDataToEndOfFile()
-        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
-        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
-
-        return AllowlistedProbeResult(
-            executable: executable,
-            arguments: arguments,
-            exitCode: process.terminationStatus,
-            stdout: stdout,
-            stderr: stderr
-        )
+        return result(for: setup, executable: executable, arguments: arguments, timeoutSeconds: timeoutSeconds)
     }
+
+    private static func configuredProcess(_ executable: String, _ arguments: [String]) -> ProcessSetup {
+        let process = Process(); let out = Pipe(); let err = Pipe()
+        process.executableURL = URL(fileURLWithPath: executable); process.arguments = arguments
+        process.standardOutput = out; process.standardError = err; process.standardInput = FileHandle.nullDevice
+        return ProcessSetup(process: process, out: out, err: err)
+    }
+
+    private static func launch(_ process: Process) -> String? {
+        do { try process.run(); return nil }
+        catch { return "failed to launch: \(error.localizedDescription)" }
+    }
+
+    private static func result(for setup: ProcessSetup, executable: String, arguments: [String], timeoutSeconds: TimeInterval) -> AllowlistedProbeResult {
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        while setup.process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+        if setup.process.isRunning { return timeout(setup, executable, arguments, timeoutSeconds) }
+        return completed(setup, executable, arguments)
+    }
+
+    private static func timeout(_ setup: ProcessSetup, _ executable: String, _ arguments: [String], _ seconds: TimeInterval) -> AllowlistedProbeResult {
+        setup.process.terminate(); Thread.sleep(forTimeInterval: 0.05); if setup.process.isRunning { setup.process.interrupt() }
+        _ = try? setup.out.fileHandleForReading.readToEnd(); _ = try? setup.err.fileHandleForReading.readToEnd()
+        return AllowlistedProbeResult(executable: executable, arguments: arguments, timedOut: true, errorDescription: "timed out after \(seconds)s")
+    }
+
+    private static func completed(_ setup: ProcessSetup, _ executable: String, _ arguments: [String]) -> AllowlistedProbeResult {
+        let stdout = String(data: setup.out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let stderr = String(data: setup.err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        return AllowlistedProbeResult(executable: executable, arguments: arguments, exitCode: setup.process.terminationStatus, stdout: stdout, stderr: stderr)
+    }
+
+    private static func failure(_ executable: String, _ arguments: [String], _ message: String) -> AllowlistedProbeResult { AllowlistedProbeResult(executable: executable, arguments: arguments, errorDescription: message) }
 }

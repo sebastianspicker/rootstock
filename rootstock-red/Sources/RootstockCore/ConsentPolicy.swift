@@ -40,14 +40,11 @@ public struct ConsentTokens: Codable, Sendable, Equatable {
     }
 
     public func satisfies(_ policy: ConsentPolicy) -> Bool {
-        if policy.requiresAuthorizedFlag && !iAmAuthorized { return false }
-        if policy.requiresScope && (scope == nil || scope?.isEmpty == true) { return false }
-        if policy.requiresOperator && (operatorName == nil || operatorName?.isEmpty == true) {
-            return false
-        }
-        if let token = policy.requiresConfirmToken {
-            if confirm != token { return false }
-        }
-        return true
+        let authorizationSatisfied = !policy.requiresAuthorizedFlag || iAmAuthorized
+        let scopeSatisfied = !policy.requiresScope || !(scope?.isEmpty ?? true)
+        let operatorSatisfied = !policy.requiresOperator || !(operatorName?.isEmpty ?? true)
+        let confirmationSatisfied = policy.requiresConfirmToken.map { confirm == $0 } ?? true
+        return [authorizationSatisfied, scopeSatisfied, operatorSatisfied, confirmationSatisfied]
+            .allSatisfy { $0 }
     }
 }

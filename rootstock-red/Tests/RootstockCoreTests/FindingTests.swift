@@ -3,18 +3,7 @@ import XCTest
 
 final class FindingTests: XCTestCase {
     func testFindingCodableRoundTrip() throws {
-        let finding = Finding(
-            id: "rootstock.check.host.identity",
-            title: "Host identity",
-            severity: .info,
-            confidence: .high,
-            category: .host,
-            evidence: [Evidence(type: "host", detail: "ok")],
-            attackTechniques: ["T1082"],
-            remediation: ["n/a"],
-            dryRunSafe: true,
-            opsecScore: 5
-        )
+        let finding = Finding(id: "rootstock.check.host.identity", title: "Host identity", severity: .info, category: .host, resolution: .init(evidence: [Evidence(type: "host", detail: "ok")], attackTechniques: ["T1082"], remediation: ["n/a"]), runtime: .init(confidence: .high, dryRunSafe: true, opsecScore: 5))
         let data = try JSONEncoder().encode(finding)
         let decoded = try JSONDecoder().decode(Finding.self, from: data)
         XCTAssertEqual(decoded, finding)
@@ -66,16 +55,18 @@ final class FindingTests: XCTestCase {
 
         let audit = AuditLog(fileURL: auditURL)
         let record = AuditRecord(
-            mode: .assess,
-            profile: .standard,
-            operatorName: "test-operator",
-            scope: "ENG-TEST",
-            hostUUID: "host-uuid-1",
-            argvSummary: "rootstock-red audit --profile standard",
-            findingCount: 3,
-            collectorIds: ["collect.host"],
-            checkIds: ["rootstock.check.host.identity"],
-            allowNetwork: false
+            run: .init(mode: .assess, profile: .standard, allowNetwork: false),
+            subject: .init(
+                operatorName: "test-operator",
+                scope: "ENG-TEST",
+                hostUUID: "host-uuid-1",
+                argvSummary: "rootstock-red audit --profile standard"
+            ),
+            outcome: .init(
+                findingCount: 3,
+                collectorIds: ["collect.host"],
+                checkIds: ["rootstock.check.host.identity"]
+            )
         )
         try await audit.append(record)
         try await audit.append(record)

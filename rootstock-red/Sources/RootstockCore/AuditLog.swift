@@ -2,6 +2,48 @@ import Foundation
 
 /// Single audit log record (JSONL).
 public struct AuditRecord: Codable, Sendable, Equatable {
+    public struct Run: Sendable {
+        public var timestamp: Date = Date()
+        public var mode: RunMode
+        public var profile: ScanProfile
+        public var allowNetwork: Bool
+        public var schemaVersion: String = RootstockCore.schemaVersion
+
+        public init(mode: RunMode, profile: ScanProfile, allowNetwork: Bool, timestamp: Date = Date(), schemaVersion: String = RootstockCore.schemaVersion) {
+            self.timestamp = timestamp
+            self.mode = mode
+            self.profile = profile
+            self.allowNetwork = allowNetwork
+            self.schemaVersion = schemaVersion
+        }
+    }
+
+    public struct Subject: Sendable {
+        public var operatorName: String?
+        public var scope: String?
+        public var hostUUID: String
+        public var argvSummary: String
+
+        public init(operatorName: String?, scope: String?, hostUUID: String, argvSummary: String) {
+            self.operatorName = operatorName
+            self.scope = scope
+            self.hostUUID = hostUUID
+            self.argvSummary = argvSummary
+        }
+    }
+
+    public struct Outcome: Sendable {
+        public var findingCount: Int
+        public var collectorIds: [String]
+        public var checkIds: [String]
+
+        public init(findingCount: Int, collectorIds: [String], checkIds: [String]) {
+            self.findingCount = findingCount
+            self.collectorIds = collectorIds
+            self.checkIds = checkIds
+        }
+    }
+
     public var timestamp: Date
     public var mode: RunMode
     public var profile: ScanProfile
@@ -15,32 +57,19 @@ public struct AuditRecord: Codable, Sendable, Equatable {
     public var allowNetwork: Bool
     public var schemaVersion: String
 
-    public init(
-        timestamp: Date = Date(),
-        mode: RunMode,
-        profile: ScanProfile,
-        operatorName: String?,
-        scope: String?,
-        hostUUID: String,
-        argvSummary: String,
-        findingCount: Int,
-        collectorIds: [String],
-        checkIds: [String],
-        allowNetwork: Bool,
-        schemaVersion: String = RootstockCore.schemaVersion
-    ) {
-        self.timestamp = timestamp
-        self.mode = mode
-        self.profile = profile
-        self.operatorName = operatorName
-        self.scope = scope
-        self.hostUUID = hostUUID
-        self.argvSummary = argvSummary
-        self.findingCount = findingCount
-        self.collectorIds = collectorIds
-        self.checkIds = checkIds
-        self.allowNetwork = allowNetwork
-        self.schemaVersion = schemaVersion
+    public init(run: Run, subject: Subject, outcome: Outcome) {
+        self.timestamp = run.timestamp
+        self.mode = run.mode
+        self.profile = run.profile
+        self.operatorName = subject.operatorName
+        self.scope = subject.scope
+        self.hostUUID = subject.hostUUID
+        self.argvSummary = subject.argvSummary
+        self.findingCount = outcome.findingCount
+        self.collectorIds = outcome.collectorIds
+        self.checkIds = outcome.checkIds
+        self.allowNetwork = run.allowNetwork
+        self.schemaVersion = run.schemaVersion
     }
 }
 

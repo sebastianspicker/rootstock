@@ -34,76 +34,21 @@ public actor ArtifactLedger {
     /// Only records paths that were inventoried (and, where applicable, present/exists).
     /// Does not create or mutate host files.
     public func recordStatePaths(_ state: CollectedState) {
-        for entry in state.launchAgents {
-            record(path: entry.path, action: "observe.launchAgent")
-        }
-        for entry in state.systemLaunchAgents {
-            record(path: entry.path, action: "observe.systemLaunchAgent")
-        }
-        for entry in state.launchDaemons {
-            record(path: entry.path, action: "observe.launchDaemon")
-        }
-        for meta in state.browserMeta where meta.exists {
-            record(path: meta.path, action: "observe.browserMeta")
-        }
-        for cred in state.credPaths where cred.exists {
-            record(path: cred.path, action: "observe.credPath")
-        }
-        for product in state.securityProducts where product.present {
-            record(path: product.path, action: "observe.securityProduct")
-        }
-        for loobin in state.loobins where loobin.present {
-            record(path: loobin.path, action: "observe.loobin")
-        }
-        for sample in state.codesignSamples {
-            record(path: sample.path, action: "observe.codesign")
-        }
-        for hit in state.injectabilityHits {
-            record(path: hit.path, action: "observe.injectability")
-        }
-        for hit in state.dylibRiskHits {
-            record(path: hit.path, action: "observe.dylibRisk")
-        }
-        for path in state.privilegedHelperTools {
-            record(path: path, action: "observe.privilegedHelper")
-        }
-        for path in state.systemExtensionPaths {
-            record(path: path, action: "observe.systemExtension")
-        }
-        for path in state.loginItemPaths {
-            record(path: path, action: "observe.loginItem")
-        }
-        if let loginItems = state.loginItems {
-            if let path = loginItems.btmDirectoryPath {
-                record(path: path, action: "observe.btm")
-            }
-            if let path = loginItems.backgroundItemsBtmPath {
-                record(path: path, action: "observe.btm")
-            }
-            for path in loginItems.loginItemPaths {
-                record(path: path, action: "observe.loginItem")
-            }
-        }
-
-        // TCC-related paths: well-known DBs when TCC state was collected, plus path= notes.
-        if let tcc = state.tcc {
-            let home = FileManager.default.homeDirectoryForCurrentUser.path
-            record(
-                path: (home as NSString).appendingPathComponent(
-                    "Library/Application Support/com.apple.TCC/TCC.db"
-                ),
-                action: "observe.tcc"
-            )
-            record(
-                path: "/Library/Application Support/com.apple.TCC/TCC.db",
-                action: "observe.tcc"
-            )
-            for note in tcc.notes {
-                if let path = Self.pathFromNote(note) {
-                    record(path: path, action: "observe.tccNote")
-                }
-            }
-        }
+        record(paths: state.launchAgents.map(\.path), action: "observe.launchAgent")
+        record(paths: state.systemLaunchAgents.map(\.path), action: "observe.systemLaunchAgent")
+        record(paths: state.launchDaemons.map(\.path), action: "observe.launchDaemon")
+        record(paths: state.browserMeta.filter(\.exists).map(\.path), action: "observe.browserMeta")
+        record(paths: state.credPaths.filter(\.exists).map(\.path), action: "observe.credPath")
+        record(paths: state.securityProducts.filter(\.present).map(\.path), action: "observe.securityProduct")
+        record(paths: state.loobins.filter(\.present).map(\.path), action: "observe.loobin")
+        record(paths: state.codesignSamples.map(\.path), action: "observe.codesign")
+        record(paths: state.injectabilityHits.map(\.path), action: "observe.injectability")
+        record(paths: state.dylibRiskHits.map(\.path), action: "observe.dylibRisk")
+        record(paths: state.privilegedHelperTools, action: "observe.privilegedHelper")
+        record(paths: state.systemExtensionPaths, action: "observe.systemExtension")
+        record(paths: state.loginItemPaths, action: "observe.loginItem")
+        recordLoginItems(state.loginItems)
+        recordTCCPaths(state.tcc)
     }
 
     public func exportJSON() throws -> Data {
@@ -118,6 +63,29 @@ public actor ArtifactLedger {
     }
 
     // MARK: - Helpers
+
+    private func record(paths: [String], action: String) {
+        for path in paths {
+            record(path: path, action: action)
+        }
+    }
+
+    private func recordLoginItems(_ loginItems: LoginItemsState?) {
+        guard let loginItems else { return }
+        let btmPaths = [loginItems.btmDirectoryPath, loginItems.backgroundItemsBtmPath].compactMap { $0 }
+        record(paths: btmPaths, action: "observe.btm")
+        record(paths: loginItems.loginItemPaths, action: "observe.loginItem")
+    }
+
+    private func recordTCCPaths(_ tcc: TCCState?) {
+        guard let tcc else { return }
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let userDatabase = (home as NSString).appendingPathComponent(
+            "Library/Application Support/com.apple.TCC/TCC.db"
+        )
+        record(paths: [userDatabase, "/Library/Application Support/com.apple.TCC/TCC.db"], action: "observe.tcc")
+        record(paths: tcc.notes.compactMap(Self.pathFromNote), action: "observe.tccNote")
+    }
 
     private static func pathFromNote(_ note: String) -> String? {
         // Prefer explicit path= fragments from collectors.

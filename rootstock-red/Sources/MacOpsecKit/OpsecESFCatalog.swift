@@ -26,33 +26,15 @@ public enum OpsecESFCatalog: Sendable {
 
     /// Convert short or mixed class names to `NOTIFY_*` Endpoint Security event type labels.
     public static func notifyEventNames(from classes: [String]) -> [String] {
-        classes.map { raw in
-            let upper = raw.uppercased()
-            if upper.hasPrefix("ES_EVENT_TYPE_NOTIFY_") {
-                // ES_EVENT_TYPE_NOTIFY_OPEN → NOTIFY_OPEN
-                return String(upper.dropFirst("ES_EVENT_TYPE_".count))
-            }
-            if upper.hasPrefix("NOTIFY_") {
-                return upper
-            }
-            switch upper {
-            case "OPEN": return "NOTIFY_OPEN"
-            case "WRITE": return "NOTIFY_WRITE"
-            case "EXEC": return "NOTIFY_EXEC"
-            case "FORK": return "NOTIFY_FORK"
-            case "CREATE": return "NOTIFY_CREATE"
-            case "RENAME": return "NOTIFY_RENAME"
-            case "UNLINK": return "NOTIFY_UNLINK"
-            case "MMAP": return "NOTIFY_MMAP"
-            case "CONNECT", "UIPC_CONNECT": return "NOTIFY_UIPC_CONNECT"
-            case "LOOKUP": return "NOTIFY_LOOKUP"
-            case "SIGNAL": return "NOTIFY_SIGNAL"
-            case "GET_TASK": return "NOTIFY_GET_TASK"
-            case "USER_PROMPT": return "USER_PROMPT" // not a real ES event; user-visible marker
-            default:
-                return "NOTIFY_" + upper
-            }
-        }
+        classes.map(notifyEventName)
+    }
+
+    private static let notifyNames = ["OPEN": "NOTIFY_OPEN", "WRITE": "NOTIFY_WRITE", "EXEC": "NOTIFY_EXEC", "FORK": "NOTIFY_FORK", "CREATE": "NOTIFY_CREATE", "RENAME": "NOTIFY_RENAME", "UNLINK": "NOTIFY_UNLINK", "MMAP": "NOTIFY_MMAP", "CONNECT": "NOTIFY_UIPC_CONNECT", "UIPC_CONNECT": "NOTIFY_UIPC_CONNECT", "LOOKUP": "NOTIFY_LOOKUP", "SIGNAL": "NOTIFY_SIGNAL", "GET_TASK": "NOTIFY_GET_TASK", "USER_PROMPT": "USER_PROMPT"]
+    private static func notifyEventName(_ raw: String) -> String {
+        let upper = raw.uppercased()
+        if upper.hasPrefix("ES_EVENT_TYPE_NOTIFY_") { return String(upper.dropFirst("ES_EVENT_TYPE_".count)) }
+        if upper.hasPrefix("NOTIFY_") { return upper }
+        return notifyNames[upper] ?? "NOTIFY_" + upper
     }
 
     /// Default NOTIFY_* set for a category (via short-class defaults).

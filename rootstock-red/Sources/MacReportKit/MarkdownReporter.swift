@@ -25,34 +25,30 @@ public enum MarkdownReporter {
             return md
         }
 
-        let order: [Severity] = [.critical, .high, .medium, .low, .info]
-        for severity in order {
-            let group = findings.filter { $0.severity == severity }
-            guard !group.isEmpty else { continue }
-            md += "### \(severity.rawValue.uppercased()) (\(group.count))\n\n"
-            for f in group {
-                md += "#### `\(f.id)` - \(f.title)\n\n"
-                md += "- Confidence: \(f.confidence.rawValue)\n"
-                md += "- Category: \(f.category.rawValue)\n"
-                if let score = f.opsecScore {
-                    md += "- OPSEC score: \(score)\n"
-                }
-                if !f.attackTechniques.isEmpty {
-                    md += "- ATT&CK: \(f.attackTechniques.joined(separator: ", "))\n"
-                }
-                if !f.evidence.isEmpty {
-                    md += "- Evidence:\n"
-                    for e in f.evidence.prefix(10) {
-                        let path = e.path.map { " (`\($0)`)" } ?? ""
-                        md += "  - \(e.type)\(path): \(e.detail)\n"
-                    }
-                }
-                if !f.remediation.isEmpty {
-                    md += "- Remediation: \(f.remediation.joined(separator: "; "))\n"
-                }
-                md += "\n"
-            }
-        }
+        md += findingsSection(findings)
         return md
+    }
+
+    private static func findingsSection(_ findings: [Finding]) -> String {
+        Severity.allCases.reversed().map { severity in
+            let group = findings.filter { $0.severity == severity }
+            return group.isEmpty ? "" : "### \(severity.rawValue.uppercased()) (\(group.count))\n\n" + group.map(renderFinding).joined()
+        }.joined()
+    }
+
+    private static func renderFinding(_ finding: Finding) -> String {
+        var text = "#### `\(finding.id)` - \(finding.title)\n\n- Confidence: \(finding.confidence.rawValue)\n- Category: \(finding.category.rawValue)\n"
+        if let score = finding.opsecScore { text += "- OPSEC score: \(score)\n" }
+        if !finding.attackTechniques.isEmpty { text += "- ATT&CK: \(finding.attackTechniques.joined(separator: ", "))\n" }
+        text += evidenceSection(finding.evidence)
+        if !finding.remediation.isEmpty { text += "- Remediation: \(finding.remediation.joined(separator: "; "))\n" }
+        return text + "\n"
+    }
+
+    private static func evidenceSection(_ evidence: [Evidence]) -> String {
+        guard !evidence.isEmpty else { return "" }
+        return "- Evidence:\n" + evidence.prefix(10).map { evidence in
+            "  - \(evidence.type)\(evidence.path.map { " (`\($0)`)" } ?? ""): \(evidence.detail)\n"
+        }.joined()
     }
 }

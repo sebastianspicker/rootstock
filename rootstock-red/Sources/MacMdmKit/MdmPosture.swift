@@ -25,184 +25,252 @@ public struct MdmPostureCollector: Collector {
     public func collect(context: EvaluationContext) async throws -> CollectedState {
         let fm = FileManager.default
         var notes: [String] = [
-            "MDM posture via filesystem heuristics (no profiles CLI)",
+            "MDM posture via filesystem heuristics (no profiles CLI)"
         ]
+        let vendorHints = Self.vendorHints(fm: fm, notes: &notes)
+        let managedPreferences = Self.managedPreferences(fm: fm, notes: &notes)
+        let pppcPath = Self.pppcPath(
+            managedPreferenceNames: managedPreferences.names,
+            root: managedPreferences.root,
+            fm: fm,
+            notes: &notes
+        )
+        let pppcPolicyPresent: Bool? = pppcPath != nil
+        let profileStores = Self.profileStores(fm: fm, notes: &notes)
+        let enrollHits = Self.enrollmentPaths(fm: fm, notes: &notes)
+        let enrolled = Self.enrollmentStatus(
+            EnrollmentStatusInput(vendorHints: vendorHints, enrollmentPaths: enrollHits, managedPreferenceNames: managedPreferences.names, profileStores: profileStores, pppcPolicyPresent: pppcPolicyPresent == true),
+            notes: &notes
+        )
 
-        // MARK: - Vendor agent paths
+        let profileFileCount = profileStores.fileCount.map(String.init) ?? "nil"
+        let summary =
+            "Summary: enrolled=\(enrolled.rootstockDescribe) vendors=\(vendorHints.joined(separator: ",")) "
+            + "managedPrefs=\(managedPreferences.names.count) profileStoreReadable=\(profileStores.readable.rootstockDescribe) "
+            + "profileFiles=\(profileFileCount) pppc=\(pppcPolicyPresent.rootstockDescribe)"
+        notes.append(summary)
 
-        var hints: [String] = []
-        for (name, path) in Self.vendorPaths {
+        var state = CollectedState()
+        state.mdm = MDMState(
+            enrolled: enrolled,
+            vendorHints: vendorHints,
+            managedPreferenceNames: managedPreferences.names,
+            profileStoreReadable: profileStores.readable,
+            profileFileCount: profileStores.fileCount,
+            pppcPolicyPresent: pppcPolicyPresent,
+            notes: notes
+        )
+        state.collectorNotes[Self.id] =
+            "mdm fs+vendor enrolled=\(enrolled.rootstockDescribe) "
+            + "vendors=\(vendorHints.count) managedPrefs=\(managedPreferences.names.count) "
+            + "profiles=\(profileStores.fileCount.map(String.init) ?? "nil")"
+        return state
+    }
+
+    private struct ManagedPreferences {
+        let root: String
+        let names: [String]
+    }
+
+    private struct ProfileStores {
+        let readable: Bool?
+        let fileCount: Int?
+        let hasStore: Bool
+    }
+
+    private struct ProfileStoreRecordInput {
+        let path: String
+        let readable: Bool
+        let fileManager: FileManager
+    }
+
+    private struct ProfileStoreRecordState {
+        var readable: Bool?
+        var fileCount: Int?
+    }
+
+    private struct EnrollmentStatusInput {
+        let vendorHints: [String]
+        let enrollmentPaths: [String]
+        let managedPreferenceNames: [String]
+        let profileStores: ProfileStores
+        let pppcPolicyPresent: Bool
+    }
+
+    private static func vendorHints(fm: FileManager, notes: inout [String]) -> [String] {
+        let hints = vendorPaths.compactMap { name, path -> String? in
             let exists = fm.fileExists(atPath: path)
             notes.append("Vendor path: \(name) \(path) exists=\(exists)")
-            if exists {
-                hints.append(name)
-            }
+            return exists ? name : nil
         }
-        let vendorHints = Array(Set(hints)).sorted()
+        return Array(Set(hints)).sorted()
+    }
 
-        // MARK: - Managed Preferences (top-level names only)
-
-        let managedPrefsRoot = "/Library/Managed Preferences"
-        var managedPreferenceNames: [String] = []
-        if fm.fileExists(atPath: managedPrefsRoot) {
-            if let names = try? fm.contentsOfDirectory(atPath: managedPrefsRoot) {
-                managedPreferenceNames = names.sorted()
-                notes.append(
-                    "Managed Preferences listable (\(managedPreferenceNames.count) top-level names)"
-                )
-            } else {
-                notes.append("Managed Preferences present but not listable")
-            }
-        } else {
-            notes.append("Managed Preferences root missing: \(managedPrefsRoot)")
+    private static func managedPreferences(fm: FileManager, notes: inout [String])
+        -> ManagedPreferences
+    {
+        let root = "/Library/Managed Preferences"
+        guard fm.fileExists(atPath: root) else {
+            notes.append("Managed Preferences root missing: \(root)")
+            return ManagedPreferences(root: root, names: [])
         }
+        guard let names = try? fm.contentsOfDirectory(atPath: root) else {
+            notes.append("Managed Preferences present but not listable")
+            return ManagedPreferences(root: root, names: [])
+        }
+        let sortedNames = names.sorted()
+        notes.append("Managed Preferences listable (\(sortedNames.count) top-level names)")
+        return ManagedPreferences(root: root, names: sortedNames)
+    }
 
-        // MARK: - PPPC / TCC configuration-profile policy (path presence only)
-
-        let pppcCandidates = [
+    private static func pppcPath(
+        managedPreferenceNames: [String],
+        root: String,
+        fm: FileManager,
+        notes: inout [String]
+    ) -> String? {
+        let candidates = [
             "/Library/Managed Preferences/com.apple.TCC.configuration-profile-policy.plist",
             "/Library/Managed Preferences/com.apple.TCC.configuration-profile-policy",
             "/var/db/ConfigurationProfiles/Settings/com.apple.TCC.configuration-profile-policy.plist",
         ]
-        var pppcPath: String?
-        for path in pppcCandidates {
-            let exists = fm.fileExists(atPath: path)
-            notes.append("PPPC policy candidate: \(path) exists=\(exists)")
-            if exists, pppcPath == nil {
-                pppcPath = path
-            }
+        let path = candidates.first { candidate in
+            let exists = fm.fileExists(atPath: candidate)
+            notes.append("PPPC policy candidate: \(candidate) exists=\(exists)")
+            return exists
         }
-        // Also match by managed-prefs filename pattern without reading contents.
-        if pppcPath == nil {
-            let pppcName = managedPreferenceNames.first {
-                $0.localizedCaseInsensitiveContains("TCC.configuration-profile-policy")
-                    || $0.localizedCaseInsensitiveContains("tcc.configuration-profile-policy")
-            }
-            if let pppcName {
-                pppcPath = (managedPrefsRoot as NSString).appendingPathComponent(pppcName)
-                notes.append("PPPC policy matched managed prefs name: \(pppcPath!)")
-            }
-        }
-        let pppcPolicyPresent: Bool? = pppcPath != nil
+        guard path == nil else { return path }
+        guard let name = managedPreferenceNames.first(where: isPPPCPolicyName) else { return nil }
+        let matchedPath = (root as NSString).appendingPathComponent(name)
+        notes.append("PPPC policy matched managed prefs name: \(matchedPath)")
+        return matchedPath
+    }
 
-        // MARK: - Configuration profile stores
-
-        let profileStores = [
+    private static func profileStores(fm: FileManager, notes: inout [String]) -> ProfileStores {
+        let paths = [
             "/var/db/ConfigurationProfiles",
             "/Library/ConfigurationProfiles",
             "/var/db/ConfigurationProfiles/Store",
         ]
-        var profileStoreReadable: Bool?
-        var profileFileCount: Int?
-        var anyStoreExists = false
-        for store in profileStores {
-            let exists = fm.fileExists(atPath: store)
-            let readable = fm.isReadableFile(atPath: store)
-            notes.append("Profile store: \(store) exists=\(exists) readable=\(readable)")
+        var readable: Bool?
+        var fileCount: Int?
+        var hasStore = false
+        for path in paths {
+            let exists = fm.fileExists(atPath: path)
+            let pathReadable = fm.isReadableFile(atPath: path)
+            notes.append("Profile store: \(path) exists=\(exists) readable=\(pathReadable)")
             guard exists else { continue }
-            anyStoreExists = true
-            if let entries = try? fm.contentsOfDirectory(atPath: store) {
-                profileStoreReadable = true
-                let profileLike = entries.filter { name in
-                    let lower = name.lowercased()
-                    return lower.hasSuffix(".mobileconfig")
-                        || lower.hasSuffix(".profile")
-                        || lower.hasSuffix(".plist")
-                        || lower == "store"
-                        || lower.contains("profile")
-                }
-                let count = Self.countProfileLikeFiles(root: store, fm: fm, depth: 0, maxDepth: 2)
-                let combined = max(count, profileLike.count)
-                profileFileCount = (profileFileCount ?? 0) + combined
-                notes.append(
-                    "Profile store listable: \(store) topLevel=\(entries.count) profileLike≈\(combined)"
-                )
-            } else if readable {
-                profileStoreReadable = profileStoreReadable ?? true
-                notes.append("Profile store readable but contentsOfDirectory failed: \(store)")
-            } else {
-                if profileStoreReadable == nil {
-                    profileStoreReadable = false
-                }
-                notes.append("Profile store not listable (likely root/SIP): \(store)")
-            }
+            hasStore = true
+            var record = ProfileStoreRecordState(readable: readable, fileCount: fileCount)
+            Self.recordProfileStore(ProfileStoreRecordInput(path: path, readable: pathReadable, fileManager: fm), state: &record, notes: &notes)
+            readable = record.readable
+            fileCount = record.fileCount
         }
-        if !anyStoreExists {
-            profileStoreReadable = false
-            profileFileCount = 0
+        guard hasStore else {
             notes.append("No configuration profile store paths found")
+            return ProfileStores(readable: false, fileCount: 0, hasStore: false)
         }
+        return ProfileStores(readable: readable, fileCount: fileCount, hasStore: true)
+    }
 
-        // MARK: - Enrollment / ManagedClient prefs (existence only)
+    private static func recordProfileStore(
+        _ input: ProfileStoreRecordInput,
+        state: inout ProfileStoreRecordState,
+        notes: inout [String]
+    ) {
+        guard let entries = try? input.fileManager.contentsOfDirectory(atPath: input.path) else {
+            recordUnreadableProfileStore(
+                input.path, readable: input.readable, profileStoreReadable: &state.readable, notes: &notes
+            )
+            return
+        }
+        state.readable = true
+        let count = max(
+            countProfileLikeFiles(root: input.path, fm: input.fileManager, depth: 0, maxDepth: 2),
+            entries.filter(isProfileStoreName).count
+        )
+        state.fileCount = (state.fileCount ?? 0) + count
+        notes.append(
+            "Profile store listable: \(input.path) topLevel=\(entries.count) profileLike≈\(count)")
+    }
 
-        let enrollPaths = [
+    private static func recordUnreadableProfileStore(
+        _ path: String,
+        readable: Bool,
+        profileStoreReadable: inout Bool?,
+        notes: inout [String]
+    ) {
+        guard !readable else {
+            profileStoreReadable = profileStoreReadable ?? true
+            notes.append("Profile store readable but contentsOfDirectory failed: \(path)")
+            return
+        }
+        profileStoreReadable = profileStoreReadable ?? false
+        notes.append("Profile store not listable (likely root/SIP): \(path)")
+    }
+
+    private static func enrollmentPaths(fm: FileManager, notes: inout [String]) -> [String] {
+        let paths = [
             "/Library/Preferences/com.apple.ManagedClient.enroll.plist",
             "/Library/Preferences/com.apple.ManagedClient.plist",
             "/var/db/ConfigurationProfiles/MDM_ComputerPrefs.plist",
             "/var/db/ConfigurationProfiles/SecureUserPreferences.plist",
             "/Library/Keychains/FileVaultMaster.keychain",
         ]
-        var enrollHits: [String] = []
-        for path in enrollPaths {
+        return paths.filter { path in
             let exists = fm.fileExists(atPath: path)
             notes.append("Enrollment/ManagedClient: \(path) exists=\(exists)")
-            if exists {
-                enrollHits.append(path)
-            }
+            return exists
         }
+    }
 
-        // MARK: - Enrolled heuristic
-
+    private static func enrollmentStatus(
+        _ input: EnrollmentStatusInput,
+        notes: inout [String]
+    ) -> Bool? {
+        let vendorHints = input.vendorHints
+        let enrollmentPaths = input.enrollmentPaths
+        let managedPreferenceNames = input.managedPreferenceNames
+        let profileStores = input.profileStores
+        let pppcPolicyPresent = input.pppcPolicyPresent
         let strongSignals =
             !vendorHints.isEmpty
-            || !enrollHits.isEmpty
-            || (profileFileCount ?? 0) > 0
-            || pppcPolicyPresent == true
-            || managedPreferenceNames.contains {
-                $0.hasPrefix("com.apple.mdm")
-                    || $0.localizedCaseInsensitiveContains("ManagedClient")
-            }
-
-        // Managed Preferences often exist on stock systems for other reasons,
-        // treat non-empty managed prefs as weak signal only when combined.
-        let weakManaged = !managedPreferenceNames.isEmpty
-        let enrolled: Bool?
-        if strongSignals {
-            enrolled = true
+            || !enrollmentPaths.isEmpty
+            || (profileStores.fileCount ?? 0) > 0
+            || pppcPolicyPresent
+            || managedPreferenceNames.contains(where: isManagedMDMPreference)
+        guard !strongSignals else {
             notes.append("Enrollment signal: positive (vendor/enroll/profile/PPPC)")
-        } else if weakManaged && anyStoreExists {
-            enrolled = true
-            notes.append("Enrollment signal: likely (managed prefs + profile store present)")
-        } else if !vendorHints.isEmpty {
-            enrolled = true
-        } else {
-            enrolled = nil
-            notes.append(
-                "Enrollment signal: unknown (no vendor agent / enroll plist / profile files)"
-            )
+            return true
         }
+        guard !managedPreferenceNames.isEmpty && profileStores.hasStore else {
+            notes.append(
+                "Enrollment signal: unknown (no vendor agent / enroll plist / profile files)")
+            return nil
+        }
+        notes.append("Enrollment signal: likely (managed prefs + profile store present)")
+        return true
+    }
 
-        notes.append(
-            "Summary: enrolled=\(enrolled.rootstockDescribe) vendors=\(vendorHints.joined(separator: ",")) "
-                + "managedPrefs=\(managedPreferenceNames.count) profileStoreReadable=\(profileStoreReadable.rootstockDescribe) "
-                + "profileFiles=\(profileFileCount.map(String.init) ?? "nil") pppc=\(pppcPolicyPresent.rootstockDescribe)"
-        )
+    private static func isPPPCPolicyName(_ name: String) -> Bool {
+        name.localizedCaseInsensitiveContains("TCC.configuration-profile-policy")
+    }
 
-        var state = CollectedState()
-        state.mdm = MDMState(
-            enrolled: enrolled,
-            vendorHints: vendorHints,
-            managedPreferenceNames: managedPreferenceNames,
-            profileStoreReadable: profileStoreReadable,
-            profileFileCount: profileFileCount,
-            pppcPolicyPresent: pppcPolicyPresent,
-            notes: notes
-        )
-        state.collectorNotes[Self.id] =
-            "mdm fs+vendor enrolled=\(enrolled.rootstockDescribe) "
-            + "vendors=\(vendorHints.count) managedPrefs=\(managedPreferenceNames.count) "
-            + "profiles=\(profileFileCount.map(String.init) ?? "nil")"
-        return state
+    private static func isManagedMDMPreference(_ name: String) -> Bool {
+        name.hasPrefix("com.apple.mdm") || name.localizedCaseInsensitiveContains("ManagedClient")
+    }
+
+    private static func isProfileStoreName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return isProfileFilename(name) || lower == "store"
+            || lower.contains("profile")
+    }
+
+    private static func isProfileFilename(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return lower.hasSuffix(".mobileconfig")
+            || lower.hasSuffix(".profile")
+            || lower.hasSuffix(".plist")
     }
 
     /// Bounded recursive count of profile-like filenames (names only).
@@ -214,29 +282,30 @@ public struct MdmPostureCollector: Collector {
     ) -> Int {
         guard depth <= maxDepth else { return 0 }
         guard let entries = try? fm.contentsOfDirectory(atPath: root) else { return 0 }
-        var count = 0
-        for name in entries {
-            let path = (root as NSString).appendingPathComponent(name)
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }
-            if isDir.boolValue {
-                count += countProfileLikeFiles(
-                    root: path,
+        return entries.reduce(0) { count, name in
+            count
+                + countProfileLikeEntry(
+                    name,
+                    under: root,
                     fm: fm,
-                    depth: depth + 1,
+                    depth: depth,
                     maxDepth: maxDepth
                 )
-            } else {
-                let lower = name.lowercased()
-                if lower.hasSuffix(".mobileconfig")
-                    || lower.hasSuffix(".profile")
-                    || lower.hasSuffix(".plist")
-                {
-                    count += 1
-                }
-            }
         }
-        return count
+    }
+
+    private static func countProfileLikeEntry(
+        _ name: String,
+        under root: String,
+        fm: FileManager,
+        depth: Int,
+        maxDepth: Int
+    ) -> Int {
+        let path = (root as NSString).appendingPathComponent(name)
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDirectory) else { return 0 }
+        guard isDirectory.boolValue else { return isProfileFilename(name) ? 1 : 0 }
+        return countProfileLikeFiles(root: path, fm: fm, depth: depth + 1, maxDepth: maxDepth)
     }
 
 }

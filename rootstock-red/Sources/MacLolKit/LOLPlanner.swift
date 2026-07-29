@@ -90,72 +90,40 @@ public struct LOLPlanner: Sendable {
 
     private static func matches(goal: Goal, bin: LOOBin) -> Bool {
         let tactics = Set(bin.tactics.map { $0.lowercased() })
+        return tactics.contains(where: { tacticMatches(goal: goal, tactic: $0) })
+            || goalBins[goal, default: []].contains(bin.name)
+    }
+
+    private static let goalBins: [Goal: [String]] = [
+        .discovery: ["system_profiler", "mdfind", "codesign", "profiles"],
+        .persist: ["launchctl", "profiles"], .execute: ["osascript", "launchctl"],
+        .exfil: ["screencapture", "sqlite3", "security", "mdfind"],
+        .download: ["screencapture", "sqlite3", "security", "mdfind"],
+    ]
+
+    private static func tacticMatches(goal: Goal, tactic: String) -> Bool {
         switch goal {
-        case .discovery:
-            return tactics.contains(where: { $0.contains("discovery") })
-                || ["system_profiler", "mdfind", "codesign", "profiles"].contains(bin.name)
-        case .persist:
-            return tactics.contains(where: { $0.contains("persist") })
-                || ["launchctl", "profiles"].contains(bin.name)
-        case .execute:
-            return tactics.contains(where: { $0.contains("execution") })
-                || ["osascript", "launchctl"].contains(bin.name)
-        case .exfil, .download:
-            return tactics.contains(where: {
-                $0.contains("collection") || $0.contains("discovery") || $0.contains("credential")
-            })
-                || ["screencapture", "sqlite3", "security", "mdfind"].contains(bin.name)
+        case .discovery: return tactic.contains("discovery")
+        case .persist: return tactic.contains("persist")
+        case .execute: return tactic.contains("execution")
+        case .exfil, .download: return ["collection", "discovery", "credential"].contains { tactic.contains($0) }
         }
     }
 
     /// Noise score 0–100. Higher = more telemetry / human-visible risk.
     public static func noiseScore(for bin: LOOBin) -> Int {
-        switch bin.name.lowercased() {
-        case "system_profiler": return 15
-        case "mdfind": return 40
-        case "xattr": return 30
-        case "codesign": return 35
-        case "launchctl": return 50
-        case "profiles": return 55
-        case "sqlite3": return 55
-        case "security": return 78
-        case "osascript": return 85
-        case "screencapture": return 90
-        default:
-            // Tactic-based fallback.
-            let tactics = bin.tactics.map { $0.lowercased() }
-            if tactics.contains(where: { $0.contains("credential") }) { return 70 }
-            if tactics.contains(where: { $0.contains("execution") }) { return 65 }
-            if tactics.contains(where: { $0.contains("persist") }) { return 55 }
-            if tactics.contains(where: { $0.contains("collection") }) { return 60 }
-            if tactics.contains(where: { $0.contains("discovery") }) { return 35 }
-            return 50
-        }
+        if let score = namedNoise[bin.name.lowercased()] { return score }
+        return tacticNoise(for: bin.tactics.map { $0.lowercased() })
+    }
+
+    private static let namedNoise = ["system_profiler": 15, "mdfind": 40, "xattr": 30, "codesign": 35, "launchctl": 50, "profiles": 55, "sqlite3": 55, "security": 78, "osascript": 85, "screencapture": 90]
+    private static func tacticNoise(for tactics: [String]) -> Int {
+        let scores = [("credential", 70), ("execution", 65), ("persist", 55), ("collection", 60), ("discovery", 35)]
+        return scores.first(where: { needle, _ in tactics.contains { $0.contains(needle) } })?.1 ?? 50
     }
 
     public static func tccImpact(for bin: LOOBin) -> [String] {
-        switch bin.name.lowercased() {
-        case "screencapture":
-            return ["Screen Recording"]
-        case "osascript":
-            return ["Automation", "Accessibility"]
-        case "security":
-            return ["Keychain"]
-        case "sqlite3":
-            return ["Full Disk Access"]
-        case "mdfind":
-            return []
-        case "system_profiler":
-            return []
-        case "profiles":
-            return []
-        case "launchctl":
-            return []
-        case "xattr", "codesign":
-            return []
-        default:
-            return []
-        }
+        ["screencapture": ["Screen Recording"], "osascript": ["Automation", "Accessibility"], "security": ["Keychain"], "sqlite3": ["Full Disk Access"]][bin.name.lowercased()] ?? []
     }
 
     private static func rankReason(

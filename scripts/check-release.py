@@ -5,10 +5,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import posixpath
 import re
-import subprocess
 import sys
+import tempfile
 import tomllib
 from pathlib import Path
 from urllib.parse import unquote
@@ -58,15 +59,37 @@ def read_text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _run_git(*args: str, input_text: str | None = None) -> tuple[int, str, str]:
+    with (
+        tempfile.TemporaryFile() as stdin,
+        tempfile.TemporaryFile() as stdout,
+        tempfile.TemporaryFile() as stderr,
+    ):
+        if input_text is not None:
+            stdin.write(input_text.encode())
+            stdin.seek(0)
+        actions = [
+            (os.POSIX_SPAWN_DUP2, stdin.fileno(), 0),
+            (os.POSIX_SPAWN_DUP2, stdout.fileno(), 1),
+            (os.POSIX_SPAWN_DUP2, stderr.fileno(), 2),
+        ]
+        pid = os.posix_spawn(
+            "/usr/bin/git",
+            ["/usr/bin/git", "-C", str(ROOT), *args],
+            os.environ,
+            file_actions=actions,
+        )
+        _, status = os.waitpid(pid, 0)
+        stdout.seek(0)
+        stderr.seek(0)
+        return os.waitstatus_to_exitcode(status), stdout.read().decode(), stderr.read().decode()
+
+
 def git_output(*args: str) -> str:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
+    status, stdout, stderr = _run_git(*args)
+    if status != 0:
+        raise RuntimeError(stderr.strip() or f"git exited with status {status}")
+    return stdout
 
 
 def pep440_alpha(version: str) -> str:
@@ -203,15 +226,14 @@ def _expected_screenshots() -> set[str]:
 
 
 def _ignored_screenshots(expected_screenshots: set[str]) -> list[str]:
-    result = subprocess.run(
-        ["git", "check-ignore", "--stdin"],
-        cwd=ROOT,
-        input="\n".join(f"docs/screenshots/{name}" for name in expected_screenshots),
-        capture_output=True,
-        text=True,
-        check=False,
+    _, stdout, _ = _run_git(
+        "check-ignore",
+        "--stdin",
+        input_text="\n".join(
+            f"docs/screenshots/{name}" for name in expected_screenshots
+        ),
     )
-    return result.stdout.splitlines()
+    return stdout.splitlines()
 
 
 def _tracked_paths() -> set[str]:
@@ -232,8 +254,8 @@ def _index_markdown_image_failures(tracked_paths: set[str]) -> list[str]:
     for markdown_path in markdown_paths:
         text = git_output("show", f":{markdown_path}")
         for match in MARKDOWN_IMAGE.finditer(text):
-            target = unquote(match.group(1) or match.group(2)).split("#", 1)[0].split("?", 1)[0]
-            if not target or target.startswith(("/", "data:", "http:", "https:")):
+            target = _local_markdown_image_target(match.group(1) or match.group(2))
+            if target is None:
                 continue
             resolved = posixpath.normpath(
                 posixpath.join(posixpath.dirname(markdown_path), target)
@@ -243,9 +265,23 @@ def _index_markdown_image_failures(tracked_paths: set[str]) -> list[str]:
     return failures
 
 
+def _local_markdown_image_target(raw_target: str | None) -> str | None:
+    target = unquote(raw_target or "").split("#", 1)[0].split("?", 1)[0]
+    if not target or target.startswith(("/", "data:", "http:", "https:")):
+        return None
+    return target
+
+
 def check_public_files(check: ReleaseCheck) -> None:
     """Check required metadata, locks, screenshots, and integrity-backed browser CI."""
     tracked_paths = _tracked_paths()
+    _check_tracked_public_files(check, tracked_paths)
+    _check_public_screenshots(check, tracked_paths)
+    _check_browser_release_integrity(check)
+    _report_paths(check, _index_markdown_image_failures(tracked_paths), "all index-level Markdown image targets are Git-tracked", "missing index image")
+
+
+def _check_tracked_public_files(check: ReleaseCheck, tracked_paths: set[str]) -> None:
     for path in _required_public_files():
         check.require((ROOT / path).is_file(), f"required public file exists: {path}")
         check.require(path in tracked_paths, f"required public file is Git-tracked: {path}")
@@ -264,6 +300,9 @@ def check_public_files(check: ReleaseCheck) -> None:
     for path in _required_viewer_files():
         check.require((ROOT / path).is_file(), f"viewer source or bundle exists: {path}")
         check.require(path in tracked_paths, f"viewer source or bundle is Git-tracked: {path}")
+
+
+def _check_public_screenshots(check: ReleaseCheck, tracked_paths: set[str]) -> None:
     expected_screenshots = _expected_screenshots()
     screenshots = {
         path.name for path in (ROOT / "docs/screenshots").glob("*.png")
@@ -288,6 +327,8 @@ def check_public_files(check: ReleaseCheck) -> None:
         "curated public screenshots are not hidden by .gitignore",
     )
 
+
+def _check_browser_release_integrity(check: ReleaseCheck) -> None:
     workflow = read_text(".github/workflows/test.yml")
     check.require(
         "npm ci" in workflow and "npm install --no-package-lock" not in workflow,
@@ -304,15 +345,6 @@ def check_public_files(check: ReleaseCheck) -> None:
         "EXPECTED_ARCHIVE_LISTING" in release_script,
         "collector archive validates its exact file set",
     )
-
-    image_failures = _index_markdown_image_failures(tracked_paths)
-    _report_paths(
-        check,
-        image_failures,
-        "all index-level Markdown image targets are Git-tracked",
-        "missing index image",
-    )
-
 
 def _forbidden_tracked_paths() -> list[str]:
     return [

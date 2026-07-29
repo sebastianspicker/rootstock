@@ -47,21 +47,27 @@ public struct TerminalParser: ArtifactParser {
             }
             events.append(
                 EventEnvelope(
-                    eventTime: Date(timeIntervalSince1970: 0),
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "TERMSESSIONS",
-                    eventType: "shell.history",
-                    entityRefs: user.map { [.user(name: $0)] } ?? [],
-                    fields: [
+                    identity: EventEnvelope.Identity(
+                        kind: "shell.history",
+                        label: "TERMSESSIONS"
+                    ),
+                    capture: EventEnvelope.Capture(
+                        source: .parser,
+                        eventTime: Date(timeIntervalSince1970: 0),
+                        collectedAt: Date()
+                    ),
+                    payload: EventEnvelope.Payload(
+                        entityRefs: user.map { [.user(name: $0)] } ?? [],
+                        properties: [
                         "shell.command": command,
                         "shell.history_path": url.path,
                         "shell.line": String(index),
                         FieldTaxonomy.userName: user ?? "",
                         FieldTaxonomy.eventType: "shell.history",
                     ],
-                    rawRef: url.path,
-                    confidence: 0.85
+                        provenance: url.path,
+                        confidence: 0.85
+                    )
                 )
             )
         }

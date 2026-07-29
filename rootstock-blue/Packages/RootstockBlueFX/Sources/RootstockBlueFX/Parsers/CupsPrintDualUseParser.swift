@@ -58,11 +58,21 @@ public struct CupsPrintDualUseParser: ArtifactParser {
         ]
         if !risk.isEmpty { fields["cups.risk_tags"] = risk.joined(separator: ",") }
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(), source: .parser, sourcePlugin: "CUPSPRINTDUAL",
-            eventType: "cups.print",
-            entityRefs: [EntityID(kind: .host, value: "cups|\(name.isEmpty ? path : name)")],
-            fields: fields, rawRef: ArtifactRoot.pathKey(sourceURL), confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "cups.print",
+                label: "CUPSPRINTDUAL"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "cups|\(name.isEmpty ? path : name)")],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
     }
 }

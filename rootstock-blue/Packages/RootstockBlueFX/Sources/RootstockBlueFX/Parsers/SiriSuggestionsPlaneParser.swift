@@ -18,8 +18,8 @@ public struct SiriSuggestionsPlaneParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let n = url.lastPathComponent
             return n == "siri_suggestions_plane.json" || n == "siri_suggestions_plane.jsonl"
-        }) {
-            if seen.insert(url) { events.append(contentsOf: parseFile(at: url)) }
+        }) where seen.insert(url) {
+            events.append(contentsOf: parseFile(at: url))
         }
         return events
     }
@@ -52,11 +52,21 @@ public struct SiriSuggestionsPlaneParser: ArtifactParser {
         ]
         if !risk.isEmpty { fields["sirisug.risk_tags"] = risk.joined(separator: ",") }
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(), source: .parser, sourcePlugin: "SIRISUG",
-            eventType: "siri.suggestions",
-            entityRefs: [EntityID(kind: .host, value: "sirisug|\(name.isEmpty ? path : name)")],
-            fields: fields, rawRef: ArtifactRoot.pathKey(sourceURL), confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "siri.suggestions",
+                label: "SIRISUG"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "sirisug|\(name.isEmpty ? path : name)")],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
     }
 }

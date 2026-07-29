@@ -50,13 +50,18 @@ public struct UsersParser: ArtifactParser {
         let realname = firstString(dict["realname"]) ?? name
 
         return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "USERS",
-            eventType: "user.account",
-            entityRefs: [.user(name: name)],
-            fields: [
+            identity: EventEnvelope.Identity(
+                kind: "user.account",
+                label: "USERS"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [.user(name: name)],
+                properties: [
                 FieldTaxonomy.userName: name,
                 "user.uid": uid,
                 "user.home": home,
@@ -65,8 +70,9 @@ public struct UsersParser: ArtifactParser {
                 "user.plist_path": url.path,
                 FieldTaxonomy.eventType: "user.account",
             ],
-            rawRef: url.path,
-            confidence: 0.9
+                provenance: url.path,
+                confidence: 0.9
+            )
         )
     }
 

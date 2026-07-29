@@ -31,20 +31,26 @@ public struct FSEventsParser: ArtifactParser {
             let eid = stringValue(obj["event_id"]) ?? String(describing: obj["event_id"] ?? "")
             out.append(
                 EventEnvelope(
-                    eventTime: Date(timeIntervalSince1970: 0),
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "FSEVENTS",
-                    eventType: "fsevents.entry",
-                    entityRefs: path.isEmpty ? [] : [.file(path: path)],
-                    fields: [
+                    identity: EventEnvelope.Identity(
+                        kind: "fsevents.entry",
+                        label: "FSEVENTS"
+                    ),
+                    capture: EventEnvelope.Capture(
+                        source: .parser,
+                        eventTime: Date(timeIntervalSince1970: 0),
+                        collectedAt: Date()
+                    ),
+                    payload: EventEnvelope.Payload(
+                        entityRefs: path.isEmpty ? [] : [.file(path: path)],
+                        properties: [
                         FieldTaxonomy.filePath: path,
                         "fsevents.flags": flags,
                         "fsevents.event_id": eid,
                         FieldTaxonomy.eventType: "fsevents.entry",
                     ],
-                    rawRef: url.path,
-                    confidence: 0.7
+                        provenance: url.path,
+                        confidence: 0.7
+                    )
                 )
             )
         }

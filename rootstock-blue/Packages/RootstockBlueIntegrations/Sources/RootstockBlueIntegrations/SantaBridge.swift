@@ -10,57 +10,54 @@ public enum SantaBridge {
     /// Fixture shape:
     /// `{"decision":"DENY","path":"/tmp/evil_payload","sha256":"abc","reason":"BLOCKLIST","timestamp":"2026-01-15T12:00:00Z"}`
     public static func eventsFromSantaLog(at url: URL) throws -> [EventEnvelope] {
-        let data = try Data(contentsOf: url)
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw RootstockBlueError.io("Santa log is not UTF-8: \(url.path)")
+        let text = try santaLogText(at: url)
+        let dates = SantaDateParsers()
+        let events = try text.components(separatedBy: .newlines).enumerated().compactMap {
+            try santaEvent(rawLine: $0.element, lineNumber: $0.offset + 1, url: url, dates: dates)
         }
-
-        var events: [EventEnvelope] = []
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoBasic = ISO8601DateFormatter()
-        isoBasic.formatOptions = [.withInternetDateTime]
-
-        let lines = text.components(separatedBy: .newlines)
-        for (lineNo, rawLine) in lines.enumerated() {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-
-            // JSONL object per line
-            if line.hasPrefix("{") {
-                guard let lineData = line.data(using: String.Encoding.utf8),
-                      let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any]
-                else {
-                    throw RootstockBlueError.io("Santa log JSON parse failed at line \(lineNo + 1)")
-                }
-                if let event = eventFromDecisionObject(obj, iso: iso, isoBasic: isoBasic, rawRef: "\(url.path)#L\(lineNo + 1)") {
-                    events.append(event)
-                }
-                continue
-            }
-
-            // Simple CSV: decision,path,sha256,reason,timestamp
-            let cols = line.components(separatedBy: ",").map {
-                $0.trimmingCharacters(in: .whitespaces)
-            }
-            if cols.count >= 2 {
-                var obj: [String: Any] = [
-                    "decision": cols[0],
-                    "path": cols[1],
-                ]
-                if cols.count > 2 { obj["sha256"] = cols[2] }
-                if cols.count > 3 { obj["reason"] = cols[3] }
-                if cols.count > 4 { obj["timestamp"] = cols[4] }
-                if let event = eventFromDecisionObject(obj, iso: iso, isoBasic: isoBasic, rawRef: "\(url.path)#L\(lineNo + 1)") {
-                    events.append(event)
-                }
-            }
-        }
-
-        if events.isEmpty {
-            throw RootstockBlueError.io("No Santa decisions parsed from \(url.path)")
-        }
+        guard !events.isEmpty else { throw RootstockBlueError.io("No Santa decisions parsed from \(url.path)") }
         return events
+    }
+
+    private struct SantaDateParsers {
+        let fractional = ISO8601DateFormatter()
+        let basic = ISO8601DateFormatter()
+
+        init() {
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            basic.formatOptions = [.withInternetDateTime]
+        }
+    }
+
+    private static func santaLogText(at url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
+        guard let text = String(data: data, encoding: .utf8) else { throw RootstockBlueError.io("Santa log is not UTF-8: \(url.path)") }
+        return text
+    }
+
+    private static func santaEvent(rawLine: String, lineNumber: Int, url: URL, dates: SantaDateParsers) throws -> EventEnvelope? {
+        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, !line.hasPrefix("#") else { return nil }
+        let reference = "\(url.path)#L\(lineNumber)"
+        if line.hasPrefix("{") { return try eventFromJSONLine(line, lineNumber: lineNumber, dates: dates, rawRef: reference) }
+        return eventFromCSVLine(line, dates: dates, rawRef: reference)
+    }
+
+    private static func eventFromJSONLine(_ line: String, lineNumber: Int, dates: SantaDateParsers, rawRef: String) throws -> EventEnvelope? {
+        guard let data = line.data(using: .utf8), let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw RootstockBlueError.io("Santa log JSON parse failed at line \(lineNumber)")
+        }
+        return eventFromDecisionObject(object, iso: dates.fractional, isoBasic: dates.basic, rawRef: rawRef)
+    }
+
+    private static func eventFromCSVLine(_ line: String, dates: SantaDateParsers, rawRef: String) -> EventEnvelope? {
+        let columns = line.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard columns.count >= 2 else { return nil }
+        var object: [String: Any] = ["decision": columns[0], "path": columns[1]]
+        if columns.count > 2 { object["sha256"] = columns[2] }
+        if columns.count > 3 { object["reason"] = columns[3] }
+        if columns.count > 4 { object["timestamp"] = columns[4] }
+        return eventFromDecisionObject(object, iso: dates.fractional, isoBasic: dates.basic, rawRef: rawRef)
     }
 
     /// Suggest a manual Santa rule snippet from an event (review required).
@@ -126,15 +123,9 @@ public enum SantaBridge {
         }
 
         return EventEnvelope(
-            eventTime: eventTime,
-            collectedAt: Date(),
-            source: .santa,
-            sourcePlugin: "SANTA",
-            eventType: "santa.decision",
-            entityRefs: entityRefs,
-            fields: fields,
-            rawRef: rawRef,
-            confidence: 0.95
+            identity: .init(kind: "santa.decision", label: "SANTA"),
+            capture: .init(source: .santa, eventTime: eventTime),
+            payload: .init(entityRefs: entityRefs, properties: fields, provenance: rawRef, confidence: 0.95)
         )
     }
 

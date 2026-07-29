@@ -18,99 +18,68 @@ public enum FamilyOpenExporter: Sendable {
         scanProfile: String = "offline-dfir",
         generatedAt: Date = Date()
     ) -> [String: Any] {
-        let hostName = events
-            .first(where: { $0.eventType == "ir.posture.host" })?
-            .fields["host.hostname"]
-            ?? caseName
-        let hostId = "Host:\(sanitize(hostName))"
-        var nodes: [[String: Any]] = [
-            [
-                "id": hostId,
-                "type": "Host",
-                "name": hostName,
-                "hostname": hostName,
-                "case_name": caseName,
-            ],
-        ]
+        let hostName = events.first(where: { $0.eventType == "ir.posture.host" })?.fields["host.hostname"] ?? caseName
+        var graph = FamilyOpenGraph(hostName: hostName, caseName: caseName)
+        for event in events {
+            graph.append(event)
+        }
+        return graph.export(scopeName: scopeName, scanProfile: scanProfile, generatedAt: generatedAt)
+    }
+
+    private struct FamilyOpenGraph {
+        let hostName: String
+        let hostID: String
+        let caseName: String
+        var nodes: [[String: Any]]
         var edges: [[String: String]] = []
         var seen = Set<String>()
 
-        for event in events {
+        init(hostName: String, caseName: String) {
+            self.hostName = hostName
+            self.hostID = "Host:\(FamilyOpenExporter.sanitize(hostName))"
+            self.caseName = caseName
+            self.nodes = [["id": hostID, "type": "Host", "name": hostName, "hostname": hostName, "case_name": caseName]]
+        }
+
+        mutating func append(_ event: EventEnvelope) {
             if event.eventType == "ir.posture.protection" {
-                let name = event.fields["protection.name"] ?? "Protection"
-                let id = "Protection:\(sanitize(name.lowercased()))"
-                if seen.insert(id).inserted {
-                    nodes.append(
-                        [
-                            "id": id,
-                            "type": "Protection",
-                            "name": name,
-                            "enabled": event.fields["protection.enabled"] ?? "unknown",
-                        ]
-                    )
-                    edges.append(["from": hostId, "to": id, "type": "HAS_PROTECTION"])
-                }
-            } else if event.eventType == "persistence.item"
-                || event.sourcePlugin == "AUTOSTART"
-            {
-                let label = event.fields["persistence.label"]
-                    ?? event.fields[FieldTaxonomy.persistenceLabel]
-                    ?? event.rawRef
-                    ?? UUID().uuidString
-                let id = "LaunchItem:\(sanitize(label))"
-                if seen.insert(id).inserted {
-                    nodes.append(
-                        [
-                            "id": id,
-                            "type": "LaunchItem",
-                            "name": label,
-                            "label": label,
-                            "path": event.fields["persistence.path"]
-                                ?? event.fields[FieldTaxonomy.persistencePath]
-                                ?? "",
-                            "program": event.fields["persistence.program"]
-                                ?? event.fields[FieldTaxonomy.processPath]
-                                ?? "",
-                        ]
-                    )
-                    edges.append(["from": hostId, "to": id, "type": "HAS_LAUNCH_ITEM"])
-                }
-            } else if event.eventType == "finding.import"
-                || event.eventType.hasPrefix("harden.")
-                || event.fields["finding.id"] != nil
-            {
-                let fid = event.fields["finding.id"] ?? event.eventType
-                let id = "Finding:\(sanitize(fid))"
-                if seen.insert(id).inserted {
-                    nodes.append(
-                        [
-                            "id": id,
-                            "type": "Finding",
-                            "name": event.fields["finding.title"] ?? fid,
-                            "finding_id": fid,
-                            "severity": event.fields["finding.severity"] ?? "info",
-                            "category": event.fields["finding.category"] ?? "other",
-                        ]
-                    )
-                    edges.append(["from": hostId, "to": id, "type": "HAS_FINDING"])
-                }
+                appendProtection(event)
+            } else if event.eventType == "persistence.item" || event.sourcePlugin == "AUTOSTART" {
+                appendLaunchItem(event)
+            } else if event.eventType == "finding.import" || event.eventType.hasPrefix("harden.") || event.fields["finding.id"] != nil {
+                appendFinding(event)
             }
         }
 
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return [
-            "schema_version": schemaVersion,
-            "source": source,
-            "generated_at": formatter.string(from: generatedAt),
-            "scope_name": scopeName,
-            "scan_profile": scanProfile,
-            "node_types": nodeTypes,
-            "edge_types": Array(Set(edges.map { $0["type"]! })).sorted(),
-            "edge_vocabulary": edgeVocabulary,
-            "nodes": nodes,
-            "edges": edges,
-        ]
+        mutating func appendProtection(_ event: EventEnvelope) {
+            let name = event.fields["protection.name"] ?? "Protection"
+            let id = "Protection:\(FamilyOpenExporter.sanitize(name.lowercased()))"
+            guard seen.insert(id).inserted else { return }
+            nodes.append(["id": id, "type": "Protection", "name": name, "enabled": event.fields["protection.enabled"] ?? "unknown"])
+            edges.append(["from": hostID, "to": id, "type": "HAS_PROTECTION"])
+        }
+
+        mutating func appendLaunchItem(_ event: EventEnvelope) {
+            let label = event.fields["persistence.label"] ?? event.fields[FieldTaxonomy.persistenceLabel] ?? event.rawRef ?? UUID().uuidString
+            let id = "LaunchItem:\(FamilyOpenExporter.sanitize(label))"
+            guard seen.insert(id).inserted else { return }
+            nodes.append(["id": id, "type": "LaunchItem", "name": label, "label": label, "path": event.fields["persistence.path"] ?? event.fields[FieldTaxonomy.persistencePath] ?? "", "program": event.fields["persistence.program"] ?? event.fields[FieldTaxonomy.processPath] ?? ""])
+            edges.append(["from": hostID, "to": id, "type": "HAS_LAUNCH_ITEM"])
+        }
+
+        mutating func appendFinding(_ event: EventEnvelope) {
+            let findingID = event.fields["finding.id"] ?? event.eventType
+            let id = "Finding:\(FamilyOpenExporter.sanitize(findingID))"
+            guard seen.insert(id).inserted else { return }
+            nodes.append(["id": id, "type": "Finding", "name": event.fields["finding.title"] ?? findingID, "finding_id": findingID, "severity": event.fields["finding.severity"] ?? "info", "category": event.fields["finding.category"] ?? "other"])
+            edges.append(["from": hostID, "to": id, "type": "HAS_FINDING"])
+        }
+
+        func export(scopeName: String, scanProfile: String, generatedAt: Date) -> [String: Any] {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            return ["schema_version": FamilyOpenExporter.schemaVersion, "source": FamilyOpenExporter.source, "generated_at": formatter.string(from: generatedAt), "scope_name": scopeName, "scan_profile": scanProfile, "node_types": FamilyOpenExporter.nodeTypes, "edge_types": Array(Set(edges.map { $0["type"]! })).sorted(), "edge_vocabulary": FamilyOpenExporter.edgeVocabulary, "nodes": nodes, "edges": edges]
+        }
     }
 
     public static func writeJSON(

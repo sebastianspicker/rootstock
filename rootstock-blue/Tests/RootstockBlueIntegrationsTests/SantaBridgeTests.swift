@@ -31,13 +31,19 @@ final class SantaBridgeTests: XCTestCase {
 
     func testSuggestRuleIncludesPath() {
         let event = EventEnvelope(
-            source: .santa,
-            sourcePlugin: "SANTA",
-            eventType: "santa.decision",
-            fields: [
+            identity: EventEnvelope.Identity(
+                kind: "santa.decision",
+                label: "SANTA"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .santa
+            ),
+            payload: EventEnvelope.Payload(
+                properties: [
                 FieldTaxonomy.processPath: "/tmp/evil_payload",
                 "santa.sha256": "abc",
             ]
+            )
         )
         let rule = SantaBridge.suggestRule(from: event)
         XCTAssertTrue(rule.contains("/tmp/evil_payload"))
@@ -46,10 +52,16 @@ final class SantaBridgeTests: XCTestCase {
 
     func testOsqueryRowIncludesSourcePlugin() {
         let event = EventEnvelope(
-            source: .santa,
-            sourcePlugin: "SANTA",
-            eventType: "santa.decision",
-            fields: ["santa.decision": "DENY"]
+            identity: EventEnvelope.Identity(
+                kind: "santa.decision",
+                label: "SANTA"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .santa
+            ),
+            payload: EventEnvelope.Payload(
+                properties: ["santa.decision": "DENY"]
+            )
         )
         let row = OsqueryExport.asOsqueryRow(event)
         XCTAssertEqual(row["rootstock_blue_source_plugin"], "SANTA")

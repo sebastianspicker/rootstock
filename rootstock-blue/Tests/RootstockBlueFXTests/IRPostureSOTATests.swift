@@ -67,22 +67,14 @@ final class IRPostureSOTATests: XCTestCase {
     func testPersistenceInventoryTagsAutostart() throws {
         try XCTSkipIf(!FileManager.default.fileExists(atPath: relativeRoot.path))
         let events = try PersistenceInventory.enumerate(source: .directory(relativeRoot))
-        // Fixture has LaunchAgents - expect inventory-tagged events when present
         if !events.isEmpty {
             XCTAssertTrue(events.allSatisfy { ($0.fields["inventory.unified"] ?? "") == "true" })
             let sources = Set(events.compactMap { $0.fields["inventory.source"] })
-            XCTAssertTrue(
-                sources.contains("autostart") || sources.contains("btm")
-                    || sources.contains("cron") || sources.contains("login_item")
-                    || sources.contains("ssh"),
-                "expected inventory.source tags, got \(sources)"
-            )
-            XCTAssertTrue(events.contains {
-                $0.fields["inventory.parser"] == "AUTOSTART"
-                    || $0.fields["inventory.parser"] == "BTM"
-                    || $0.fields["inventory.parser"] == "CRON"
-                    || $0.fields["inventory.parser"] == "LOGINITEMS"
-            })
+            let expectedSources: Set<String> = ["autostart", "btm", "cron", "login_item", "ssh"]
+            XCTAssertFalse(sources.intersection(expectedSources).isEmpty, "expected inventory.source tags, got \(sources)")
+            let parsers = Set(events.compactMap { $0.fields["inventory.parser"] })
+            let expectedParsers: Set<String> = ["AUTOSTART", "BTM", "CRON", "LOGINITEMS"]
+            XCTAssertFalse(parsers.intersection(expectedParsers).isEmpty)
         }
     }
 

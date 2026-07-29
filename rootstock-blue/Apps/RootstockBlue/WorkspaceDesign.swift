@@ -112,8 +112,14 @@ struct StatusLabel: View {
     }
 }
 
+struct WorkspaceMetric {
+    let label: String
+    let value: String
+    let tone: RootstockTone
+}
+
 struct MetricStrip: View {
-    let metrics: [(label: String, value: String, tone: RootstockTone)]
+    let metrics: [WorkspaceMetric]
 
     var body: some View {
         HStack(spacing: 0) {

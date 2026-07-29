@@ -75,72 +75,21 @@ final class Wave13MultiPlanePairTests: XCTestCase {
     }
 
     func testHardenAssessSyntheticEmitsFiveWave13Controls() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "CALENDARREMINDERS",
-                eventType: "calendar.reminders",
-                fields: [
-                    "calrem.path": "/Users/alice/Library/Preferences/calendar_reminders_automation.json",
-                    "calrem.name": "Calendar/Reminders automation",
-                    "calrem.risk_tags": "automation_surface,wave13",
-                    "calrem.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "GKASSESSMENTHIST",
-                eventType: "gatekeeper.assessment",
-                fields: [
-                    "gkh.path": "/Users/alice/Library/Preferences/gatekeeper_assessment_history.json",
-                    "gkh.name": "Gatekeeper assessment history",
-                    "gkh.risk_tags": "assessment_surface,wave13",
-                    "gkh.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "HOMEBREWPKG",
-                eventType: "homebrew.package",
-                fields: [
-                    "brew.path": "/Users/alice/Library/Preferences/homebrew_package_dualuse.json",
-                    "brew.name": "Homebrew package dual-use",
-                    "brew.risk_tags": "package_surface,wave13",
-                    "brew.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "CUPSPRINTDUAL",
-                eventType: "cups.print",
-                fields: [
-                    "cups.path": "/Users/alice/Library/Preferences/cups_print_dualuse.json",
-                    "cups.name": "CUPS printer dual-use",
-                    "cups.risk_tags": "print_surface,wave13",
-                    "cups.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "SCREENCAPTUREPRIV",
-                eventType: "screencapture.privacy",
-                fields: [
-                    "scpriv.path": "/Users/alice/Library/Preferences/screencapture_privacy_dualuse.json",
-                    "scpriv.name": "ScreenCapture privacy dual-use",
-                    "scpriv.risk_tags": "capture_surface,wave13",
-                    "scpriv.secrets_exported": "false",
-                ]
-            ),
-        ]
+        let synthetic = HardeningTestFixtures.planeEvents(wave: "wave13", specifications: [
+            .init(plugin: "CALENDARREMINDERS", eventType: "calendar.reminders", fieldPrefix: "calrem", fileName: "calendar_reminders_automation.json", name: "Calendar/Reminders automation", riskTag: "automation_surface"),
+            .init(plugin: "GKASSESSMENTHIST", eventType: "gatekeeper.assessment", fieldPrefix: "gkh", fileName: "gatekeeper_assessment_history.json", name: "Gatekeeper assessment history", riskTag: "assessment_surface"),
+            .init(plugin: "HOMEBREWPKG", eventType: "homebrew.package", fieldPrefix: "brew", fileName: "homebrew_package_dualuse.json", name: "Homebrew package dual-use", riskTag: "package_surface"),
+            .init(plugin: "CUPSPRINTDUAL", eventType: "cups.print", fieldPrefix: "cups", fileName: "cups_print_dualuse.json", name: "CUPS printer dual-use", riskTag: "print_surface"),
+            .init(plugin: "SCREENCAPTUREPRIV", eventType: "screencapture.privacy", fieldPrefix: "scpriv", fileName: "screencapture_privacy_dualuse.json", name: "ScreenCapture privacy dual-use", riskTag: "capture_surface"),
+        ])
         let findings = HardeningAssessment.assess(events: synthetic)
         let controls = Set(findings.map(\.control))
-        for c in wave13HardenControls {
-            XCTAssertTrue(controls.contains(c), "missing harden \(c); got \(controls.sorted())")
+        for control in wave13HardenControls {
+            XCTAssertTrue(controls.contains(control), "missing harden \(control); got \(controls.sorted())")
         }
-        for f in findings where wave13HardenControls.contains(f.control) {
-            XCTAssertFalse(f.remediation.isEmpty)
-            let blob = (f.detail + f.remediation + f.evidence).lowercased()
-            XCTAssertFalse(blob.contains("password=secret"))
+        for finding in findings where wave13HardenControls.contains(finding.control) {
+            XCTAssertFalse(finding.remediation.isEmpty)
+            XCTAssertFalse((finding.detail + finding.remediation + finding.evidence).lowercased().contains("password=secret"))
         }
     }
 

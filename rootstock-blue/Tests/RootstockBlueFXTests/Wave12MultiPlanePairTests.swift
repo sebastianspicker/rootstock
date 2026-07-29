@@ -86,83 +86,22 @@ final class Wave12MultiPlanePairTests: XCTestCase {
     }
 
     func testHardenAssessSyntheticEmitsSixWave12Controls() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "WEBLOCINETLOC",
-                eventType: "webloc.delivery",
-                fields: [
-                    "webloc.path": "/Users/alice/Library/Preferences/webloc_inetloc_delivery.json",
-                    "webloc.name": "Webloc/inetloc delivery",
-                    "webloc.risk_tags": "delivery_surface,wave12",
-                    "webloc.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "MAILRULESAUTO",
-                eventType: "mail.rules",
-                fields: [
-                    "mail_rules.path": "/Users/alice/Library/Preferences/mail_rules_automation.json",
-                    "mail_rules.name": "Mail rules automation",
-                    "mail_rules.risk_tags": "rules_surface,wave12",
-                    "mail_rules.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "UNIFIEDLOGOBS",
-                eventType: "unified_log.observation",
-                fields: [
-                    "ulog.path": "/Users/alice/Library/Preferences/unified_log_observation.json",
-                    "ulog.name": "Unified log observation",
-                    "ulog.risk_tags": "observation_surface,wave12",
-                    "ulog.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "DOCKPERSIST",
-                eventType: "dock.persistence",
-                fields: [
-                    "dock.path": "/Users/alice/Library/Preferences/dock_persistence_surface.json",
-                    "dock.name": "Dock persistence dual-use",
-                    "dock.risk_tags": "dock_surface,wave12",
-                    "dock.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "OSASCRIPTSCPT",
-                eventType: "osascript.scpt",
-                fields: [
-                    "osa.path": "/Users/alice/Library/Preferences/osascript_scpt_delivery.json",
-                    "osa.name": "OSA/scpt delivery",
-                    "osa.risk_tags": "scpt_surface,wave12",
-                    "osa.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "NETWORKSHAREMOUNT",
-                eventType: "network.share_mount",
-                fields: [
-                    "share.path": "/Users/alice/Library/Preferences/network_share_mount.json",
-                    "share.name": "Network share mount",
-                    "share.risk_tags": "share_surface,wave12",
-                    "share.secrets_exported": "false",
-                ]
-            ),
-        ]
+        let synthetic = HardeningTestFixtures.planeEvents(wave: "wave12", specifications: [
+            .init(plugin: "WEBLOCINETLOC", eventType: "webloc.delivery", fieldPrefix: "webloc", fileName: "webloc_inetloc_delivery.json", name: "Webloc/inetloc delivery", riskTag: "delivery_surface"),
+            .init(plugin: "MAILRULESAUTO", eventType: "mail.rules", fieldPrefix: "mail_rules", fileName: "mail_rules_automation.json", name: "Mail rules automation", riskTag: "rules_surface"),
+            .init(plugin: "UNIFIEDLOGOBS", eventType: "unified_log.observation", fieldPrefix: "ulog", fileName: "unified_log_observation.json", name: "Unified log observation", riskTag: "observation_surface"),
+            .init(plugin: "DOCKPERSIST", eventType: "dock.persistence", fieldPrefix: "dock", fileName: "dock_persistence_surface.json", name: "Dock persistence dual-use", riskTag: "dock_surface"),
+            .init(plugin: "OSASCRIPTSCPT", eventType: "osascript.scpt", fieldPrefix: "osa", fileName: "osascript_scpt_delivery.json", name: "OSA/scpt delivery", riskTag: "scpt_surface"),
+            .init(plugin: "NETWORKSHAREMOUNT", eventType: "network.share_mount", fieldPrefix: "share", fileName: "network_share_mount.json", name: "Network share mount", riskTag: "share_surface"),
+        ])
         let findings = HardeningAssessment.assess(events: synthetic)
         let controls = Set(findings.map(\.control))
-        for c in wave12HardenControls {
-            XCTAssertTrue(controls.contains(c), "missing harden control \(c); got \(controls.sorted())")
+        for control in wave12HardenControls {
+            XCTAssertTrue(controls.contains(control), "missing harden control \(control); got \(controls.sorted())")
         }
-        for f in findings where wave12HardenControls.contains(f.control) {
-            XCTAssertFalse(f.remediation.isEmpty, "\(f.control) remediation")
-            let blob = (f.detail + f.remediation + f.evidence).lowercased()
-            XCTAssertFalse(blob.contains("password=secret"), "\(f.control) no secrets")
+        for finding in findings where wave12HardenControls.contains(finding.control) {
+            XCTAssertFalse(finding.remediation.isEmpty, "\(finding.control) remediation")
+            XCTAssertFalse((finding.detail + finding.remediation + finding.evidence).lowercased().contains("password=secret"), "\(finding.control) no secrets")
         }
     }
 

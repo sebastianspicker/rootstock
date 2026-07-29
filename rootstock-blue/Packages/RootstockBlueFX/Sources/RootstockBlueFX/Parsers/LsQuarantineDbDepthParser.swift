@@ -18,8 +18,8 @@ public struct LsQuarantineDbDepthParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let n = url.lastPathComponent
             return n == "ls_quarantine_db_depth.json" || n == "ls_quarantine_db_depth.jsonl"
-        }) {
-            if seen.insert(url) { events.append(contentsOf: parseFile(at: url)) }
+        }) where seen.insert(url) {
+            events.append(contentsOf: parseFile(at: url))
         }
         return events
     }
@@ -52,11 +52,21 @@ public struct LsQuarantineDbDepthParser: ArtifactParser {
         ]
         if !risk.isEmpty { fields["lsqdb.risk_tags"] = risk.joined(separator: ",") }
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(), source: .parser, sourcePlugin: "LSQUARANTINEDB",
-            eventType: "ls.quarantine_db",
-            entityRefs: [EntityID(kind: .host, value: "lsqdb|\(name.isEmpty ? path : name)")],
-            fields: fields, rawRef: ArtifactRoot.pathKey(sourceURL), confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "ls.quarantine_db",
+                label: "LSQUARANTINEDB"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "lsqdb|\(name.isEmpty ? path : name)")],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
     }
 }

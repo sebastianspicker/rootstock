@@ -18,8 +18,8 @@ public struct DnsResolverDualuseParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let n = url.lastPathComponent
             return n == "dns_resolver_dualuse.json" || n == "dns_resolver_dualuse.jsonl"
-        }) {
-            if seen.insert(url) { events.append(contentsOf: parseFile(at: url)) }
+        }) where seen.insert(url) {
+            events.append(contentsOf: parseFile(at: url))
         }
         return events
     }
@@ -52,11 +52,21 @@ public struct DnsResolverDualuseParser: ArtifactParser {
         ]
         if !risk.isEmpty { fields["dnsres.risk_tags"] = risk.joined(separator: ",") }
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(), source: .parser, sourcePlugin: "DNSRESOLVER",
-            eventType: "dns.resolver",
-            entityRefs: [EntityID(kind: .host, value: "dnsres|\(name.isEmpty ? path : name)")],
-            fields: fields, rawRef: ArtifactRoot.pathKey(sourceURL), confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "dns.resolver",
+                label: "DNSRESOLVER"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "dnsres|\(name.isEmpty ? path : name)")],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
     }
 }

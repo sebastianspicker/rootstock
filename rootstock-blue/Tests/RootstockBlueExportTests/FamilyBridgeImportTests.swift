@@ -7,32 +7,27 @@ final class FamilyBridgeImportTests: XCTestCase {
     func testFamilyOpenExporterShape() throws {
         let events = [
             EventEnvelope(
-                source: .collect,
-                sourcePlugin: "IRPOSTURE",
-                eventType: "ir.posture.host",
-                fields: ["host.hostname": "blue-fixture", "ir.mode": "live"]
+                identity: EventEnvelope.Identity(kind: "ir.posture.host", label: "IRPOSTURE"),
+                capture: EventEnvelope.Capture(source: .collect),
+                payload: EventEnvelope.Payload(properties: ["host.hostname": "blue-fixture", "ir.mode": "live"])
             ),
             EventEnvelope(
-                source: .collect,
-                sourcePlugin: "IRPOSTURE",
-                eventType: "ir.posture.protection",
-                fields: [
-                    "protection.name": "SIP",
-                    "protection.enabled": "true",
-                    "protection.parser": "HostPostureProbes",
-                    "ir.mode": "live",
-                ]
+                identity: EventEnvelope.Identity(kind: "ir.posture.protection", label: "IRPOSTURE"),
+                capture: EventEnvelope.Capture(source: .collect),
+                payload: EventEnvelope.Payload(properties: [
+                    "protection.name": "SIP", "protection.enabled": "true",
+                    "protection.parser": "HostPostureProbes", "ir.mode": "live",
+                ])
             ),
             EventEnvelope(
-                source: .parser,
-                sourcePlugin: "AUTOSTART",
-                eventType: "persistence.item",
-                fields: [
+                identity: EventEnvelope.Identity(kind: "persistence.item", label: "AUTOSTART"),
+                capture: EventEnvelope.Capture(source: .parser),
+                payload: EventEnvelope.Payload(properties: [
                     "persistence.label": "com.example.agent",
                     "persistence.path": "/Library/LaunchAgents/com.example.agent.plist",
                     "persistence.program": "/usr/bin/true",
                     "persistence.parser": "LaunchdPlistFacts",
-                ]
+                ])
             ),
         ]
         let dict = FamilyOpenExporter.build(events: events, caseName: "fixture-case")

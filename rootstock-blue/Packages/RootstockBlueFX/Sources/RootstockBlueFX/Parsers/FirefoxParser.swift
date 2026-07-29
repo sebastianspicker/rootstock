@@ -14,6 +14,22 @@ public struct FirefoxParser: ArtifactParser {
 
     public init() {}
 
+    private struct VisitDetails {
+        let url: String
+        let title: String
+        let visitCount: String
+        let riskTags: [String]
+        let eventTime: Date
+    }
+
+    private struct DownloadDetails {
+        let path: String
+        let url: String
+        let mimeType: String
+        let riskTags: [String]
+        let eventTime: Date
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
         var events: [EventEnvelope] = []
@@ -25,22 +41,18 @@ public struct FirefoxParser: ArtifactParser {
             return name == "firefox_history.json"
                 || name == "firefox_export.json"
                 || name == "places_export.json"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseJSONExport(at: url))
-            }
         }
 
         // places.sqlite when present
         for url in root.enumerate(matching: { url in
             url.lastPathComponent == "places.sqlite"
                 && (url.path.contains("Firefox") || url.path.contains("firefox"))
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 if let rows = try? parsePlacesSQLite(url) {
                     events.append(contentsOf: rows)
                 }
-            }
         }
 
         return events
@@ -48,58 +60,51 @@ public struct FirefoxParser: ArtifactParser {
 
     private func parseJSONExport(at url: URL) -> [EventEnvelope] {
         guard let obj = ArtifactIO.jsonObject(contentsOf: url) else { return [] }
-
-        var events: [EventEnvelope] = []
         let user = inferUser(from: url.path)
-
         if let dict = obj as? [String: Any] {
-            if let visits = dict["visits"] as? [[String: Any]] {
-                for v in visits {
-                    if let e = makeVisit(from: v, sourceURL: url, user: user) {
-                        events.append(e)
-                    }
-                }
-            }
-            if let downloads = dict["downloads"] as? [[String: Any]] {
-                for d in downloads {
-                    if let e = makeDownload(from: d, sourceURL: url, user: user) {
-                        events.append(e)
-                    }
-                }
-            }
-            // Flat list
-            if let items = dict["items"] as? [[String: Any]] {
-                for item in items {
-                    if item["path"] != nil || item["target_path"] != nil {
-                        if let e = makeDownload(from: item, sourceURL: url, user: user) {
-                            events.append(e)
-                        }
-                    } else if let e = makeVisit(from: item, sourceURL: url, user: user) {
-                        events.append(e)
-                    }
-                }
-            }
-        } else if let arr = obj as? [[String: Any]] {
-            for item in arr {
-                if item["path"] != nil || item["target_path"] != nil {
-                    if let e = makeDownload(from: item, sourceURL: url, user: user) {
-                        events.append(e)
-                    }
-                } else if let e = makeVisit(from: item, sourceURL: url, user: user) {
-                    events.append(e)
-                }
-            }
+            return exportEvents(from: dict, sourceURL: url, user: user)
         }
-        return events
+        if let items = obj as? [[String: Any]] {
+            return mixedEvents(items, sourceURL: url, user: user)
+        }
+        return []
+    }
+
+    private func exportEvents(from dict: [String: Any], sourceURL: URL, user: String?) -> [EventEnvelope] {
+        visitEvents(dict["visits"] as? [[String: Any]] ?? [], sourceURL: sourceURL, user: user)
+            + downloadEvents(dict["downloads"] as? [[String: Any]] ?? [], sourceURL: sourceURL, user: user)
+            + mixedEvents(dict["items"] as? [[String: Any]] ?? [], sourceURL: sourceURL, user: user)
+    }
+
+    private func visitEvents(_ items: [[String: Any]], sourceURL: URL, user: String?) -> [EventEnvelope] {
+        items.compactMap { makeVisit(from: $0, sourceURL: sourceURL, user: user) }
+    }
+
+    private func downloadEvents(_ items: [[String: Any]], sourceURL: URL, user: String?) -> [EventEnvelope] {
+        items.compactMap { makeDownload(from: $0, sourceURL: sourceURL, user: user) }
+    }
+
+    private func mixedEvents(_ items: [[String: Any]], sourceURL: URL, user: String?) -> [EventEnvelope] {
+        items.compactMap { item in
+            isDownload(item) ? makeDownload(from: item, sourceURL: sourceURL, user: user)
+                : makeVisit(from: item, sourceURL: sourceURL, user: user)
+        }
+    }
+
+    private func isDownload(_ item: [String: Any]) -> Bool {
+        item["path"] != nil || item["target_path"] != nil
     }
 
     private func parsePlacesSQLite(_ url: URL) throws -> [EventEnvelope] {
         let reader = try SQLiteReader(url: url)
-        var events: [EventEnvelope] = []
         let user = inferUser(from: url.path)
+        return try historyEvents(reader: reader, sourceURL: url, user: user)
+            + downloadAnnotationEvents(reader: reader, sourceURL: url, user: user)
+    }
 
-        if try reader.tableExists("moz_places"), try reader.tableExists("moz_historyvisits") {
-            let rows = try reader.query(
+    private func historyEvents(reader: SQLiteReader, sourceURL: URL, user: String?) throws -> [EventEnvelope] {
+        guard try reader.tableExists("moz_places"), try reader.tableExists("moz_historyvisits") else { return [] }
+        let rows = try reader.query(
                 """
                 SELECT
                   COALESCE(p.url, '') AS url,
@@ -110,37 +115,34 @@ public struct FirefoxParser: ArtifactParser {
                 LEFT JOIN moz_places p ON v.place_id = p.id
                 LIMIT 5000;
                 """
-            )
-            for row in rows {
-                let when = Epochs.dateFromFirefoxMicroseconds(row["visit_date"] ?? "")
-                    ?? Date(timeIntervalSince1970: 0)
-                let urlString = row["url"] ?? ""
-                events.append(
-                    EventEnvelope(
-                        eventTime: when,
-                        collectedAt: Date(),
-                        source: .parser,
-                        sourcePlugin: "FIREFOX",
-                        eventType: "browser.visit",
-                        entityRefs: urlString.isEmpty ? [] : [EntityID(kind: .file, value: urlString)],
-                        fields: [
-                            "browser.engine": "firefox",
-                            "browser.url": urlString,
-                            "browser.title": row["title"] ?? "",
-                            "browser.visit_count": row["visit_count"] ?? "",
-                            FieldTaxonomy.eventType: "browser.visit",
-                            FieldTaxonomy.userName: user ?? "",
-                        ],
-                        rawRef: ArtifactRoot.pathKey(url),
-                        confidence: 0.95
-                    )
-                )
-            }
-        }
+        )
+        return rows.map { makeSQLiteVisit($0, sourceURL: sourceURL, user: user) }
+    }
 
-        // Download annotations when present
-        if try reader.tableExists("moz_annos"), try reader.tableExists("moz_places") {
-            let drows = try reader.query(
+    private func makeSQLiteVisit(_ row: [String: String], sourceURL: URL, user: String?) -> EventEnvelope {
+        let url = row["url"] ?? ""
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "browser.visit",
+                label: "FIREFOX"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: firefoxDate(row["visit_date"]),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: url.isEmpty ? [] : [EntityID(kind: .file, value: url)],
+                properties: visitFields(url: url, title: row["title"] ?? "", count: row["visit_count"] ?? "", user: user, riskTags: []),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.95
+            )
+        )
+    }
+
+    private func downloadAnnotationEvents(reader: SQLiteReader, sourceURL: URL, user: String?) throws -> [EventEnvelope] {
+        guard try reader.tableExists("moz_annos"), try reader.tableExists("moz_places") else { return [] }
+        let rows = try reader.query(
                 """
                 SELECT
                   COALESCE(p.url, '') AS url,
@@ -151,133 +153,170 @@ public struct FirefoxParser: ArtifactParser {
                 WHERE a.content LIKE 'file://%' OR a.content LIKE '/%'
                 LIMIT 2000;
                 """
-            )
-            for row in drows {
-                let path = (row["content"] ?? "").replacingOccurrences(of: "file://", with: "")
-                let when = Epochs.dateFromFirefoxMicroseconds(row["date_added"] ?? "")
-                    ?? Date(timeIntervalSince1970: 0)
-                var refs: [EntityID] = []
-                if !path.isEmpty { refs.append(.file(path: path)) }
-                events.append(
-                    EventEnvelope(
-                        eventTime: when,
-                        collectedAt: Date(),
-                        source: .parser,
-                        sourcePlugin: "FIREFOX",
-                        eventType: "browser.download",
-                        entityRefs: refs,
-                        fields: [
-                            "browser.engine": "firefox",
-                            "browser.url": row["url"] ?? "",
-                            "browser.download_path": path,
-                            FieldTaxonomy.eventType: "browser.download",
-                            FieldTaxonomy.userName: user ?? "",
-                        ],
-                        rawRef: ArtifactRoot.pathKey(url),
-                        confidence: 0.9
-                    )
-                )
-            }
-        }
+        )
+        return rows.map { makeSQLiteDownload($0, sourceURL: sourceURL, user: user) }
+    }
 
-        return events
+    private func makeSQLiteDownload(_ row: [String: String], sourceURL: URL, user: String?) -> EventEnvelope {
+        let path = (row["content"] ?? "").replacingOccurrences(of: "file://", with: "")
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "browser.download",
+                label: "FIREFOX"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: firefoxDate(row["date_added"]),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: downloadEntities(path: path, url: ""),
+                properties: downloadFields(path: path, url: row["url"] ?? "", mimeType: "", user: user, riskTags: []),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
+        )
+    }
+
+    private func firefoxDate(_ raw: String?) -> Date {
+        Epochs.dateFromFirefoxMicroseconds(raw ?? "") ?? Date(timeIntervalSince1970: 0)
     }
 
     private func makeVisit(from item: [String: Any], sourceURL: URL, user: String?) -> EventEnvelope? {
-        let urlString = stringish(item["url"]) ?? stringish(item["uri"]) ?? ""
-        let title = stringish(item["title"]) ?? ""
-        guard !urlString.isEmpty || !title.isEmpty else { return nil }
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        let lower = urlString.lowercased()
-        if lower.contains("evil") || lower.contains("c2.") || lower.contains("malware") {
-            if !risk.contains("evil_domain") { risk.append("evil_domain") }
-        }
-
-        var fields: [String: String] = [
-            "browser.engine": "firefox",
-            "browser.url": urlString,
-            "browser.title": title,
-            "browser.visit_count": stringish(item["visit_count"]) ?? "",
-            FieldTaxonomy.eventType: "browser.visit",
-            FieldTaxonomy.userName: user ?? "",
-        ]
-        if !risk.isEmpty {
-            fields["browser.risk_tags"] = risk.joined(separator: ",")
-        }
-
+        guard let details = visitDetails(item) else { return nil }
         return EventEnvelope(
-            eventTime: parseDate(item["visit_time"] ?? item["timestamp"] ?? item["time"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "FIREFOX",
-            eventType: "browser.visit",
-            entityRefs: urlString.isEmpty ? [] : [EntityID(kind: .file, value: urlString)],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.92
+            identity: EventEnvelope.Identity(
+                kind: "browser.visit",
+                label: "FIREFOX"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: details.eventTime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: visitEntities(details.url),
+                properties: visitFields(url: details.url, title: details.title, count: details.visitCount, user: user, riskTags: details.riskTags),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.92
+            )
         )
     }
 
     private func makeDownload(from item: [String: Any], sourceURL: URL, user: String?) -> EventEnvelope? {
-        let path = stringish(item["path"])
-            ?? stringish(item["target_path"])
-            ?? stringish(item["download_path"])
-            ?? ""
-        let urlString = stringish(item["url"])
-            ?? stringish(item["source_url"])
-            ?? stringish(item["referrer"])
-            ?? ""
-        guard !path.isEmpty || !urlString.isEmpty else { return nil }
+        guard let details = downloadDetails(item) else { return nil }
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "browser.download",
+                label: "FIREFOX"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: details.eventTime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: downloadEntities(path: details.path, url: details.url),
+                properties: downloadFields(path: details.path, url: details.url, mimeType: details.mimeType, user: user, riskTags: details.riskTags),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.92
+            )
+        )
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    private func visitDetails(_ item: [String: Any]) -> VisitDetails? {
+        let url = stringish(item["url"]) ?? stringish(item["uri"]) ?? ""
+        let title = stringish(item["title"]) ?? ""
+        guard !url.isEmpty || !title.isEmpty else { return nil }
+        return VisitDetails(
+            url: url, title: title, visitCount: stringish(item["visit_count"]) ?? "",
+            riskTags: visitRiskTags(item, url: url),
+            eventTime: parseDate(item["visit_time"] ?? item["timestamp"] ?? item["time"]) ?? Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    private func downloadDetails(_ item: [String: Any]) -> DownloadDetails? {
+        let path = firstString(item, keys: ["path", "target_path", "download_path"])
+        let url = firstString(item, keys: ["url", "source_url", "referrer"])
+        guard !path.isEmpty || !url.isEmpty else { return nil }
+        let mimeType = stringish(item["mime_type"]) ?? ""
+        return DownloadDetails(
+            path: path, url: url, mimeType: mimeType, riskTags: downloadRiskTags(item, path: path, url: url, mimeType: mimeType),
+            eventTime: parseDate(item["start_time"] ?? item["timestamp"] ?? item["time"]) ?? Date(timeIntervalSince1970: 0)
+        )
+    }
+
+    private func firstString(_ item: [String: Any], keys: [String]) -> String {
+        for key in keys {
+            if let value = stringish(item[key]) { return value }
         }
-        let lowerURL = urlString.lowercased()
+        return ""
+    }
+
+    private func visitRiskTags(_ item: [String: Any], url: String) -> [String] {
+        var tags = taggedRisks(item)
+        if suspiciousURL(url) { appendUnique("evil_domain", to: &tags) }
+        return tags
+    }
+
+    private func downloadRiskTags(_ item: [String: Any], path: String, url: String, mimeType: String) -> [String] {
+        var tags = taggedRisks(item)
+        if suspiciousDownload(path: path, url: url) { appendUnique("evil_domain", to: &tags) }
+        if scriptDownload(path: path, mimeType: mimeType) { appendUnique("script_download", to: &tags) }
+        if path.lowercased().contains("/tmp/") { appendUnique("tmp_path", to: &tags) }
+        return tags
+    }
+
+    private func taggedRisks(_ item: [String: Any]) -> [String] {
+        guard let tags = stringish(item["risk_tags"]), !tags.isEmpty else { return [] }
+        return tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func suspiciousURL(_ url: String) -> Bool {
+        let lower = url.lowercased()
+        return lower.contains("evil") || lower.contains("c2.") || lower.contains("malware")
+    }
+
+    private func suspiciousDownload(path: String, url: String) -> Bool {
         let lowerPath = path.lowercased()
-        if lowerURL.contains("evil") || lowerPath.contains("evil") || lowerPath.contains("payload") {
-            if !risk.contains("evil_domain") { risk.append("evil_domain") }
-        }
-        if lowerPath.hasSuffix(".sh") || lowerPath.hasSuffix(".py") || lowerPath.hasSuffix(".command")
-            || (stringish(item["mime_type"]) ?? "").contains("x-sh") {
-            if !risk.contains("script_download") { risk.append("script_download") }
-        }
-        if lowerPath.contains("/tmp/") {
-            if !risk.contains("tmp_path") { risk.append("tmp_path") }
-        }
+        return url.lowercased().contains("evil") || lowerPath.contains("evil") || lowerPath.contains("payload")
+    }
 
-        var fields: [String: String] = [
-            "browser.engine": "firefox",
-            "browser.url": urlString,
-            "browser.download_path": path,
-            "browser.mime_type": stringish(item["mime_type"]) ?? "",
-            FieldTaxonomy.eventType: "browser.download",
-            FieldTaxonomy.userName: user ?? "",
-        ]
-        if !risk.isEmpty {
-            fields["browser.risk_tags"] = risk.joined(separator: ",")
-        }
+    private func scriptDownload(path: String, mimeType: String) -> Bool {
+        let lowerPath = path.lowercased()
+        return lowerPath.hasSuffix(".sh") || lowerPath.hasSuffix(".py") || lowerPath.hasSuffix(".command") || mimeType.contains("x-sh")
+    }
 
+    private func appendUnique(_ tag: String, to tags: inout [String]) {
+        if !tags.contains(tag) { tags.append(tag) }
+    }
+
+    private func visitEntities(_ url: String) -> [EntityID] {
+        url.isEmpty ? [] : [EntityID(kind: .file, value: url)]
+    }
+
+    private func downloadEntities(path: String, url: String) -> [EntityID] {
         var refs: [EntityID] = []
         if !path.isEmpty { refs.append(.file(path: path)) }
-        if !urlString.isEmpty { refs.append(EntityID(kind: .file, value: urlString)) }
+        if !url.isEmpty { refs.append(EntityID(kind: .file, value: url)) }
+        return refs
+    }
 
-        return EventEnvelope(
-            eventTime: parseDate(item["start_time"] ?? item["timestamp"] ?? item["time"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "FIREFOX",
-            eventType: "browser.download",
-            entityRefs: refs,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.92
-        )
+    private func visitFields(url: String, title: String, count: String, user: String?, riskTags: [String]) -> [String: String] {
+        var fields = [
+            "browser.engine": "firefox", "browser.url": url, "browser.title": title,
+            "browser.visit_count": count, FieldTaxonomy.eventType: "browser.visit", FieldTaxonomy.userName: user ?? "",
+        ]
+        if !riskTags.isEmpty { fields["browser.risk_tags"] = riskTags.joined(separator: ",") }
+        return fields
+    }
+
+    private func downloadFields(path: String, url: String, mimeType: String, user: String?, riskTags: [String]) -> [String: String] {
+        var fields = [
+            "browser.engine": "firefox", "browser.url": url, "browser.download_path": path,
+            "browser.mime_type": mimeType, FieldTaxonomy.eventType: "browser.download", FieldTaxonomy.userName: user ?? "",
+        ]
+        if !riskTags.isEmpty { fields["browser.risk_tags"] = riskTags.joined(separator: ",") }
+        return fields
     }
 }

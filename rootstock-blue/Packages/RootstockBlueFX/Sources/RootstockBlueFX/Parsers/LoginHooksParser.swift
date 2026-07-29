@@ -24,43 +24,51 @@ public struct LoginHooksParser: ArtifactParser {
         var events: [EventEnvelope] = []
         var seen = PathDeduper()
 
-        // JSON inventory (fixture-friendly)
-        for rel in [
+        appendInventoryEvents(from: root, to: &events, seen: &seen)
+        appendPlistEvents(from: root, to: &events, seen: &seen)
+        appendLoginwindowJSONEvents(from: root, to: &events, seen: &seen)
+
+        return events
+    }
+
+    private func appendInventoryEvents(from root: ArtifactRoot, to events: inout [EventEnvelope], seen: inout PathDeduper) {
+        let paths = [
             "Library/Preferences/login_hooks.json",
             "Library/Preferences/com.apple.loginwindow.hooks.json",
-        ] {
-            if let url = root.firstExisting([rel]),
-               let json = ArtifactIO.jsonObject(contentsOf: url),
-               seen.insert(url) {
-                events.append(contentsOf: parseJSONInventory(json, rawRef: ArtifactRoot.pathKey(url)))
-            }
+        ]
+        for path in paths {
+            guard let url = root.firstExisting([path]),
+                  let json = ArtifactIO.jsonObject(contentsOf: url),
+                  seen.insert(url)
+            else { continue }
+            events.append(contentsOf: parseJSONInventory(json, rawRef: ArtifactRoot.pathKey(url)))
         }
+    }
 
-        // Classic plists
-        let plistPaths = [
+    private func appendPlistEvents(from root: ArtifactRoot, to events: inout [EventEnvelope], seen: inout PathDeduper) {
+        let paths = [
             "Library/Preferences/com.apple.loginwindow.plist",
             "var/root/Library/Preferences/com.apple.loginwindow.plist",
             "private/var/root/Library/Preferences/com.apple.loginwindow.plist",
         ]
-        for rel in plistPaths {
-            guard let url = root.firstExisting([rel]) else { continue }
-            guard seen.insert(url) else { continue }
+        for path in paths {
+            guard let url = root.firstExisting([path]), seen.insert(url) else { continue }
             events.append(contentsOf: parseLoginwindowPlist(at: url))
         }
+    }
 
-        // Also accept JSON-encoded loginwindow export used by some collectors
-        for rel in [
+    private func appendLoginwindowJSONEvents(from root: ArtifactRoot, to events: inout [EventEnvelope], seen: inout PathDeduper) {
+        let paths = [
             "Library/Preferences/com.apple.loginwindow.json",
             "Library/Preferences/loginwindow.json",
-        ] {
-            guard let url = root.firstExisting([rel]),
-                  let json = ArtifactIO.jsonDict(contentsOf: url)
+        ]
+        for path in paths {
+            guard let url = root.firstExisting([path]),
+                  let json = ArtifactIO.jsonDict(contentsOf: url),
+                  seen.insert(url)
             else { continue }
-            guard seen.insert(url) else { continue }
             events.append(contentsOf: eventsFromLoginwindowDict(json, rawRef: ArtifactRoot.pathKey(url)))
         }
-
-        return events
     }
 
     private func parseJSONInventory(_ json: Any, rawRef: String) -> [EventEnvelope] {
@@ -76,24 +84,19 @@ public struct LoginHooksParser: ArtifactParser {
                 items = [dict]
             }
         }
-        return items.compactMap { item -> EventEnvelope? in
-            let hookType = (stringish(item["hook_type"])
-                ?? stringish(item["type"])
-                ?? stringish(item["kind"])
-                ?? "login").lowercased()
-            let script = stringish(item["script_path"])
-                ?? stringish(item["path"])
-                ?? stringish(item["script"])
-                ?? ""
-            guard !script.isEmpty else { return nil }
-            let normalizedType = hookType.contains("out") ? "logout" : "login"
-            return makeEvent(
-                hookType: normalizedType,
-                scriptPath: script,
-                scriptExists: boolish(item["script_exists"]).map { $0 ? "true" : "false" },
-                rawRef: rawRef
-            )
-        }
+        return items.compactMap { inventoryEvent(for: $0, rawRef: rawRef) }
+    }
+
+    private func inventoryEvent(for item: [String: Any], rawRef: String) -> EventEnvelope? {
+        let hookType = (stringish(item["hook_type"]) ?? stringish(item["type"]) ?? stringish(item["kind"]) ?? "login").lowercased()
+        let script = stringish(item["script_path"]) ?? stringish(item["path"]) ?? stringish(item["script"]) ?? ""
+        guard !script.isEmpty else { return nil }
+        return makeEvent(
+            hookType: hookType.contains("out") ? "logout" : "login",
+            scriptPath: script,
+            scriptExists: boolish(item["script_exists"]).map { $0 ? "true" : "false" },
+            rawRef: rawRef
+        )
     }
 
     private func parseLoginwindowPlist(at url: URL) -> [EventEnvelope] {
@@ -127,18 +130,38 @@ public struct LoginHooksParser: ArtifactParser {
         rawRef: String
     ) -> EventEnvelope {
         let kind = hookType == "logout" ? "logout_hook" : "login_hook"
+        let risk = riskTags(for: scriptPath)
+        let fields = hookFields(kind: kind, hookType: hookType, scriptPath: scriptPath, scriptExists: scriptExists, risk: risk)
+
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "persistence.item",
+                label: "LOGINHOOKS"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: hookEntities(hookType: hookType, scriptPath: scriptPath, rawRef: rawRef),
+                properties: fields,
+                provenance: rawRef,
+                confidence: 0.96
+            )
+        )
+    }
+
+    private func riskTags(for scriptPath: String) -> [String] {
         var risk: [String] = []
         let lower = scriptPath.lowercased()
-        if lower.contains("/tmp/") || lower.contains("/var/tmp/") {
-            risk.append("tmp_path")
-        }
-        if lower.contains("/users/shared/") {
-            risk.append("shared_writable")
-        }
-        if lower.contains("evil") || lower.contains("persist") {
-            risk.append("suspicious_name")
-        }
+        if ["/tmp/", "/var/tmp/"].contains(where: lower.contains) { risk.append("tmp_path") }
+        if lower.contains("/users/shared/") { risk.append("shared_writable") }
+        if ["evil", "persist"].contains(where: lower.contains) { risk.append("suspicious_name") }
+        return risk
+    }
 
+    private func hookFields(kind: String, hookType: String, scriptPath: String, scriptExists: String?, risk: [String]) -> [String: String] {
         var fields: [String: String] = [
             "persistence.kind": kind,
             "persistence.label": "loginwindow.\(hookType)",
@@ -157,23 +180,14 @@ public struct LoginHooksParser: ArtifactParser {
             fields["persistence.risk_tags"] = risk.joined(separator: ",")
             fields["loginwindow.risk_tags"] = risk.joined(separator: ",")
         }
+        return fields
+    }
 
-        let entities: [EntityID] = [
+    private func hookEntities(hookType: String, scriptPath: String, rawRef: String) -> [EntityID] {
+        [
             EntityID(kind: .persistence, value: "loginwindow|\(hookType)|\(scriptPath)"),
             .file(path: scriptPath),
             .file(path: rawRef),
         ]
-
-        return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "LOGINHOOKS",
-            eventType: "persistence.item",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: rawRef,
-            confidence: 0.96
-        )
     }
 }

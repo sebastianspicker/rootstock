@@ -23,11 +23,9 @@ public enum ESEventMapper {
         }
         counters.recordMapped()
         return EventEnvelope(
-            source: .es,
-            sourcePlugin: "eskit",
-            eventType: eventType,
-            entityRefs: entities,
-            fields: fields
+            identity: .init(kind: eventType, label: "eskit"),
+            capture: .init(source: .es),
+            payload: .init(entityRefs: entities, properties: fields)
         )
     }
 }

@@ -15,131 +15,69 @@ public struct CronParser: ArtifactParser {
 
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
+        return systemCrontabs(root, seen: &seen)
+            + discoveredTabs(root, seen: &seen)
+            + explicitAtTabs(root, seen: &seen)
+            + periodicScripts(root, seen: &seen)
+    }
 
-        // System crontab
-        for rel in ["etc/crontab", "private/etc/crontab"] {
-            if let url = root.firstExisting([rel]) {
-                if seen.insert(url) {
-                    events.append(contentsOf: parseCrontab(at: url, kind: "cron", defaultUser: "root"))
-                }
-            }
-        }
+    private func systemCrontabs(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        ["etc/crontab", "private/etc/crontab"].compactMap { root.firstExisting([$0]) }
+            .flatMap { seen.insert($0) ? parseCrontab(at: $0, kind: "cron", defaultUser: "root") : [] }
+    }
 
-        // cron.d drop-ins + user crontabs under etc/cron.d or Users/*/.cron
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            let name = url.lastPathComponent
-            if path.contains("/cron.d/") || path.hasSuffix("/cron.d/\(name)") {
-                return true
-            }
-            if name == ".cron" || path.hasSuffix("/.cron") {
-                return true
-            }
-            // Users/* /var/cron/tabs style exported as plain text
-            if path.contains("/cron/tabs/") || path.contains("/at/tabs/") {
-                return true
-            }
-            return false
-        }) {
-            if !seen.insert(url) { continue }
+    private func discoveredTabs(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        root.enumerate(matching: Self.isCronTab).filter { seen.insert($0) }.flatMap { url in
             let isAt = url.path.contains("/at/tabs/")
-            let user = isAt ? url.lastPathComponent : cronUser(from: url)
-            events.append(contentsOf: parseCrontab(
-                at: url,
-                kind: isAt ? "at" : "cron",
-                defaultUser: user ?? "root"
-            ))
+            return parseCrontab(at: url, kind: isAt ? "at" : "cron", defaultUser: isAt ? url.lastPathComponent : cronUser(from: url) ?? "root")
         }
+    }
 
-        // Explicit at tabs paths
-        for base in ["private/var/at/tabs", "var/at/tabs"] {
-            let dir = root.file(base)
-            guard let items = try? FileManager.default.contentsOfDirectory(
-                at: dir,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) else { continue }
-            for item in items {
-                if !seen.insert(item) { continue }
-                events.append(contentsOf: parseCrontab(
-                    at: item,
-                    kind: "at",
-                    defaultUser: item.lastPathComponent
-                ))
-            }
+    private func explicitAtTabs(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        ["private/var/at/tabs", "var/at/tabs"].flatMap { base in
+            let directory = root.file(base)
+            let items = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+            return items.flatMap { seen.insert($0) ? parseCrontab(at: $0, kind: "at", defaultUser: $0.lastPathComponent) : [] }
         }
+    }
 
-        // periodic scripts: daily/weekly/monthly under private/etc/periodic or etc/periodic
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            return path.contains("/periodic/")
-                && !url.hasDirectoryPath
-                && !url.lastPathComponent.hasPrefix(".")
-        }) {
-            if !seen.insert(url) { continue }
-            if let event = parsePeriodic(at: url) {
-                events.append(event)
-            }
-        }
+    private func periodicScripts(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        root.enumerate(matching: Self.isPeriodicScript).compactMap { seen.insert($0) ? parsePeriodic(at: $0) : nil }
+    }
 
-        return events
+    private static func isCronTab(_ url: URL) -> Bool {
+        let path = url.path
+        let name = url.lastPathComponent
+        return path.contains("/cron.d/") || path.hasSuffix("/cron.d/\(name)") || name == ".cron" || path.hasSuffix("/.cron") || path.contains("/cron/tabs/") || path.contains("/at/tabs/")
+    }
+
+    private static func isPeriodicScript(_ url: URL) -> Bool {
+        url.path.contains("/periodic/") && !url.hasDirectoryPath && !url.lastPathComponent.hasPrefix(".")
     }
 
     // MARK: - crontab / at
 
     private func parseCrontab(at url: URL, kind: String, defaultUser: String) -> [EventEnvelope] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
-        var events: [EventEnvelope] = []
-        var lineNo = 0
-
-        for rawLine in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
-            lineNo += 1
-            let line = String(rawLine).trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            // env assignments like SHELL=/bin/bash - skip
-            if line.contains("=") && !line.contains(" ") {
-                // SHELL=/bin/sh style
-                let parts = line.split(separator: "=", maxSplits: 1)
-                if parts.count == 2, !parts[0].contains("/") {
-                    continue
-                }
-            }
-            if line.hasPrefix("SHELL=") || line.hasPrefix("PATH=") || line.hasPrefix("MAILTO=")
-                || line.hasPrefix("HOME=") || line.hasPrefix("LOGNAME=") {
-                continue
-            }
-
-            if kind == "at" {
-                // at tabs are often free-form shell; treat whole line as command
-                if let event = makePersistenceEvent(
-                    kind: "at",
-                    schedule: "at",
-                    command: line,
-                    user: defaultUser,
-                    sourceURL: url,
-                    lineNo: lineNo
-                ) {
-                    events.append(event)
-                }
-                continue
-            }
-
-            if let parsed = parseCronLine(line, defaultUser: defaultUser) {
-                if let event = makePersistenceEvent(
-                    kind: "cron",
-                    schedule: parsed.schedule,
-                    command: parsed.command,
-                    user: parsed.user,
-                    sourceURL: url,
-                    lineNo: lineNo
-                ) {
-                    events.append(event)
-                }
-            }
+        return text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated().compactMap {
+            eventForLine(String($0.element), number: $0.offset + 1, kind: kind, defaultUser: defaultUser, sourceURL: url)
         }
-        return events
+    }
+
+    private func eventForLine(_ rawLine: String, number: Int, kind: String, defaultUser: String, sourceURL: URL) -> EventEnvelope? {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        guard !isIgnoredCronLine(line) else { return nil }
+        let entry = kind == "at"
+            ? CronEntry(schedule: "at", user: defaultUser, command: line, kind: "at")
+            : parseCronLine(line, defaultUser: defaultUser)
+        return entry.flatMap { makePersistenceEvent($0, sourceURL: sourceURL, lineNo: number) }
+    }
+
+    private func isIgnoredCronLine(_ line: String) -> Bool {
+        let environmentPrefix = ["SHELL=", "PATH=", "MAILTO=", "HOME=", "LOGNAME="]
+        let assignment = line.contains("=") && !line.contains(" ") && line.split(separator: "=", maxSplits: 1).first.map { !$0.contains("/") } == true
+        return line.isEmpty || line.hasPrefix("#") || assignment || environmentPrefix.contains(where: line.hasPrefix)
     }
 
     /// Vixie cron special schedule strings (must be handled before 5-field path).
@@ -150,48 +88,40 @@ public struct CronParser: ArtifactParser {
 
     /// Parse classic crontab line: Vixie specials (`@reboot`…), user crontab (5 fields + cmd),
     /// or system/cron.d (6: schedule + user + cmd).
-    private func parseCronLine(_ line: String, defaultUser: String) -> (schedule: String, user: String, command: String)? {
+    private func parseCronLine(_ line: String, defaultUser: String) -> CronEntry? {
         let tokens = tokenizeCron(line)
         guard !tokens.isEmpty else { return nil }
+        return tokens[0].hasPrefix("@")
+            ? parseVixieEntry(tokens, defaultUser: defaultUser)
+            : parseClassicEntry(tokens, defaultUser: defaultUser)
+    }
 
-        // Vixie specials: @reboot [user] command...  OR  @daily command...
+    private func parseVixieEntry(_ tokens: [String], defaultUser: String) -> CronEntry? {
         let head = tokens[0].lowercased()
-        if head.hasPrefix("@") {
-            guard Self.vixieSpecials.contains(head) else { return nil }
-            let rest = Array(tokens.dropFirst())
-            guard !rest.isEmpty else { return nil }
-            let first = rest[0]
-            let looksLikeUser = !first.contains("/") && !first.contains("$") && !first.contains("=")
-                && first.rangeOfCharacter(from: .letters) != nil
-                && first.count < 32
-            if looksLikeUser && rest.count >= 2 {
-                return (head, first, rest.dropFirst().joined(separator: " "))
-            }
-            return (head, defaultUser, rest.joined(separator: " "))
-        }
+        guard Self.vixieSpecials.contains(head) else { return nil }
+        let rest = Array(tokens.dropFirst())
+        guard !rest.isEmpty else { return nil }
+        let hasExplicitUser = isUserToken(rest[0]) && rest.count >= 2
+        let user = hasExplicitUser ? rest[0] : defaultUser
+        let command = hasExplicitUser ? rest.dropFirst().joined(separator: " ") : rest.joined(separator: " ")
+        return CronEntry(schedule: head, user: user, command: command)
+    }
 
-        // Minimum classic: m h dom mon dow cmd  (6 tokens)
+    private func parseClassicEntry(_ tokens: [String], defaultUser: String) -> CronEntry? {
         guard tokens.count >= 6 else { return nil }
-
-        // Heuristic: if 6th token looks like a username (no slash, no $), treat as system crontab.
         let scheduleFields = Array(tokens.prefix(5))
         let rest = Array(tokens.dropFirst(5))
         guard !rest.isEmpty else { return nil }
-
         let schedule = scheduleFields.joined(separator: " ")
-        let sixth = rest[0]
-        let looksLikeUser = !sixth.contains("/") && !sixth.contains("$") && !sixth.contains("=")
-            && sixth.rangeOfCharacter(from: .letters) != nil
-            && sixth.count < 32
+        let hasExplicitUser = isUserToken(rest[0]) && rest.count >= 2
+        let user = hasExplicitUser ? rest[0] : defaultUser
+        let command = hasExplicitUser ? rest.dropFirst().joined(separator: " ") : rest.joined(separator: " ")
+        return CronEntry(schedule: schedule, user: user, command: command)
+    }
 
-        if looksLikeUser && rest.count >= 2 {
-            let user = sixth
-            let command = rest.dropFirst().joined(separator: " ")
-            return (schedule, user, command)
-        }
-
-        let command = rest.joined(separator: " ")
-        return (schedule, defaultUser, command)
+    private func isUserToken(_ token: String) -> Bool {
+        !token.contains("/") && !token.contains("$") && !token.contains("=")
+            && token.rangeOfCharacter(from: .letters) != nil && token.count < 32
     }
 
     private func tokenizeCron(_ line: String) -> [String] {
@@ -226,10 +156,7 @@ public struct CronParser: ArtifactParser {
         }
 
         return makePersistenceEvent(
-            kind: "periodic",
-            schedule: schedule,
-            command: command,
-            user: "root",
+            CronEntry(schedule: schedule, user: "root", command: command, kind: "periodic"),
             sourceURL: url,
             lineNo: 0
         )
@@ -237,25 +164,18 @@ public struct CronParser: ArtifactParser {
 
     // MARK: - event
 
-    private func makePersistenceEvent(
-        kind: String,
-        schedule: String,
-        command: String,
-        user: String,
-        sourceURL: URL,
-        lineNo: Int
-    ) -> EventEnvelope? {
-        let trimmed = command.trimmingCharacters(in: .whitespaces)
+    private func makePersistenceEvent(_ entry: CronEntry, sourceURL: URL, lineNo: Int) -> EventEnvelope? {
+        let trimmed = entry.command.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return nil }
 
         var fields: [String: String] = [
-            "persistence.kind": kind,
-            "persistence.schedule": schedule,
+            "persistence.kind": entry.kind,
+            "persistence.schedule": entry.schedule,
             "persistence.command": trimmed,
             "persistence.path": ArtifactRoot.pathKey(sourceURL),
             FieldTaxonomy.filePath: ArtifactRoot.pathKey(sourceURL),
             FieldTaxonomy.eventType: "persistence.item",
-            FieldTaxonomy.userName: user,
+            FieldTaxonomy.userName: entry.user,
         ]
         if lineNo > 0 {
             fields["persistence.line"] = String(lineNo)
@@ -268,25 +188,45 @@ public struct CronParser: ArtifactParser {
         }
 
         var entities: [EntityID] = [
-            EntityID(kind: .persistence, value: "\(kind)|\(schedule)|\(trimmed)"),
+            EntityID(kind: .persistence, value: "\(entry.kind)|\(entry.schedule)|\(trimmed)"),
             .file(path: ArtifactRoot.pathKey(sourceURL)),
-            .user(name: user),
+            .user(name: entry.user),
         ]
         if first.hasPrefix("/") {
             entities.append(.file(path: first))
         }
 
         return EventEnvelope(
-            eventTime: fileMTime(sourceURL),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "CRON",
-            eventType: "persistence.item",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: kind == "periodic" ? 0.92 : 0.96
+            identity: EventEnvelope.Identity(
+                kind: "persistence.item",
+                label: "CRON"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: fileMTime(sourceURL),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: entities,
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: entry.kind == "periodic" ? 0.92 : 0.96
+            )
         )
+    }
+
+    private struct CronEntry {
+        let schedule: String
+        let user: String
+        let command: String
+        let kind: String
+
+        init(schedule: String, user: String, command: String, kind: String = "cron") {
+            self.schedule = schedule
+            self.user = user
+            self.command = command
+            self.kind = kind
+        }
     }
 
     private func cronUser(from url: URL) -> String? {

@@ -33,10 +33,8 @@ public struct InfoStealerPathParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let name = url.lastPathComponent
             return name == "stealer_path_plane.json" || name == "stealer_path_plane.jsonl"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -55,106 +53,73 @@ public struct InfoStealerPathParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        // Explicit non-goal: drop any secret-like keys if present in markers
-        let secretKeys = ["password", "cookie", "cookie_value", "secret", "token",
-                          "keychain_data", "wallet_seed", "mnemonic", "private_key"]
-        for k in secretKeys {
-            if item[k] != nil {
-                // Skip rows that attempt to carry secret payloads
-                // (path plane markers must not ship secrets)
-            }
-        }
-
-        var family = (stringish(item["path_family"])
-            ?? stringish(item["family"])
-            ?? stringish(item["category"])
-            ?? "").lowercased()
-        let path = stringish(item["path"])
-            ?? stringish(item["stealer_path"])
-            ?? stringish(item["target_path"])
-            ?? ""
-        if family.isEmpty {
-            family = inferFamily(from: path)
-        }
-        // Normalize allowed families
-        let allowed = ["browser", "messaging", "vault", "wallet", "sync"]
-        if !allowed.contains(family) {
-            family = inferFamily(from: path)
-            if !allowed.contains(family) { family = "browser" }
-        }
-
-        guard !path.isEmpty else { return nil }
-
-        let fdaAdjacent = boolish(item["fda_adjacent"])
-            ?? boolish(item["requires_fda"])
-            ?? pathLooksFDAAdjacent(path)
-        let user = stringish(item["user"]) ?? inferUser(from: path) ?? inferUser(from: sourceURL.path) ?? ""
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map {
-                $0.trimmingCharacters(in: .whitespaces)
-            }.filter { tag in
-                // Never propagate secret-related tags as values
-                let lower = tag.lowercased()
-                return !lower.contains("password_dump") && !lower.contains("cookie_value")
-            }
-        }
-        if fdaAdjacent, !risk.contains("fda_adjacent") {
-            risk.append("fda_adjacent")
-        }
-
-        var fields: [String: String] = [
-            "stealer.path_family": family,
-            "stealer.path": path,
-            "stealer.fda_adjacent": fdaAdjacent ? "true" : "false",
-            FieldTaxonomy.eventType: "stealer.path",
-            FieldTaxonomy.userName: user,
-        ]
-        if !risk.isEmpty {
-            fields["stealer.risk_tags"] = risk.joined(separator: ",")
-        }
-        // Explicit honesty markers - no secret export
-        fields["stealer.secrets_exported"] = "false"
-
-        return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "INFOSTEALERPATH",
-            eventType: "stealer.path",
-            entityRefs: [
-                EntityID(kind: .host, value: "stealer|\(family)|\(path.hashValue)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
-        )
+        guard let details = stealerDetails(from: item, sourceURL: sourceURL) else { return nil }
+        let fields = stealerFields(details: details)
+        return stealerEnvelope(item: item, sourceURL: sourceURL, details: details, fields: fields)
     }
 
+    private struct StealerDetails {
+        let family: String
+        let path: String
+        let fdaAdjacent: Bool
+        let user: String
+        let risk: [String]
+    }
+
+    private func stealerDetails(from item: [String: Any], sourceURL: URL) -> StealerDetails? {
+        discardSecretMarkers(in: item)
+        let path = stringish(item["path"]) ?? stringish(item["stealer_path"]) ?? stringish(item["target_path"]) ?? ""
+        guard !path.isEmpty else { return nil }
+        let family = normalizedFamily(item: item, path: path)
+        let fdaAdjacent = boolish(item["fda_adjacent"]) ?? boolish(item["requires_fda"]) ?? pathLooksFDAAdjacent(path)
+        let user = stringish(item["user"]) ?? inferUser(from: path) ?? inferUser(from: sourceURL.path) ?? ""
+        return StealerDetails(family: family, path: path, fdaAdjacent: fdaAdjacent, user: user, risk: stealerRisk(item: item, fdaAdjacent: fdaAdjacent))
+    }
+
+    private func discardSecretMarkers(in item: [String: Any]) {
+        for key in ["password", "cookie", "cookie_value", "secret", "token", "keychain_data", "wallet_seed", "mnemonic", "private_key"] where item[key] != nil { _ = key }
+    }
+
+    private func normalizedFamily(item: [String: Any], path: String) -> String {
+        let allowed = ["browser", "messaging", "vault", "wallet", "sync"]
+        let supplied = (stringish(item["path_family"]) ?? stringish(item["family"]) ?? stringish(item["category"]) ?? "").lowercased()
+        let inferred = supplied.isEmpty ? inferFamily(from: path) : supplied
+        return allowed.contains(inferred) ? inferred : (allowed.contains(inferFamily(from: path)) ? inferFamily(from: path) : "browser")
+    }
+
+    private func stealerRisk(item: [String: Any], fdaAdjacent: Bool) -> [String] {
+        var risk = (stringish(item["risk_tags"]) ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { tag in
+            let lower = tag.lowercased()
+            return !lower.contains("password_dump") && !lower.contains("cookie_value")
+        }
+        if fdaAdjacent, !risk.contains("fda_adjacent") { risk.append("fda_adjacent") }
+        return risk
+    }
+
+    private func stealerFields(details: StealerDetails) -> [String: String] {
+        var fields = ["stealer.path_family": details.family, "stealer.path": details.path, "stealer.fda_adjacent": details.fdaAdjacent ? "true" : "false", FieldTaxonomy.eventType: "stealer.path", FieldTaxonomy.userName: details.user]
+        if !details.risk.isEmpty { fields["stealer.risk_tags"] = details.risk.joined(separator: ",") }
+        fields["stealer.secrets_exported"] = "false"
+        return fields
+    }
+
+    private func stealerEnvelope(item: [String: Any], sourceURL: URL, details: StealerDetails, fields: [String: String]) -> EventEnvelope {
+        EventEnvelope(identity: EventEnvelope.Identity(kind: "stealer.path", label: "INFOSTEALERPATH"), capture: EventEnvelope.Capture(source: .parser, eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(), collectedAt: Date()), payload: EventEnvelope.Payload(entityRefs: [EntityID(kind: .host, value: "stealer|\(details.family)|\(details.path.hashValue)")], properties: fields, provenance: ArtifactRoot.pathKey(sourceURL), confidence: 0.88))
+    }
+
+    private static let familyMarkers: [(family: String, markers: [String])] = [
+        ("browser", ["chrome", "firefox", "safari", "edge", "brave", "cookies"]),
+        ("messaging", ["slack", "telegram", "discord", "messages", "mail"]),
+        ("vault", ["1password", "bitwarden", "keepass", "keychain", "notes"]),
+        ("wallet", ["exodus", "electrum", "coinomi", "ledger", "wallet"]),
+        ("sync", ["dropbox", "cloudstorage", "mobile documents", "desktop", "documents", "downloads"]),
+    ]
+
     private func inferFamily(from path: String) -> String {
-        let p = path.lowercased()
-        if p.contains("chrome") || p.contains("firefox") || p.contains("safari")
-            || p.contains("edge") || p.contains("brave") || p.contains("cookies") {
-            return "browser"
-        }
-        if p.contains("slack") || p.contains("telegram") || p.contains("discord")
-            || p.contains("messages") || p.contains("mail") {
-            return "messaging"
-        }
-        if p.contains("1password") || p.contains("bitwarden") || p.contains("keepass")
-            || p.contains("keychain") || p.contains("notes") {
-            return "vault"
-        }
-        if p.contains("exodus") || p.contains("electrum") || p.contains("coinomi")
-            || p.contains("ledger") || p.contains("wallet") {
-            return "wallet"
-        }
-        if p.contains("dropbox") || p.contains("cloudstorage") || p.contains("mobile documents")
-            || p.contains("desktop") || p.contains("documents") || p.contains("downloads") {
-            return "sync"
-        }
-        return "browser"
+        let normalizedPath = path.lowercased()
+        return Self.familyMarkers.first {
+            $0.markers.contains(where: normalizedPath.contains)
+        }?.family ?? "browser"
     }
 
     private func pathLooksFDAAdjacent(_ path: String) -> Bool {

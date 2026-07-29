@@ -14,6 +14,12 @@ public struct PluginRuntime: Sendable {
     }
 
     public static func defaultTier1() -> [any ArtifactParser] {
+        coreParsers + persistenceParsers + forensicsParsers + coverageParsers
+            + wave8Parsers + wave11Parsers + wave12Parsers + wave13Parsers
+            + wave14Parsers + wave15Parsers + wave16Parsers
+    }
+
+    private static var coreParsers: [any ArtifactParser] {
         [
             // Tier-1 IR / host state
             TCCParser(),
@@ -29,6 +35,11 @@ public struct PluginRuntime: Sendable {
             LoginItemsParser(),
             SystemExtensionsParser(),
             UtmpxParser(),
+        ]
+    }
+
+    private static var persistenceParsers: [any ArtifactParser] {
+        [
             // Tier-2 post-incident forensics (always registered in default engine)
             SafariParser(),
             ChromiumParser(),
@@ -46,6 +57,11 @@ public struct PluginRuntime: Sendable {
             BrowserExtensionsParser(),
             GatekeeperHistoryParser(),
             NetworkLocationParser(),
+        ]
+    }
+
+    private static var forensicsParsers: [any ArtifactParser] {
+        [
             // Wave-3 2026 coverage ROI (beyond §7.1–§7.2)
             ShellProfilesParser(),
             EmondParser(),
@@ -55,6 +71,11 @@ public struct PluginRuntime: Sendable {
             PrivHelpersParser(),
             FolderActionsParser(),
             LoginHooksParser(),
+        ]
+    }
+
+    private static var coverageParsers: [any ArtifactParser] {
+        [
             // Wave-5 2026 coverage ROI (beyond §7.1–§7.10)
             AuthPluginsParser(),
             NetUsageParser(),
@@ -81,16 +102,31 @@ public struct PluginRuntime: Sendable {
             IDeviceBackupParser(),
             MSRDCParser(),
             CloudSyncParser(),
+        ]
+    }
+
+    private static var wave8Parsers: [any ArtifactParser] {
+        [
             // Wave-8 residual red↔blue pair parsers
             PackageKitDesignParser(),
             ArchiveExtractorParser(),
             InfoStealerPathParser(),
             TCCESFVisibilityParser(),
+        ]
+    }
+
+    private static var wave11Parsers: [any ArtifactParser] {
+        [
             // Wave-11 multi-plane red↔blue pair parsers
             URLSchemeHandlerParser(),
             LaunchdOverrideDepthParser(),
             BrowserExtensionDualUseParser(),
             ShortcutsAppIntentsParser(),
+        ]
+    }
+
+    private static var wave12Parsers: [any ArtifactParser] {
+        [
             // Wave-12 multi-plane red↔blue pair parsers
             WeblocInetlocParser(),
             MailRulesAutomationParser(),
@@ -98,12 +134,22 @@ public struct PluginRuntime: Sendable {
             DockPersistenceSurfaceParser(),
             OsascriptScptDeliveryParser(),
             NetworkShareMountParser(),
+        ]
+    }
+
+    private static var wave13Parsers: [any ArtifactParser] {
+        [
             // Wave-13 multi-plane red↔blue pair parsers
             CalendarRemindersAutomationParser(),
             GatekeeperAssessmentHistoryParser(),
             HomebrewPackageDualUseParser(),
             CupsPrintDualUseParser(),
             ScreenCapturePrivacyDualUseParser(),
+        ]
+    }
+
+    private static var wave14Parsers: [any ArtifactParser] {
+        [
             // Wave-14 multi-plane red↔blue pair parsers
             AutomatorWorkflowParser(),
             IcloudDrivePathParser(),
@@ -115,6 +161,11 @@ public struct PluginRuntime: Sendable {
             PamAuthModuleParser(),
             CronAtJobDepthParser(),
             NotesMetadataPlaneParser(),
+        ]
+    }
+
+    private static var wave15Parsers: [any ArtifactParser] {
+        [
             // Wave-15 multi-plane red↔blue pair parsers
             PhotosLibraryPathParser(),
             VpnConfigDualuseParser(),
@@ -126,6 +177,11 @@ public struct PluginRuntime: Sendable {
             KeychainAclPathParser(),
             PythonRuntimeDualuseParser(),
             ShellPluginManagerParser(),
+        ]
+    }
+
+    private static var wave16Parsers: [any ArtifactParser] {
+        [
             // Wave-16 multi-plane red↔blue pair parsers (25)
             AirplayReceiverSurfaceParser(),
             HandoffClipboardDepthParser(),

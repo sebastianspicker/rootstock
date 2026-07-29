@@ -14,6 +14,17 @@ public struct ICloudParser: ArtifactParser {
 
     public init() {}
 
+    private struct AccountDetails {
+        let present: Bool
+        let driveEnabled: Bool
+        let desktopDocuments: Bool
+        let photos: Bool
+        let keychainSync: Bool
+        let findMy: Bool
+        let user: String
+        let domain: String
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
         var events: [EventEnvelope] = []
@@ -38,10 +49,8 @@ public struct ICloudParser: ArtifactParser {
                 || name == "icloud_sync.json"
                 || name == "icloud_export.jsonl"
                 || name == "com.apple.bird.plist.json"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -51,18 +60,9 @@ public struct ICloudParser: ArtifactParser {
         if url.pathExtension == "jsonl" {
             return parseJSONL(at: url)
         }
-        // Prefer single-account posture keys before nested accounts/items arrays.
-        // Original order checked identity keys first, then accounts, then items.
         guard let obj = ArtifactIO.jsonObject(contentsOf: url) else { return [] }
-        if let dict = obj as? [String: Any] {
-            if dict["account_present"] != nil
-                || dict["drive_enabled"] != nil
-                || dict["desktop_documents_sync"] != nil
-                || dict["services"] != nil {
-                if let e = makeAccountEvent(from: dict, sourceURL: url) {
-                    return [e]
-                }
-            }
+        if let account = directAccount(obj, sourceURL: url) {
+            return [account]
         }
         return ArtifactIO.dictionaryEntries(
             from: obj,
@@ -71,100 +71,99 @@ public struct ICloudParser: ArtifactParser {
         ).compactMap { makeAccountEvent(from: $0, sourceURL: url) }
     }
 
+    private func directAccount(_ obj: Any, sourceURL: URL) -> EventEnvelope? {
+        guard let dict = obj as? [String: Any], hasDirectPosture(dict) else { return nil }
+        return makeAccountEvent(from: dict, sourceURL: sourceURL)
+    }
+
+    private func hasDirectPosture(_ item: [String: Any]) -> Bool {
+        ["account_present", "drive_enabled", "desktop_documents_sync", "services"].contains { item[$0] != nil }
+    }
+
     private func parseJSONL(at url: URL) -> [EventEnvelope] {
         ArtifactIO.jsonlDictionaries(contentsOf: url)
             .compactMap { makeAccountEvent(from: $0, sourceURL: url) }
     }
 
     private func makeAccountEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let accountPresent = boolish(item["account_present"]) ?? true
-        let driveEnabled = boolish(item["drive_enabled"])
-            ?? serviceEnabled(item, name: "iCloudDrive")
-            ?? false
-        let desktopDocs = boolish(item["desktop_documents_sync"])
-            ?? serviceEnabled(item, name: "DesktopDocuments")
-            ?? false
-        let photos = boolish(item["photos_enabled"])
-            ?? serviceEnabled(item, name: "Photos")
-            ?? false
-        let keychainSync = boolish(item["keychain_sync"])
-            ?? serviceEnabled(item, name: "Keychain")
-            ?? false
-        let findMy = boolish(item["find_my"])
-            ?? serviceEnabled(item, name: "FindMy")
-            ?? false
-        let user = stringish(item["signed_in_user"])
-            ?? stringish(item["user"])
-            ?? ""
-        let domain = stringish(item["apple_id_domain"])
-            ?? stringish(item["account_domain"])
-            ?? ""
+        let details = accountDetails(item)
+        guard hasPostureSignal(details, item: item) else { return nil }
+        let risk = accountRisks(item, details: details)
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "cloud.sync_posture",
+                label: "ICLOUD"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "icloud|\(details.user.isEmpty ? "account" : details.user)")],
+                properties: accountFields(item, details: details, risks: risk),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
+        )
+    }
 
-        // At least one posture signal
-        guard accountPresent
-            || driveEnabled
-            || desktopDocs
-            || item["services"] != nil
-            || !user.isEmpty
-        else { return nil }
+    private func accountDetails(_ item: [String: Any]) -> AccountDetails {
+        AccountDetails(
+            present: boolish(item["account_present"]) ?? true,
+            driveEnabled: boolish(item["drive_enabled"]) ?? serviceEnabled(item, name: "iCloudDrive") ?? false,
+            desktopDocuments: boolish(item["desktop_documents_sync"]) ?? serviceEnabled(item, name: "DesktopDocuments") ?? false,
+            photos: boolish(item["photos_enabled"]) ?? serviceEnabled(item, name: "Photos") ?? false,
+            keychainSync: boolish(item["keychain_sync"]) ?? serviceEnabled(item, name: "Keychain") ?? false,
+            findMy: boolish(item["find_my"]) ?? serviceEnabled(item, name: "FindMy") ?? false,
+            user: stringish(item["signed_in_user"]) ?? stringish(item["user"]) ?? "",
+            domain: stringish(item["apple_id_domain"]) ?? stringish(item["account_domain"]) ?? ""
+        )
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        if desktopDocs {
-            if !risk.contains("desktop_documents_sync") { risk.append("desktop_documents_sync") }
-        }
-        if driveEnabled {
-            if !risk.contains("drive_enabled") { risk.append("drive_enabled") }
-        }
+    private func hasPostureSignal(_ details: AccountDetails, item: [String: Any]) -> Bool {
+        details.present || details.driveEnabled || details.desktopDocuments || item["services"] != nil || !details.user.isEmpty
+    }
 
+    private func accountRisks(_ item: [String: Any], details: AccountDetails) -> [String] {
+        var risks = stringish(item["risk_tags"])?
+            .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+        if details.desktopDocuments, !risks.contains("desktop_documents_sync") { risks.append("desktop_documents_sync") }
+        if details.driveEnabled, !risks.contains("drive_enabled") { risks.append("drive_enabled") }
+        return risks
+    }
+
+    private func accountFields(_ item: [String: Any], details: AccountDetails, risks: [String]) -> [String: String] {
         var fields: [String: String] = [
-            "icloud.account_present": accountPresent ? "true" : "false",
-            "icloud.drive_enabled": driveEnabled ? "true" : "false",
-            "icloud.desktop_documents_sync": desktopDocs ? "true" : "false",
-            "icloud.photos_enabled": photos ? "true" : "false",
-            "icloud.keychain_sync": keychainSync ? "true" : "false",
-            "icloud.find_my": findMy ? "true" : "false",
-            "icloud.signed_in_user": user,
-            "icloud.apple_id_domain": domain,
+            "icloud.account_present": boolText(details.present),
+            "icloud.drive_enabled": boolText(details.driveEnabled),
+            "icloud.desktop_documents_sync": boolText(details.desktopDocuments),
+            "icloud.photos_enabled": boolText(details.photos),
+            "icloud.keychain_sync": boolText(details.keychainSync),
+            "icloud.find_my": boolText(details.findMy),
+            "icloud.signed_in_user": details.user,
+            "icloud.apple_id_domain": details.domain,
             FieldTaxonomy.eventType: "cloud.sync_posture",
         ]
-        // Never export full Apple ID email as secret-bearing identity if present
-        if let email = stringish(item["apple_id"]), !email.isEmpty {
-            // Store domain-only marker, not full address, when possible
-            if email.contains("@") {
-                let parts = email.split(separator: "@")
-                if parts.count == 2 {
-                    fields["icloud.apple_id_domain"] = String(parts[1])
-                    fields["icloud.apple_id_present"] = "true"
-                } else {
-                    fields["icloud.apple_id_present"] = "true"
-                }
-            } else {
-                fields["icloud.apple_id_present"] = "true"
-            }
+        appendAppleIDFields(&fields, appleID: stringish(item["apple_id"]))
+        if !risks.isEmpty {
+            fields["icloud.risk_tags"] = risks.joined(separator: ",")
         }
-        if !risk.isEmpty {
-            fields["icloud.risk_tags"] = risk.joined(separator: ",")
+        if !details.user.isEmpty {
+            fields[FieldTaxonomy.userName] = details.user
         }
-        if !user.isEmpty {
-            fields[FieldTaxonomy.userName] = user
-        }
+        return fields
+    }
 
-        return EventEnvelope(
-            eventTime: Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "ICLOUD",
-            eventType: "cloud.sync_posture",
-            entityRefs: [
-                EntityID(kind: .host, value: "icloud|\(user.isEmpty ? "account" : user)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
-        )
+    private func boolText(_ value: Bool) -> String {
+        value ? "true" : "false"
+    }
+
+    private func appendAppleIDFields(_ fields: inout [String: String], appleID: String?) {
+        guard let email = appleID, !email.isEmpty else { return }
+        fields["icloud.apple_id_present"] = "true"
+        let parts = email.split(separator: "@")
+        if parts.count == 2 { fields["icloud.apple_id_domain"] = String(parts[1]) }
     }
 
     private func serviceEnabled(_ item: [String: Any], name: String) -> Bool? {

@@ -26,82 +26,75 @@ public enum PersistenceInventory {
     /// + PrivHelpers + FolderActions + LoginHooks + AuthPlugins + SavedState
     /// (+ optional SSH authorized_keys) and tag for unified inventory.
     public static func enumerate(source: ImageSource, includeSSH: Bool = true) throws -> [EventEnvelope] {
-        var parsers: [any ArtifactParser] = [
-            AutostartParser(),
-            BTMParser(),
-            CronParser(),
-            LoginItemsParser(),
-            ShellProfilesParser(),
-            EmondParser(),
-            PrivHelpersParser(),
-            FolderActionsParser(),
-            LoginHooksParser(),
-            AuthPluginsParser(),
-            SavedStateParser(),
-        ]
-        if includeSSH {
-            parsers.append(SSHArtifactsParser())
-        }
-
-        var events: [EventEnvelope] = []
-        for parser in parsers {
-            let parsed = try parser.parse(source: source)
-            for var event in parsed {
-                // SSH: only keep authorized_keys as remote-access persistence surface
-                if parser.manifest.id == "SSH" {
-                    guard event.eventType == "auth.ssh_authorized_key" else { continue }
-                    event.fields["inventory.source"] = SourceTag.ssh.rawValue
-                    event.fields["inventory.unified"] = "true"
-                    event.fields["inventory.parser"] = parser.manifest.id
-                    event.fields["inventory.surface"] = "remote_access"
-                    event.fields["inventory.event_type"] = "access.persistence"
-                    event.fields["inventory.kind"] = "ssh_authorized_key"
-                    if event.fields["auth.event_type"] == nil {
-                        event.fields["auth.event_type"] = event.eventType
-                    }
-                    event.eventType = "access.persistence"
-                    event.fields[FieldTaxonomy.eventType] = "access.persistence"
-                    events.append(event)
-                    continue
-                }
-
-                // SavedState: only risky / non-Apple restore states as inventory surface
-                if parser.manifest.id == "SAVEDSTATE" {
-                    let tags = (event.fields["savedstate.risk_tags"] ?? "").lowercased()
-                    let bid = (event.fields["savedstate.bundle_id"] ?? "").lowercased()
-                    let interesting = !tags.isEmpty
-                        || bid.contains("evil")
-                        || bid.contains("implant")
-                        || !(bid.hasPrefix("com.apple.") || bid.isEmpty)
-                    guard interesting else { continue }
-                    event.fields["inventory.source"] = SourceTag.savedState.rawValue
-                    event.fields["inventory.unified"] = "true"
-                    event.fields["inventory.parser"] = parser.manifest.id
-                    event.fields["inventory.kind"] = "saved_state"
-                    event.fields["inventory.event_type"] = "inventory.persistence"
-                    if event.fields["persistence.kind"] == nil {
-                        event.fields["persistence.kind"] = "saved_state"
-                    }
-                    events.append(event)
-                    continue
-                }
-
-                let tag = sourceTag(for: parser.manifest.id, event: event)
-                event.fields["inventory.source"] = tag.rawValue
-                event.fields["inventory.unified"] = "true"
-                event.fields["inventory.parser"] = parser.manifest.id
-                if event.fields["inventory.event_type"] == nil {
-                    event.fields["inventory.event_type"] = "inventory.persistence"
-                }
-                if event.fields["inventory.kind"] == nil {
-                    event.fields["inventory.kind"] = event.fields["persistence.kind"]
-                        ?? event.fields["btm.type_label"]
-                        ?? tag.rawValue
-                }
-                events.append(event)
+        try inventoryParsers(includeSSH: includeSSH).flatMap { parser in
+            try parser.parse(source: source).compactMap { event in
+                normalizedInventoryEvent(event, parserID: parser.manifest.id)
             }
         }
-        return events
+    }
+
+    private static func inventoryParsers(includeSSH: Bool) -> [any ArtifactParser] {
+        var parsers: [any ArtifactParser] = [
+            AutostartParser(), BTMParser(), CronParser(), LoginItemsParser(),
+            ShellProfilesParser(), EmondParser(), PrivHelpersParser(),
+            FolderActionsParser(), LoginHooksParser(), AuthPluginsParser(), SavedStateParser(),
+        ]
+        if includeSSH { parsers.append(SSHArtifactsParser()) }
+        return parsers
+    }
+
+    private static func normalizedInventoryEvent(_ event: EventEnvelope, parserID: String) -> EventEnvelope? {
+        switch parserID {
+        case "SSH": return sshInventoryEvent(event, parserID: parserID)
+        case "SAVEDSTATE": return savedStateInventoryEvent(event, parserID: parserID)
+        default: return standardInventoryEvent(event, parserID: parserID)
+        }
+    }
+
+    private static func sshInventoryEvent(_ event: EventEnvelope, parserID: String) -> EventEnvelope? {
+        guard event.eventType == "auth.ssh_authorized_key" else { return nil }
+        var inventoryEvent = event
+        inventoryEvent.fields["inventory.source"] = SourceTag.ssh.rawValue
+        inventoryEvent.fields["inventory.unified"] = "true"
+        inventoryEvent.fields["inventory.parser"] = parserID
+        inventoryEvent.fields["inventory.surface"] = "remote_access"
+        inventoryEvent.fields["inventory.event_type"] = "access.persistence"
+        inventoryEvent.fields["inventory.kind"] = "ssh_authorized_key"
+        if inventoryEvent.fields["auth.event_type"] == nil { inventoryEvent.fields["auth.event_type"] = event.eventType }
+        inventoryEvent.eventType = "access.persistence"
+        inventoryEvent.fields[FieldTaxonomy.eventType] = "access.persistence"
+        return inventoryEvent
+    }
+
+    private static func savedStateInventoryEvent(_ event: EventEnvelope, parserID: String) -> EventEnvelope? {
+        guard isInterestingSavedState(event) else { return nil }
+        var inventoryEvent = event
+        inventoryEvent.fields["inventory.source"] = SourceTag.savedState.rawValue
+        inventoryEvent.fields["inventory.unified"] = "true"
+        inventoryEvent.fields["inventory.parser"] = parserID
+        inventoryEvent.fields["inventory.kind"] = "saved_state"
+        inventoryEvent.fields["inventory.event_type"] = "inventory.persistence"
+        if inventoryEvent.fields["persistence.kind"] == nil { inventoryEvent.fields["persistence.kind"] = "saved_state" }
+        return inventoryEvent
+    }
+
+    private static func isInterestingSavedState(_ event: EventEnvelope) -> Bool {
+        let tags = (event.fields["savedstate.risk_tags"] ?? "").lowercased()
+        let bundleID = (event.fields["savedstate.bundle_id"] ?? "").lowercased()
+        return !tags.isEmpty || bundleID.contains("evil") || bundleID.contains("implant") || !(bundleID.hasPrefix("com.apple.") || bundleID.isEmpty)
+    }
+
+    private static func standardInventoryEvent(_ event: EventEnvelope, parserID: String) -> EventEnvelope {
+        var inventoryEvent = event
+        let tag = sourceTag(for: parserID, event: event)
+        inventoryEvent.fields["inventory.source"] = tag.rawValue
+        inventoryEvent.fields["inventory.unified"] = "true"
+        inventoryEvent.fields["inventory.parser"] = parserID
+        if inventoryEvent.fields["inventory.event_type"] == nil { inventoryEvent.fields["inventory.event_type"] = "inventory.persistence" }
+        if inventoryEvent.fields["inventory.kind"] == nil {
+            inventoryEvent.fields["inventory.kind"] = event.fields["persistence.kind"] ?? event.fields["btm.type_label"] ?? tag.rawValue
+        }
+        return inventoryEvent
     }
 
     /// Summarize inventory events by kind / source tag counts.
@@ -145,53 +138,43 @@ public enum PersistenceInventory {
 
     // MARK: - Private
 
+    private static let parserSourceTags: [String: SourceTag] = [
+        "AUTOSTART": .autostart,
+        "BTM": .btm,
+        "CRON": .cron,
+        "LOGINITEMS": .loginItem,
+        "SSH": .ssh,
+        "SHELLPROFILES": .shellProfile,
+        "EMOND": .emond,
+        "PRIVHELPERS": .privilegedHelper,
+        "FOLDERACTIONS": .folderAction,
+        "LOGINHOOKS": .loginHook,
+        "AUTHPLUGINS": .authorizationPlugin,
+        "SAVEDSTATE": .savedState,
+    ]
+
+    private static let persistenceKindSourceTags: [String: SourceTag] = [
+        "cron": .cron,
+        "at": .cron,
+        "periodic": .cron,
+        "login_item": .loginItem,
+        "shell_profile": .shellProfile,
+        "emond": .emond,
+        "privileged_helper": .privilegedHelper,
+        "folder_action": .folderAction,
+        "login_hook": .loginHook,
+        "logout_hook": .loginHook,
+        "authorization_plugin": .authorizationPlugin,
+        "auth_plugin": .authorizationPlugin,
+    ]
+
     private static func sourceTag(for parserID: String, event: EventEnvelope) -> SourceTag {
-        switch parserID {
-        case "AUTOSTART":
-            return .autostart
-        case "BTM":
-            return .btm
-        case "CRON":
-            return .cron
-        case "LOGINITEMS":
-            return .loginItem
-        case "SSH":
-            return .ssh
-        case "SHELLPROFILES":
-            return .shellProfile
-        case "EMOND":
-            return .emond
-        case "PRIVHELPERS":
-            return .privilegedHelper
-        case "FOLDERACTIONS":
-            return .folderAction
-        case "LOGINHOOKS":
-            return .loginHook
-        case "AUTHPLUGINS":
-            return .authorizationPlugin
-        case "SAVEDSTATE":
-            return .savedState
-        default:
-            if event.eventType.contains("btm") { return .btm }
-            if event.fields["persistence.kind"] == "cron"
-                || event.fields["persistence.kind"] == "at"
-                || event.fields["persistence.kind"] == "periodic" {
-                return .cron
-            }
-            if event.fields["persistence.kind"] == "login_item" { return .loginItem }
-            if event.fields["persistence.kind"] == "shell_profile" { return .shellProfile }
-            if event.fields["persistence.kind"] == "emond" { return .emond }
-            if event.fields["persistence.kind"] == "privileged_helper" { return .privilegedHelper }
-            if event.fields["persistence.kind"] == "folder_action" { return .folderAction }
-            if event.fields["persistence.kind"] == "login_hook"
-                || event.fields["persistence.kind"] == "logout_hook" {
-                return .loginHook
-            }
-            if event.fields["persistence.kind"] == "authorization_plugin"
-                || event.fields["persistence.kind"] == "auth_plugin" {
-                return .authorizationPlugin
-            }
-            return .autostart
+        if let parserTag = parserSourceTags[parserID] {
+            return parserTag
         }
+        if event.eventType.contains("btm") {
+            return .btm
+        }
+        return persistenceKindSourceTags[event.fields["persistence.kind"] ?? ""] ?? .autostart
     }
 }

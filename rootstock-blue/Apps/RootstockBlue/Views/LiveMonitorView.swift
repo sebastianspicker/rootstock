@@ -9,10 +9,10 @@ struct LiveMonitorView: View {
             summary: "Monitor-only Endpoint Security visibility with explicit loss accounting. Blocking and AUTH decisions remain off by default."
         ) {
             MetricStrip(metrics: [
-                ("Received", "0", .neutral),
-                ("Enqueued", "0", .neutral),
-                ("Dropped", "0", .verified),
-                ("Mapped", "0", .neutral),
+                WorkspaceMetric(label: "Received", value: "0", tone: .neutral),
+                WorkspaceMetric(label: "Enqueued", value: "0", tone: .neutral),
+                WorkspaceMetric(label: "Dropped", value: "0", tone: .verified),
+                WorkspaceMetric(label: "Mapped", value: "0", tone: .neutral),
             ])
 
             InstrumentSection("Stream state", detail: "No active session") {

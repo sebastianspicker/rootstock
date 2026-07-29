@@ -17,13 +17,19 @@ final class DetectTests: XCTestCase {
             fixture: "unsigned_exec.jsonl"
         )
         let event = EventEnvelope(
-            source: .es,
-            sourcePlugin: "test",
-            eventType: "NOTIFY_EXEC",
-            fields: [
+            identity: EventEnvelope.Identity(
+                kind: "NOTIFY_EXEC",
+                label: "test"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .es
+            ),
+            payload: EventEnvelope.Payload(
+                properties: [
                 FieldTaxonomy.processPath: "/tmp/evil",
                 FieldTaxonomy.processSigned: "false",
             ]
+            )
         )
         let findings = FixtureRunner.evaluate(rule: rule, events: [event])
         XCTAssertEqual(findings.count, 1)

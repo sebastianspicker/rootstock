@@ -92,106 +92,26 @@ final class Wave15MultiPlanePairTests: XCTestCase {
     }
 
     func testHardenAssessSyntheticEmitsTenWave15Controls() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser, sourcePlugin: "PHOTOSLIBRARY", eventType: "photos.library",
-                fields: [
-                    "photoslib.path": "/Users/alice/Library/Preferences/photos_library_path.json",
-                    "photoslib.name": "Photos library path plane",
-                    "photoslib.risk_tags": "photos_surface,wave15",
-                    "photoslib.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "VPNCONFIGDUAL", eventType: "vpn.config",
-                fields: [
-                    "vpncfg.path": "/Users/alice/Library/Preferences/vpn_config_dualuse.json",
-                    "vpncfg.name": "VPN config dual-use",
-                    "vpncfg.risk_tags": "vpn_surface,wave15",
-                    "vpncfg.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "SANDBOXCONTAINER", eventType: "sandbox.container",
-                fields: [
-                    "sbxctr.path": "/Users/alice/Library/Preferences/sandbox_container_depth.json",
-                    "sbxctr.name": "Sandbox container depth",
-                    "sbxctr.risk_tags": "sandbox_surface,wave15",
-                    "sbxctr.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "XPCMACHSERVICE", eventType: "xpc.mach_service",
-                fields: [
-                    "xpcmach.path": "/Users/alice/Library/Preferences/xpc_mach_service_depth.json",
-                    "xpcmach.name": "XPC Mach service depth",
-                    "xpcmach.risk_tags": "xpc_mach_surface,wave15",
-                    "xpcmach.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "TMLOCALSNAPSHOT", eventType: "tm.local_snapshot",
-                fields: [
-                    "tmsnap.path": "/Users/alice/Library/Preferences/tm_local_snapshot_depth.json",
-                    "tmsnap.name": "TM local snapshot depth",
-                    "tmsnap.risk_tags": "tm_snapshot_surface,wave15",
-                    "tmsnap.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "EMONDLEGACY", eventType: "emond.legacy",
-                fields: [
-                    "emondleg.path": "/Users/alice/Library/Preferences/emond_legacy_depth.json",
-                    "emondleg.name": "Emond legacy depth",
-                    "emondleg.risk_tags": "emond_surface,wave15",
-                    "emondleg.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "SCREENSHARINGARD", eventType: "ard.screen_sharing",
-                fields: [
-                    "ardss.path": "/Users/alice/Library/Preferences/screen_sharing_ard_depth.json",
-                    "ardss.name": "Screen Sharing ARD depth",
-                    "ardss.risk_tags": "ard_surface,wave15",
-                    "ardss.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "KEYCHAINACLPATH", eventType: "keychain.acl_path",
-                fields: [
-                    "kcacl.path": "/Users/alice/Library/Preferences/keychain_acl_path.json",
-                    "kcacl.name": "Keychain ACL path plane",
-                    "kcacl.risk_tags": "keychain_acl_surface,wave15",
-                    "kcacl.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "PYTHONRUNTIME", eventType: "python.runtime",
-                fields: [
-                    "pyrun.path": "/Users/alice/Library/Preferences/python_runtime_dualuse.json",
-                    "pyrun.name": "Python runtime dual-use",
-                    "pyrun.risk_tags": "python_surface,wave15",
-                    "pyrun.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "SHELLPLUGINMGR", eventType: "shell.plugin_manager",
-                fields: [
-                    "shplug.path": "/Users/alice/Library/Preferences/shell_plugin_manager.json",
-                    "shplug.name": "Shell plugin manager dual-use",
-                    "shplug.risk_tags": "shell_plugin_surface,wave15",
-                    "shplug.secrets_exported": "false",
-                ]
-            ),
-        ]
+        let synthetic = HardeningTestFixtures.planeEvents(wave: "wave15", specifications: [
+            .init(plugin: "PHOTOSLIBRARY", eventType: "photos.library", fieldPrefix: "photoslib", fileName: "photos_library_path.json", name: "Photos library path plane", riskTag: "photos_surface"),
+            .init(plugin: "VPNCONFIGDUAL", eventType: "vpn.config", fieldPrefix: "vpncfg", fileName: "vpn_config_dualuse.json", name: "VPN config dual-use", riskTag: "vpn_surface"),
+            .init(plugin: "SANDBOXCONTAINER", eventType: "sandbox.container", fieldPrefix: "sbxctr", fileName: "sandbox_container_depth.json", name: "Sandbox container depth", riskTag: "sandbox_surface"),
+            .init(plugin: "XPCMACHSERVICE", eventType: "xpc.mach_service", fieldPrefix: "xpcmach", fileName: "xpc_mach_service_depth.json", name: "XPC Mach service depth", riskTag: "xpc_mach_surface"),
+            .init(plugin: "TMLOCALSNAPSHOT", eventType: "tm.local_snapshot", fieldPrefix: "tmsnap", fileName: "tm_local_snapshot_depth.json", name: "TM local snapshot depth", riskTag: "tm_snapshot_surface"),
+            .init(plugin: "EMONDLEGACY", eventType: "emond.legacy", fieldPrefix: "emondleg", fileName: "emond_legacy_depth.json", name: "Emond legacy depth", riskTag: "emond_surface"),
+            .init(plugin: "SCREENSHARINGARD", eventType: "ard.screen_sharing", fieldPrefix: "ardss", fileName: "screen_sharing_ard_depth.json", name: "Screen Sharing ARD depth", riskTag: "ard_surface"),
+            .init(plugin: "KEYCHAINACLPATH", eventType: "keychain.acl_path", fieldPrefix: "kcacl", fileName: "keychain_acl_path.json", name: "Keychain ACL path plane", riskTag: "keychain_acl_surface"),
+            .init(plugin: "PYTHONRUNTIME", eventType: "python.runtime", fieldPrefix: "pyrun", fileName: "python_runtime_dualuse.json", name: "Python runtime dual-use", riskTag: "python_surface"),
+            .init(plugin: "SHELLPLUGINMGR", eventType: "shell.plugin_manager", fieldPrefix: "shplug", fileName: "shell_plugin_manager.json", name: "Shell plugin manager dual-use", riskTag: "shell_plugin_surface"),
+        ])
         let findings = HardeningAssessment.assess(events: synthetic)
         let controls = Set(findings.map(\.control))
-        for c in wave15HardenControls {
-            XCTAssertTrue(controls.contains(c), "missing \(c); got \(controls.sorted())")
+        for control in wave15HardenControls {
+            XCTAssertTrue(controls.contains(control), "missing \(control); got \(controls.sorted())")
         }
-        for f in findings where wave15HardenControls.contains(f.control) {
-            XCTAssertFalse(f.remediation.isEmpty)
-            XCTAssertFalse((f.detail + f.remediation + f.evidence).lowercased().contains("password=secret"))
+        for finding in findings where wave15HardenControls.contains(finding.control) {
+            XCTAssertFalse(finding.remediation.isEmpty)
+            XCTAssertFalse((finding.detail + finding.remediation + finding.evidence).lowercased().contains("password=secret"))
         }
     }
 

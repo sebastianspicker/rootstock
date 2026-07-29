@@ -14,11 +14,26 @@ public struct IDeviceBackupParser: ArtifactParser {
 
     public init() {}
 
+    private struct BackupDetails {
+        let deviceName: String
+        let encrypted: Bool?
+        let lastBackup: String
+        let product: String
+        let iosVersion: String
+        let udidMarker: String
+        let path: String
+        let user: String
+        let eventTime: Date
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
+        return knownBackupEvents(root, seen: &seen) + discoveredBackupEvents(root, seen: &seen)
+    }
 
+    private func knownBackupEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for rel in [
             "Library/Preferences/idevice_backups.json",
             "Library/Preferences/mobile_sync_backups.json",
@@ -31,27 +46,25 @@ public struct IDeviceBackupParser: ArtifactParser {
                 }
             }
         }
+        return events
+    }
 
-        for url in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            return name == "idevice_backups.json"
-                || name == "mobile_sync_backups.json"
-                || name == "backup_inventory.json"
-                || name == "idevice_backups.jsonl"
-                || name == "Info.plist.json"
-        }) {
-            // Info.plist.json only under MobileSync/Backup trees
-            if url.lastPathComponent == "Info.plist.json"
-                && !url.path.contains("MobileSync")
-                && !url.path.contains("Backup") {
-                continue
-            }
+    private func discoveredBackupEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
+        for url in root.enumerate(matching: isBackupFile) where isBackupLocation(url) {
             if seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
             }
         }
-
         return events
+    }
+
+    private func isBackupFile(_ url: URL) -> Bool {
+        ["idevice_backups.json", "mobile_sync_backups.json", "backup_inventory.json", "idevice_backups.jsonl", "Info.plist.json"].contains(url.lastPathComponent)
+    }
+
+    private func isBackupLocation(_ url: URL) -> Bool {
+        url.lastPathComponent != "Info.plist.json" || url.path.contains("MobileSync") || url.path.contains("Backup")
     }
 
     private func parseFile(at url: URL) -> [EventEnvelope] {
@@ -71,84 +84,69 @@ public struct IDeviceBackupParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let deviceName = stringish(item["device_name"])
-            ?? stringish(item["DeviceName"])
-            ?? stringish(item["name"])
-            ?? ""
-        let encrypted = boolish(item["encrypted"])
-            ?? boolish(item["IsEncrypted"])
-            ?? boolish(item["is_encrypted"])
-        let lastBackup = stringish(item["last_backup"])
-            ?? stringish(item["LastBackupDate"])
-            ?? stringish(item["timestamp"])
-            ?? ""
-        let product = stringish(item["product_type"])
-            ?? stringish(item["ProductType"])
-            ?? stringish(item["product"])
-            ?? ""
-        let iosVersion = stringish(item["ios_version"])
-            ?? stringish(item["ProductVersion"])
-            ?? ""
-        // UDID marker only - truncate full UDID if present
-        var udidMarker = stringish(item["udid_marker"])
-            ?? stringish(item["UniqueDeviceID"])
-            ?? stringish(item["udid"])
-            ?? ""
-        if udidMarker.count > 12 {
-            udidMarker = String(udidMarker.prefix(8)) + "…"
-        }
-        let path = stringish(item["backup_path"])
-            ?? stringish(item["path"])
-            ?? ""
+        guard let details = backupDetails(item, sourceURL: sourceURL) else { return nil }
+        let risks = backupRisks(item, details: details)
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "backup.idevice",
+                label: "IDEVICEBACKUP"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: details.eventTime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "idevice|\(details.deviceName.isEmpty ? details.udidMarker : details.deviceName)")],
+                properties: backupFields(details, risks: risks),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
+        )
+    }
 
+    private func backupDetails(_ item: [String: Any], sourceURL: URL) -> BackupDetails? {
+        let deviceName = firstString(item, keys: ["device_name", "DeviceName", "name"])
+        let encrypted = firstBool(item, keys: ["encrypted", "IsEncrypted", "is_encrypted"])
+        let lastBackup = firstString(item, keys: ["last_backup", "LastBackupDate", "timestamp"])
         guard !deviceName.isEmpty || encrypted != nil || !lastBackup.isEmpty else { return nil }
+        return BackupDetails(
+            deviceName: deviceName, encrypted: encrypted, lastBackup: lastBackup,
+            product: firstString(item, keys: ["product_type", "ProductType", "product"]),
+            iosVersion: firstString(item, keys: ["ios_version", "ProductVersion"]),
+            udidMarker: marker(firstString(item, keys: ["udid_marker", "UniqueDeviceID", "udid"])),
+            path: firstString(item, keys: ["backup_path", "path"]),
+            user: stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? "",
+            eventTime: parseDate(item["last_backup"] ?? item["LastBackupDate"] ?? item["timestamp"]) ?? Date(timeIntervalSince1970: 0)
+        )
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        if encrypted == false {
-            if !risk.contains("unencrypted_backup") { risk.append("unencrypted_backup") }
-        }
-        if encrypted == true {
-            if !risk.contains("encrypted_backup") { risk.append("encrypted_backup") }
-        }
-        if deviceName.lowercased().contains("evil") {
-            if !risk.contains("suspicious_device") { risk.append("suspicious_device") }
-        }
+    private func firstString(_ item: [String: Any], keys: [String]) -> String { keys.lazy.compactMap { stringish(item[$0]) }.first ?? "" }
+    private func firstBool(_ item: [String: Any], keys: [String]) -> Bool? { keys.lazy.compactMap { boolish(item[$0]) }.first }
+    private func marker(_ value: String) -> String { value.count > 12 ? String(value.prefix(8)) + "…" : value }
 
-        let user = stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
+    private func backupRisks(_ item: [String: Any], details: BackupDetails) -> [String] {
+        var risks = stringish(item["risk_tags"])?.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+        if details.encrypted == false, !risks.contains("unencrypted_backup") { risks.append("unencrypted_backup") }
+        if details.encrypted == true, !risks.contains("encrypted_backup") { risks.append("encrypted_backup") }
+        if details.deviceName.lowercased().contains("evil"), !risks.contains("suspicious_device") { risks.append("suspicious_device") }
+        return risks
+    }
 
+    private func backupFields(_ details: BackupDetails, risks: [String]) -> [String: String] {
         var fields: [String: String] = [
-            "backup.device_name": deviceName,
-            "backup.last_backup": lastBackup,
-            "backup.product_type": product,
-            "backup.ios_version": iosVersion,
-            "backup.udid_marker": udidMarker,
-            "backup.path": path,
+            "backup.device_name": details.deviceName, "backup.last_backup": details.lastBackup,
+            "backup.product_type": details.product, "backup.ios_version": details.iosVersion,
+            "backup.udid_marker": details.udidMarker, "backup.path": details.path,
             FieldTaxonomy.eventType: "backup.idevice",
-            FieldTaxonomy.userName: user,
+            FieldTaxonomy.userName: details.user,
         ]
-        if let enc = encrypted {
+        if let enc = details.encrypted {
             fields["backup.encrypted"] = enc ? "true" : "false"
         }
-        if !risk.isEmpty {
-            fields["backup.risk_tags"] = risk.joined(separator: ",")
+        if !risks.isEmpty {
+            fields["backup.risk_tags"] = risks.joined(separator: ",")
         }
-
-        return EventEnvelope(
-            eventTime: parseDate(item["last_backup"] ?? item["LastBackupDate"] ?? item["timestamp"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "IDEVICEBACKUP",
-            eventType: "backup.idevice",
-            entityRefs: [
-                EntityID(kind: .host, value: "idevice|\(deviceName.isEmpty ? udidMarker : deviceName)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
-        )
+        return fields
     }
 }

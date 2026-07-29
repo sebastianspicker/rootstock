@@ -58,11 +58,21 @@ public struct GatekeeperAssessmentHistoryParser: ArtifactParser {
         ]
         if !risk.isEmpty { fields["gkh.risk_tags"] = risk.joined(separator: ",") }
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(), source: .parser, sourcePlugin: "GKASSESSMENTHIST",
-            eventType: "gatekeeper.assessment",
-            entityRefs: [EntityID(kind: .host, value: "gkh|\(name.isEmpty ? path : name)")],
-            fields: fields, rawRef: ArtifactRoot.pathKey(sourceURL), confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "gatekeeper.assessment",
+                label: "GKASSESSMENTHIST"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "gkh|\(name.isEmpty ? path : name)")],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
     }
 }

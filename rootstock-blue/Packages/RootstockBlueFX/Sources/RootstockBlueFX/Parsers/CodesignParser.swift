@@ -61,125 +61,128 @@ public struct CodesignParser: ArtifactParser {
         return items.compactMap { makeEvent(from: $0, rawRef: rawRef) }
     }
 
+    private struct CodesignFacts {
+        let path: String
+        let signed: Bool?
+        let notarized: Bool?
+        let teamID: String
+        let signingID: String
+        let authority: String
+        let persistenceKind: String?
+    }
+
     private func makeEvent(from item: [String: Any], rawRef: String) -> EventEnvelope? {
-        let path = stringish(item["path"])
-            ?? stringish(item["file"])
-            ?? stringish(item["file_path"])
-            ?? stringish(item["binary"])
-            ?? ""
-        guard !path.isEmpty else { return nil }
-
-        let signed = boolish(item["signed"])
-        let notarized = boolish(item["notarized"])
-            ?? boolish(item["notary"])
-        let teamID = stringish(item["team_id"])
-            ?? stringish(item["teamID"])
-            ?? stringish(item["TeamIdentifier"])
-            ?? ""
-        let signingID = stringish(item["signing_id"])
-            ?? stringish(item["signingID"])
-            ?? stringish(item["identifier"])
-            ?? stringish(item["SigningIdentifier"])
-            ?? ""
-        let authority = stringish(item["authority"])
-            ?? stringish(item["Authority"])
-            ?? stringish(item["signer"])
-            ?? ""
-        let persistenceKind = stringish(item["persistence_kind"])
-            ?? stringish(item["persistence.kind"])
-            ?? inferPersistenceKind(path: path)
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-
-        let lowerAuth = authority.lowercased()
-        let adhoc = boolish(item["adhoc"]) == true
-            || lowerAuth.contains("ad-hoc")
-            || lowerAuth.contains("adhoc")
-            || teamID == "-"
-
-        if signed == false {
-            if !risk.contains("unsigned") { risk.append("unsigned") }
-        }
-        if notarized == false {
-            if !risk.contains("not_notarized") { risk.append("not_notarized") }
-        }
-        if adhoc {
-            if !risk.contains("adhoc") { risk.append("adhoc") }
-        }
-        if teamID.isEmpty || teamID == "UNKNOWN" || teamID.lowercased() == "unknown"
-            || path.lowercased().contains("evil") || signingID.lowercased().contains("evil") {
-            if signed == false || teamID.isEmpty || teamID.uppercased() == "UNKNOWN"
-                || path.lowercased().contains("evil") {
-                if !risk.contains("unknown_team") { risk.append("unknown_team") }
-            }
-        }
-
-        var fields: [String: String] = [
-            "codesign.path": path,
-            FieldTaxonomy.filePath: path,
-            FieldTaxonomy.eventType: "codesign.assessment",
-        ]
-        if let signed {
-            fields["codesign.signed"] = signed ? "true" : "false"
-            fields[FieldTaxonomy.processSigned] = signed ? "true" : "false"
-        }
-        if let notarized {
-            fields["codesign.notarized"] = notarized ? "true" : "false"
-        }
-        if !teamID.isEmpty {
-            fields["codesign.team_id"] = teamID
-            fields[FieldTaxonomy.processTeamID] = teamID
-        }
-        if !signingID.isEmpty {
-            fields["codesign.signing_id"] = signingID
-            fields[FieldTaxonomy.processSigningID] = signingID
-        }
-        if !authority.isEmpty {
-            fields["codesign.authority"] = authority
-        }
-        if let persistenceKind, !persistenceKind.isEmpty {
-            fields["persistence.kind"] = persistenceKind
-            fields["codesign.persistence_kind"] = persistenceKind
-        }
-        if !risk.isEmpty {
-            fields["codesign.risk_tags"] = risk.joined(separator: ",")
-            fields["persistence.risk_tags"] = risk.joined(separator: ",")
-        }
-
-        var entities: [EntityID] = [
-            EntityID(kind: .file, value: path),
-            EntityID(kind: .host, value: "codesign|\(path)|\(teamID)"),
-        ]
-        if let persistenceKind, !persistenceKind.isEmpty {
-            entities.append(EntityID(kind: .persistence, value: "\(persistenceKind)|\(path)"))
-        }
-
+        guard let facts = codesignFacts(from: item) else { return nil }
+        let risk = codesignRiskTags(item: item, facts: facts)
         return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "CODESIGN",
-            eventType: "codesign.assessment",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: rawRef,
-            confidence: 0.92
+            identity: EventEnvelope.Identity(
+                kind: "codesign.assessment",
+                label: "CODESIGN"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: codesignEntities(for: facts),
+                properties: codesignFields(for: facts, risk: risk),
+                provenance: rawRef,
+                confidence: 0.92
+            )
         )
+    }
+
+    private func codesignFacts(from item: [String: Any]) -> CodesignFacts? {
+        let path = stringish(item["path"]) ?? stringish(item["file"]) ?? stringish(item["file_path"]) ?? stringish(item["binary"]) ?? ""
+        guard !path.isEmpty else { return nil }
+        let teamID = stringish(item["team_id"]) ?? stringish(item["teamID"]) ?? stringish(item["TeamIdentifier"]) ?? ""
+        let signingID = stringish(item["signing_id"]) ?? stringish(item["signingID"]) ?? stringish(item["identifier"]) ?? stringish(item["SigningIdentifier"]) ?? ""
+        return CodesignFacts(
+            path: path,
+            signed: boolish(item["signed"]),
+            notarized: boolish(item["notarized"]) ?? boolish(item["notary"]),
+            teamID: teamID,
+            signingID: signingID,
+            authority: stringish(item["authority"]) ?? stringish(item["Authority"]) ?? stringish(item["signer"]) ?? "",
+            persistenceKind: stringish(item["persistence_kind"]) ?? stringish(item["persistence.kind"]) ?? inferPersistenceKind(path: path)
+        )
+    }
+
+    private func codesignRiskTags(item: [String: Any], facts: CodesignFacts) -> [String] {
+        var tags = (stringish(item["risk_tags"]) ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        if facts.signed == false { appendRiskTags(["unsigned"], to: &tags) }
+        if facts.notarized == false { appendRiskTags(["not_notarized"], to: &tags) }
+        if isAdhoc(item: item, facts: facts) { appendRiskTags(["adhoc"], to: &tags) }
+        if needsUnknownTeamTag(facts) {
+            appendRiskTags(["unknown_team"], to: &tags)
+        }
+        return tags
+    }
+
+    private func isAdhoc(item: [String: Any], facts: CodesignFacts) -> Bool {
+        let authority = facts.authority.lowercased()
+        return boolish(item["adhoc"]) == true || ["ad-hoc", "adhoc"].contains(where: authority.contains) || facts.teamID == "-"
+    }
+
+    private func needsUnknownTeamTag(_ facts: CodesignFacts) -> Bool {
+        let unknownTeam = facts.teamID.isEmpty || facts.teamID.uppercased() == "UNKNOWN"
+        let suspiciousPath = facts.path.lowercased().contains("evil")
+        let suspiciousID = facts.signingID.lowercased().contains("evil")
+        return (unknownTeam || suspiciousPath || suspiciousID) && (facts.signed == false || unknownTeam || suspiciousPath)
+    }
+
+    private func codesignFields(for facts: CodesignFacts, risk: [String]) -> [String: String] {
+        var fields = ["codesign.path": facts.path, FieldTaxonomy.filePath: facts.path, FieldTaxonomy.eventType: "codesign.assessment"]
+        addAssessmentFields(for: facts, to: &fields)
+        addPersistenceFields(for: facts, risk: risk, to: &fields)
+        return fields
+    }
+
+    private func addAssessmentFields(for facts: CodesignFacts, to fields: inout [String: String]) {
+        addSignatureFields(for: facts, to: &fields)
+        addIdentityFields(for: facts, to: &fields)
+    }
+
+    private func addSignatureFields(for facts: CodesignFacts, to fields: inout [String: String]) {
+        if let signed = facts.signed { fields["codesign.signed"] = signed ? "true" : "false"; fields[FieldTaxonomy.processSigned] = signed ? "true" : "false" }
+        if let notarized = facts.notarized { fields["codesign.notarized"] = notarized ? "true" : "false" }
+    }
+
+    private func addIdentityFields(for facts: CodesignFacts, to fields: inout [String: String]) {
+        if !facts.teamID.isEmpty { fields["codesign.team_id"] = facts.teamID; fields[FieldTaxonomy.processTeamID] = facts.teamID }
+        if !facts.signingID.isEmpty { fields["codesign.signing_id"] = facts.signingID; fields[FieldTaxonomy.processSigningID] = facts.signingID }
+        if !facts.authority.isEmpty { fields["codesign.authority"] = facts.authority }
+    }
+
+    private func addPersistenceFields(for facts: CodesignFacts, risk: [String], to fields: inout [String: String]) {
+        if let kind = facts.persistenceKind, !kind.isEmpty { fields["persistence.kind"] = kind; fields["codesign.persistence_kind"] = kind }
+        if !risk.isEmpty { fields["codesign.risk_tags"] = risk.joined(separator: ","); fields["persistence.risk_tags"] = risk.joined(separator: ",") }
+    }
+
+    private func codesignEntities(for facts: CodesignFacts) -> [EntityID] {
+        var entities: [EntityID] = [.file(path: facts.path), EntityID(kind: .host, value: "codesign|\(facts.path)|\(facts.teamID)")]
+        if let kind = facts.persistenceKind, !kind.isEmpty { entities.append(EntityID(kind: .persistence, value: "\(kind)|\(facts.path)")) }
+        return entities
+    }
+
+    private func appendRiskTags(_ additions: [String], to tags: inout [String]) {
+        for tag in additions where !tags.contains(tag) { tags.append(tag) }
     }
 
     private func inferPersistenceKind(path: String) -> String? {
         let lower = path.lowercased()
-        if lower.contains("privilegedhelpertools") { return "privileged_helper" }
-        if lower.contains("launchagents") || lower.contains("launchdaemons") { return "launchd" }
-        if lower.contains("securityagentplugins") { return "authorization_plugin" }
-        if lower.contains("loginhook") || lower.contains("login_hook") { return "login_hook" }
-        if lower.contains("/library/launch") { return "launchd" }
-        // Known fixture paths for evil helpers / agents
-        if lower.contains("privhelper") { return "privileged_helper" }
-        if lower.contains("persist") { return "launchd" }
+        for (marker, kind) in Self.persistenceKindMarkers where lower.contains(marker) {
+            return kind
+        }
         return nil
     }
+
+    private static let persistenceKindMarkers: [(String, String)] = [
+        ("privilegedhelpertools", "privileged_helper"), ("launchagents", "launchd"),
+        ("launchdaemons", "launchd"), ("securityagentplugins", "authorization_plugin"),
+        ("loginhook", "login_hook"), ("login_hook", "login_hook"),
+        ("/library/launch", "launchd"), ("privhelper", "privileged_helper"),
+        ("persist", "launchd"),
+    ]
 }

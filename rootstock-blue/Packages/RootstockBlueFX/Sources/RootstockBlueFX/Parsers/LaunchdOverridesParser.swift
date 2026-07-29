@@ -28,100 +28,67 @@ public struct LaunchdOverridesParser: ArtifactParser {
 
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
-
-        // JSON fixture inventory
-        for rel in [
-            "var/db/com.apple.xpc.launchd/disabled.json",
-            "private/var/db/com.apple.xpc.launchd/disabled.json",
-            "Library/Preferences/launchd_disabled.json",
-        ] {
-            if let url = root.firstExisting([rel]),
-               let json = ArtifactIO.jsonObject(contentsOf: url),
-               seen.insert(url) {
-                events.append(contentsOf: parseJSON(json, rawRef: ArtifactRoot.pathKey(url)))
-            }
-        }
-
-        // Standard disabled.plist paths
-        let plistRelatives = [
-            "var/db/com.apple.xpc.launchd/disabled.plist",
-            "private/var/db/com.apple.xpc.launchd/disabled.plist",
-        ]
-        for rel in plistRelatives {
-            if let url = root.firstExisting([rel]), seen.insert(url) {
-                events.append(contentsOf: parseDisabledPlist(at: url))
-            }
-        }
-
-        // Per-user disabled.<uid>.plist
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            let name = url.lastPathComponent
-            guard path.contains("com.apple.xpc.launchd") || path.contains("/launchd/") else {
-                return false
-            }
-            return name == "disabled.plist"
-                || name.hasPrefix("disabled.")
-                || name == "overrides.plist"
-        }) {
-            guard seen.insert(url) else { continue }
-            if url.pathExtension == "json" {
-                if let json = ArtifactIO.jsonObject(contentsOf: url) {
-                    events.append(contentsOf: parseJSON(json, rawRef: ArtifactRoot.pathKey(url)))
-                }
-            } else {
-                events.append(contentsOf: parseDisabledPlist(at: url))
-            }
-        }
-
+        var events = fixtureJSONEvents(root: root, seen: &seen)
+        events.append(contentsOf: standardPlistEvents(root: root, seen: &seen))
+        events.append(contentsOf: discoveredOverrideEvents(root: root, seen: &seen))
         return events
     }
 
-    private func parseJSON(_ json: Any, rawRef: String) -> [EventEnvelope] {
-        var events: [EventEnvelope] = []
-        if let dict = json as? [String: Any] {
-            // { "disabled": { "label": true } } or flat { "label": true }
-            let disabled: [String: Any]
-            if let nested = dict["disabled"] as? [String: Any] {
-                disabled = nested
-            } else if let items = dict["items"] as? [[String: Any]] {
-                return items.compactMap { item in
-                    let label = stringish(item["label"]) ?? stringish(item["Label"]) ?? ""
-                    guard !label.isEmpty else { return nil }
-                    let isDisabled = boolish(item["disabled"]) ?? true
-                    return makeEvent(
-                        label: label,
-                        disabled: isDisabled,
-                        path: rawRef,
-                        domain: stringish(item["domain"]) ?? "system"
-                    )
-                }
-            } else {
-                disabled = dict
-            }
-            for (label, value) in disabled {
-                if label == "disabled" || label == "items" { continue }
-                let isDisabled = boolish(value) ?? true
-                events.append(makeEvent(label: label, disabled: isDisabled, path: rawRef, domain: "system"))
-            }
-        } else if let arr = json as? [[String: Any]] {
-            for item in arr {
-                let label = stringish(item["label"]) ?? ""
-                guard !label.isEmpty else { continue }
-                let isDisabled = boolish(item["disabled"]) ?? true
-                events.append(
-                    makeEvent(
-                        label: label,
-                        disabled: isDisabled,
-                        path: rawRef,
-                        domain: stringish(item["domain"]) ?? "system"
-                    )
-                )
-            }
+    private func fixtureJSONEvents(root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        let paths = ["var/db/com.apple.xpc.launchd/disabled.json", "private/var/db/com.apple.xpc.launchd/disabled.json", "Library/Preferences/launchd_disabled.json"]
+        return paths.flatMap { path -> [EventEnvelope] in
+            guard let url = root.firstExisting([path]), let json = ArtifactIO.jsonObject(contentsOf: url), seen.insert(url) else { return [] }
+            return parseJSON(json, rawRef: ArtifactRoot.pathKey(url))
         }
-        return events
+    }
+
+    private func standardPlistEvents(root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        ["var/db/com.apple.xpc.launchd/disabled.plist", "private/var/db/com.apple.xpc.launchd/disabled.plist"].flatMap { path -> [EventEnvelope] in
+            guard let url = root.firstExisting([path]), seen.insert(url) else { return [] }
+            return parseDisabledPlist(at: url)
+        }
+    }
+
+    private func discoveredOverrideEvents(root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        root.enumerate(matching: isOverrideFile).flatMap { url -> [EventEnvelope] in
+            guard seen.insert(url) else { return [] }
+            if url.pathExtension == "json" { return ArtifactIO.jsonObject(contentsOf: url).map { parseJSON($0, rawRef: ArtifactRoot.pathKey(url)) } ?? [] }
+            return parseDisabledPlist(at: url)
+        }
+    }
+
+    private func isOverrideFile(_ url: URL) -> Bool {
+        let path = url.path
+        guard path.contains("com.apple.xpc.launchd") || path.contains("/launchd/") else { return false }
+        let name = url.lastPathComponent
+        return name == "disabled.plist" || name.hasPrefix("disabled.") || name == "overrides.plist"
+    }
+
+    private func parseJSON(_ json: Any, rawRef: String) -> [EventEnvelope] {
+        if let dictionary = json as? [String: Any] { return dictionaryEvents(dictionary, rawRef: rawRef) }
+        if let items = json as? [[String: Any]] { return itemEvents(items, rawRef: rawRef) }
+        return []
+    }
+
+    private func dictionaryEvents(_ dictionary: [String: Any], rawRef: String) -> [EventEnvelope] {
+        if let disabled = dictionary["disabled"] as? [String: Any] { return disabledEvents(disabled, rawRef: rawRef) }
+        if let items = dictionary["items"] as? [[String: Any]] { return itemEvents(items, rawRef: rawRef) }
+        return disabledEvents(dictionary, rawRef: rawRef)
+    }
+
+    private func disabledEvents(_ disabled: [String: Any], rawRef: String) -> [EventEnvelope] {
+        disabled.compactMap { label, value in
+            guard label != "disabled", label != "items" else { return nil }
+            return makeEvent(label: label, disabled: boolish(value) ?? true, path: rawRef, domain: "system")
+        }
+    }
+
+    private func itemEvents(_ items: [[String: Any]], rawRef: String) -> [EventEnvelope] {
+        items.compactMap { item in
+            guard let label = stringish(item["label"]) ?? stringish(item["Label"]), !label.isEmpty else { return nil }
+            return makeEvent(label: label, disabled: boolish(item["disabled"]) ?? true, path: rawRef, domain: stringish(item["domain"]) ?? "system")
+        }
     }
 
     private func parseDisabledPlist(at url: URL) -> [EventEnvelope] {
@@ -161,18 +128,24 @@ public struct LaunchdOverridesParser: ArtifactParser {
         }
 
         return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "LAUNCHDOVERRIDES",
-            eventType: "defense.launchd_override",
-            entityRefs: [
+            identity: EventEnvelope.Identity(
+                kind: "defense.launchd_override",
+                label: "LAUNCHDOVERRIDES"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [
                 EntityID(kind: .persistence, value: "launchd_override|\(label)"),
                 .file(path: path),
             ],
-            fields: fields,
-            rawRef: path,
-            confidence: securityRelated && disabled ? 0.97 : 0.9
+                properties: fields,
+                provenance: path,
+                confidence: securityRelated && disabled ? 0.97 : 0.9
+            )
         )
     }
 

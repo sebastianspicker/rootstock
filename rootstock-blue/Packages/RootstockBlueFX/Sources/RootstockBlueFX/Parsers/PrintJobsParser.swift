@@ -12,6 +12,14 @@ public struct PrintJobsParser: ArtifactParser {
         description: "CUPS print job history with sensitive-document risk tags"
     )
 
+    private struct PrintJobDetails {
+        let jobID: String
+        let document: String
+        let user: String
+        let printer: String
+        let pages: String
+    }
+
     public init() {}
 
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
@@ -39,10 +47,8 @@ public struct PrintJobsParser: ArtifactParser {
                 || name == "cups_jobs.json"
                 || name == "print_jobs.jsonl"
                 || name == "jobs.json"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -65,52 +71,47 @@ public struct PrintJobsParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let jobID = stringish(item["job_id"])
-            ?? stringish(item["id"])
-            ?? stringish(item["job-id"])
-            ?? ""
-        let document = stringish(item["document"])
-            ?? stringish(item["title"])
-            ?? stringish(item["job-name"])
-            ?? stringish(item["name"])
-            ?? ""
-        let user = stringish(item["user"])
-            ?? stringish(item["job-originating-user-name"])
-            ?? ""
-        let printer = stringish(item["printer"])
-            ?? stringish(item["printer-name"])
-            ?? stringish(item["queue"])
-            ?? ""
-        let pages = stringish(item["pages"]) ?? stringish(item["job-media-sheets"]) ?? ""
+        let details = PrintJobDetails(
+            jobID: stringish(item["job_id"]) ?? stringish(item["id"]) ?? stringish(item["job-id"]) ?? "",
+            document: stringish(item["document"]) ?? stringish(item["title"])
+                ?? stringish(item["job-name"]) ?? stringish(item["name"]) ?? "",
+            user: stringish(item["user"]) ?? stringish(item["job-originating-user-name"]) ?? "",
+            printer: stringish(item["printer"]) ?? stringish(item["printer-name"])
+                ?? stringish(item["queue"]) ?? "",
+            pages: stringish(item["pages"]) ?? stringish(item["job-media-sheets"]) ?? ""
+        )
+        guard !details.document.isEmpty || !details.jobID.isEmpty else { return nil }
 
-        guard !document.isEmpty || !jobID.isEmpty else { return nil }
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "print.job",
+                label: "PRINTJOBS"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["completed_at"] ?? item["timestamp"] ?? item["created"])
+                ?? Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .file, value: "print|\(details.document.isEmpty ? details.jobID : details.document)")],
+                properties: printFields(item: item, details: details),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
+        )
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        let lowerDoc = document.lowercased()
-        if lowerDoc.contains("password") || lowerDoc.contains("secret")
-            || lowerDoc.contains("credential") || lowerDoc.contains("ssn")
-            || lowerDoc.contains("payroll") || lowerDoc.contains("w2")
-            || lowerDoc.contains("bank") || lowerDoc.contains("id_rsa") {
-            if !risk.contains("sensitive_document") { risk.append("sensitive_document") }
-        }
-        if lowerDoc.contains("evil") || lowerDoc.contains("payload") {
-            if !risk.contains("suspicious_document") { risk.append("suspicious_document") }
-        }
-        if printer.lowercased().contains("remote") || printer.lowercased().contains("smb://") {
-            if !risk.contains("remote_printer") { risk.append("remote_printer") }
-        }
-
+    private func printFields(item: [String: Any], details: PrintJobDetails) -> [String: String] {
+        let risk = printRiskTags(item: item, document: details.document, printer: details.printer)
         var fields: [String: String] = [
-            "print.job_id": jobID,
-            "print.document": document,
-            "print.user": user,
-            "print.printer": printer,
-            "print.pages": pages,
+            "print.job_id": details.jobID,
+            "print.document": details.document,
+            "print.user": details.user,
+            "print.printer": details.printer,
+            "print.pages": details.pages,
             FieldTaxonomy.eventType: "print.job",
-            FieldTaxonomy.userName: user,
+            FieldTaxonomy.userName: details.user,
         ]
         if let completed = stringish(item["completed_at"]) ?? stringish(item["timestamp"]) {
             fields["print.completed_at"] = completed
@@ -121,20 +122,33 @@ public struct PrintJobsParser: ArtifactParser {
         if !risk.isEmpty {
             fields["print.risk_tags"] = risk.joined(separator: ",")
         }
+        return fields
+    }
 
-        return EventEnvelope(
-            eventTime: parseDate(item["completed_at"] ?? item["timestamp"] ?? item["created"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "PRINTJOBS",
-            eventType: "print.job",
-            entityRefs: [
-                EntityID(kind: .file, value: "print|\(document.isEmpty ? jobID : document)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
-        )
+    private func printRiskTags(item: [String: Any], document: String, printer: String) -> [String] {
+        var risk = itemRiskTags(item)
+        let lowerDocument = document.lowercased()
+        if ["password", "secret", "credential", "ssn", "payroll", "w2", "bank", "id_rsa"]
+            .contains(where: lowerDocument.contains) {
+            appendRiskTag("sensitive_document", to: &risk)
+        }
+        if ["evil", "payload"].contains(where: lowerDocument.contains) {
+            appendRiskTag("suspicious_document", to: &risk)
+        }
+        let lowerPrinter = printer.lowercased()
+        if lowerPrinter.contains("remote") || lowerPrinter.contains("smb://") {
+            appendRiskTag("remote_printer", to: &risk)
+        }
+        return risk
+    }
+
+    private func itemRiskTags(_ item: [String: Any]) -> [String] {
+        guard let tags = stringish(item["risk_tags"]), !tags.isEmpty else { return [] }
+        return tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func appendRiskTag(_ tag: String, to risk: inout [String]) {
+        guard !risk.contains(tag) else { return }
+        risk.append(tag)
     }
 }

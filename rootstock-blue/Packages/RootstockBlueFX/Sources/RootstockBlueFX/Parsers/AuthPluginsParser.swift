@@ -20,234 +20,176 @@ public struct AuthPluginsParser: ArtifactParser {
 
     public init() {}
 
+    private struct PluginDetails {
+        let name: String
+        let path: String
+        let bundleID: String
+        let signed: Bool?
+        let vendor: String
+        let rawRef: String
+        let extraRisk: [String]
+    }
+
+    private func jsonInventoryURLs(root: ArtifactRoot, seen: inout PathDeduper) -> [(Any, String)] {
+        ["Library/Preferences/auth_plugins.json", "Library/Security/authorization_plugins.json", "Library/Preferences/authorization_plugins.json"].compactMap { relativePath in
+            guard let url = root.firstExisting([relativePath]),
+                  let json = ArtifactIO.jsonObject(contentsOf: url),
+                  seen.insert(url)
+            else { return nil }
+            return (json, ArtifactRoot.pathKey(url))
+        }
+    }
+
+    private func isPluginFile(_ url: URL) -> Bool {
+        let path = url.path
+        guard path.contains("/SecurityAgentPlugins/"), !url.hasDirectoryPath else { return false }
+        if url.lastPathComponent == "Info.plist" { return true }
+        let parent = url.deletingLastPathComponent()
+        return parent.path.contains("/SecurityAgentPlugins/")
+            && parent.deletingLastPathComponent().lastPathComponent == "SecurityAgentPlugins"
+    }
+
+    private func details(forPluginFile url: URL) -> PluginDetails {
+        let key = ArtifactRoot.pathKey(url)
+        var pluginPath = key
+        var pluginName = url.lastPathComponent
+        var bundleID = ""
+        if pluginName == "Info.plist" {
+            let parent = url.deletingLastPathComponent()
+            let bundle = parent.lastPathComponent == "Contents" ? parent.deletingLastPathComponent() : parent
+            pluginPath = ArtifactRoot.pathKey(bundle)
+            pluginName = bundle.lastPathComponent
+            if let dict = ArtifactIO.jsonOrPlistDict(contentsOf: url) {
+                bundleID = stringish(dict["CFBundleIdentifier"]) ?? stringish(dict["bundle_id"]) ?? ""
+            }
+        } else {
+            let parent = url.deletingLastPathComponent()
+            if parent.deletingLastPathComponent().lastPathComponent == "SecurityAgentPlugins" {
+                pluginPath = ArtifactRoot.pathKey(parent)
+                pluginName = parent.lastPathComponent
+            } else if pluginName.hasSuffix(".bundle") {
+                pluginName = String(pluginName.dropLast(".bundle".count))
+            }
+        }
+        return PluginDetails(
+            name: pluginName,
+            path: pluginPath.hasPrefix("/") ? pluginPath : "/Library/Security/SecurityAgentPlugins/\(pluginName)",
+            bundleID: bundleID.isEmpty ? pluginName : bundleID,
+            signed: nil,
+            vendor: "",
+            rawRef: key,
+            extraRisk: []
+        )
+    }
+
+    private func inventoryItems(from json: Any) -> [[String: Any]] {
+        let items = ArtifactIO.dictionaryEntries(from: json, nestedKeys: ["plugins", "authorization_plugins", "auth_plugins"])
+        if !items.isEmpty { return items }
+        return (json as? [String: Any]).map { [$0] } ?? []
+    }
+
+    private func firstString(_ item: [String: Any], keys: [String]) -> String? {
+        keys.lazy.compactMap { stringish(item[$0]) }.first
+    }
+
+    private func pluginRisk(_ details: PluginDetails) -> [String] {
+        let values = [details.name, details.path, details.bundleID, details.vendor].map { $0.lowercased() }
+        let isTemporaryPath = ["/tmp/", "/var/tmp/", "/users/shared/"].contains { values[1].contains($0) }
+        let suspiciousName = values[..<3].contains { $0.contains("evil") }
+        let vendorNeedsAttention = [values[3] == "unknown", details.vendor.isEmpty && suspiciousName].contains(true)
+        let unsignedOrSuspicious = [details.signed == false, suspiciousName].contains(true)
+        var risk = details.extraRisk
+        if isTemporaryPath { risk.append("tmp_path") }
+        if details.signed == false { risk.append("unsigned") }
+        if vendorNeedsAttention || unsignedOrSuspicious && values[3] != "apple" { risk.append("unknown_vendor") }
+        return Array(Set(risk)).sorted()
+    }
+
+    private func pluginFields(_ details: PluginDetails, risk: [String]) -> [String: String] {
+        var fields: [String: String] = [
+            "persistence.kind": "authorization_plugin",
+            "persistence.label": details.name,
+            "persistence.path": details.path,
+            "auth.plugin_name": details.name,
+            "auth.plugin_path": details.path,
+            "auth.plugin_bundle_id": details.bundleID,
+            "auth.bundle_id": details.bundleID,
+            "attack.technique": "T1556.001",
+            FieldTaxonomy.filePath: details.path,
+            FieldTaxonomy.eventType: "persistence.item",
+        ]
+        if let signed = details.signed { fields["auth.plugin_signed"] = signed ? "true" : "false" }
+        if !details.vendor.isEmpty { fields["auth.plugin_vendor"] = details.vendor }
+        if !risk.isEmpty {
+            let joined = risk.joined(separator: ",")
+            fields["persistence.risk_tags"] = joined
+            fields["auth.risk_tags"] = joined
+        }
+        return fields
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
-        // Plugin name identity shared across JSON + directory so relative/absolute roots
-        // and multi-source inventories do not double-count the same plugin.
         var seenNames = Set<String>()
-
-        // JSON inventory preferred (fixture-friendly)
-        for rel in [
-            "Library/Preferences/auth_plugins.json",
-            "Library/Security/authorization_plugins.json",
-            "Library/Preferences/authorization_plugins.json",
-        ] {
-            if let url = root.firstExisting([rel]),
-               let json = ArtifactIO.jsonObject(contentsOf: url),
-               seen.insert(url) {
-                let parsed = parseJSONInventory(json, rawRef: ArtifactRoot.pathKey(url))
-                for e in parsed {
-                    if let n = e.fields["auth.plugin_name"] {
-                        seenNames.insert(n.lowercased())
-                    }
-                }
-                events.append(contentsOf: parsed)
-            }
+        var events: [EventEnvelope] = []
+        for (json, rawRef) in jsonInventoryURLs(root: root, seen: &seen) {
+            let parsed = parseJSONInventory(json, rawRef: rawRef)
+            seenNames.formUnion(parsed.compactMap { $0.fields["auth.plugin_name"]?.lowercased() })
+            events.append(contentsOf: parsed)
         }
-
-        // Enumerate SecurityAgentPlugins directory (bundles / markers)
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            guard path.contains("/SecurityAgentPlugins/") else { return false }
-            if url.hasDirectoryPath { return false }
-            let name = url.lastPathComponent
-            if name.hasPrefix(".") { return false }
-            // Prefer Info.plist (bundle identity) or top-level marker files
-            if name == "Info.plist" { return true }
-            // Top-level file directly under SecurityAgentPlugins/<plugin>/
-            let parent = url.deletingLastPathComponent()
-            if parent.path.contains("/SecurityAgentPlugins/"),
-               parent.deletingLastPathComponent().lastPathComponent == "SecurityAgentPlugins" {
-                return true
-            }
-            return false
-        }) {
-            let key = ArtifactRoot.pathKey(url)
-
-            // Resolve bundle / plugin directory identity
-            var pluginPath = key
-            var pluginName = url.lastPathComponent
-            var bundleID = ""
-            if pluginName == "Info.plist" {
-                let parent = url.deletingLastPathComponent()
-                if parent.lastPathComponent == "Contents" {
-                    let bundle = parent.deletingLastPathComponent()
-                    pluginPath = ArtifactRoot.pathKey(bundle)
-                    pluginName = bundle.lastPathComponent
-                } else {
-                    pluginPath = ArtifactRoot.pathKey(parent)
-                    pluginName = parent.lastPathComponent
-                }
-                if let dict = ArtifactIO.jsonOrPlistDict(contentsOf: url) {
-                    bundleID = stringish(dict["CFBundleIdentifier"]) ?? stringish(dict["bundle_id"]) ?? ""
-                }
-            } else {
-                // Marker / binary under plugin dir → attribute to parent plugin folder
-                let parent = url.deletingLastPathComponent()
-                if parent.deletingLastPathComponent().lastPathComponent == "SecurityAgentPlugins" {
-                    pluginPath = ArtifactRoot.pathKey(parent)
-                    pluginName = parent.lastPathComponent
-                } else if pluginName.hasSuffix(".bundle") {
-                    pluginName = String(pluginName.dropLast(".bundle".count))
-                }
-            }
-
-            // Dedupe by plugin identity (JSON + multi-file bundles share one event)
-            let nameKey = pluginName.lowercased()
-            if seenNames.contains(nameKey) { continue }
-            seenNames.insert(nameKey)
+        for url in root.enumerate(matching: isPluginFile) {
+            let details = details(forPluginFile: url)
+            guard seenNames.insert(details.name.lowercased()).inserted else { continue }
             _ = seen.insert(url)
-
-            let emitPath: String
-            if pluginPath.hasPrefix("/") {
-                emitPath = pluginPath
-            } else {
-                emitPath = "/Library/Security/SecurityAgentPlugins/\(pluginName)"
-            }
-
-            events.append(
-                makeEvent(
-                    name: pluginName,
-                    path: emitPath,
-                    bundleID: bundleID.isEmpty ? pluginName : bundleID,
-                    signed: nil,
-                    vendor: "",
-                    rawRef: key,
-                    extraRisk: []
-                )
-            )
+            events.append(makeEvent(details))
         }
-
         return events
     }
 
     private func parseJSONInventory(_ json: Any, rawRef: String) -> [EventEnvelope] {
-        let items = ArtifactIO.dictionaryEntries(
-            from: json,
-            nestedKeys: ["plugins", "authorization_plugins", "auth_plugins"]
-        )
-        // dictionaryEntries returns [] when nested keys miss and nestedKeys non-empty;
-        // fall back to single-dict inventory like the previous implementation.
-        let resolved: [[String: Any]]
-        if !items.isEmpty {
-            resolved = items
-        } else if let dict = json as? [String: Any] {
-            resolved = [dict]
-        } else {
-            resolved = []
-        }
-        return resolved.compactMap { item -> EventEnvelope? in
-            let name = stringish(item["plugin_name"])
-                ?? stringish(item["name"])
-                ?? stringish(item["label"])
-                ?? stringish(item["bundle_id"])
-                ?? ""
-            let path = stringish(item["plugin_path"])
-                ?? stringish(item["path"])
+        inventoryItems(from: json).compactMap { item in
+            let name = firstString(item, keys: ["plugin_name", "name", "label", "bundle_id"]) ?? ""
+            let path = firstString(item, keys: ["plugin_path", "path"])
                 ?? (name.isEmpty ? "" : "/Library/Security/SecurityAgentPlugins/\(name)")
             guard !name.isEmpty || !path.isEmpty else { return nil }
             let resolvedName = name.isEmpty ? URL(fileURLWithPath: path).lastPathComponent : name
-            let bundleID = stringish(item["bundle_id"])
-                ?? stringish(item["CFBundleIdentifier"])
-                ?? resolvedName
-            let signed = boolish(item["signed"])
-            let vendor = stringish(item["vendor"]) ?? stringish(item["team_id"]) ?? ""
-
-            var extraRisk: [String] = []
-            if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-                extraRisk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            }
-
-            return makeEvent(
+            let risk = (stringish(item["risk_tags"]) ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            return makeEvent(PluginDetails(
                 name: resolvedName,
                 path: path.isEmpty ? "/Library/Security/SecurityAgentPlugins/\(resolvedName)" : path,
-                bundleID: bundleID,
-                signed: signed,
-                vendor: vendor,
+                bundleID: firstString(item, keys: ["bundle_id", "CFBundleIdentifier"]) ?? resolvedName,
+                signed: boolish(item["signed"]),
+                vendor: firstString(item, keys: ["vendor", "team_id"]) ?? "",
                 rawRef: rawRef,
-                extraRisk: extraRisk
-            )
+                extraRisk: risk
+            ))
         }
     }
 
-    private func makeEvent(
-        name: String,
-        path: String,
-        bundleID: String,
-        signed: Bool?,
-        vendor: String,
-        rawRef: String,
-        extraRisk: [String]
-    ) -> EventEnvelope {
-        var risk = extraRisk
-        let lowerName = name.lowercased()
-        let lowerPath = path.lowercased()
-        let lowerBundle = bundleID.lowercased()
-        let lowerVendor = vendor.lowercased()
-
-        if lowerPath.contains("/tmp/") || lowerPath.contains("/var/tmp/") || lowerPath.contains("/users/shared/") {
-            if !risk.contains("tmp_path") { risk.append("tmp_path") }
-        }
-        if signed == false {
-            if !risk.contains("unsigned") { risk.append("unsigned") }
-        }
-        let unknownVendorHints = lowerName.contains("evil")
-            || lowerBundle.contains("evil")
-            || lowerPath.contains("evil")
-            || lowerVendor == "unknown"
-            || lowerVendor.isEmpty && (lowerName.contains("evil") || lowerBundle.contains("evil"))
-        if unknownVendorHints || lowerVendor == "unknown" || vendor.isEmpty && (lowerName.contains("evil") || lowerBundle.contains("com.evil")) {
-            if !risk.contains("unknown_vendor") { risk.append("unknown_vendor") }
-        }
-        // Non-Apple vendor under SecurityAgentPlugins is inherently interesting when unsigned
-        if signed == false || lowerName.contains("evil") || lowerBundle.contains("evil") {
-            if !risk.contains("unknown_vendor") && vendor.lowercased() != "apple" {
-                risk.append("unknown_vendor")
-            }
-        }
-
-        var fields: [String: String] = [
-            "persistence.kind": "authorization_plugin",
-            "persistence.label": name,
-            "persistence.path": path,
-            "auth.plugin_name": name,
-            "auth.plugin_path": path,
-            "auth.plugin_bundle_id": bundleID,
-            "auth.bundle_id": bundleID,
-            "attack.technique": "T1556.001",
-            FieldTaxonomy.filePath: path,
-            FieldTaxonomy.eventType: "persistence.item",
-        ]
-        if let signed {
-            fields["auth.plugin_signed"] = signed ? "true" : "false"
-        }
-        if !vendor.isEmpty {
-            fields["auth.plugin_vendor"] = vendor
-        }
-        if !risk.isEmpty {
-            fields["persistence.risk_tags"] = risk.joined(separator: ",")
-            fields["auth.risk_tags"] = risk.joined(separator: ",")
-        }
-
-        let entities: [EntityID] = [
-            EntityID(kind: .persistence, value: "authplugin|\(name)|\(path)"),
-            EntityID(kind: .auth, value: "auth_plugin|\(bundleID)"),
-            .file(path: path),
-            .file(path: rawRef),
-        ]
-
+    private func makeEvent(_ details: PluginDetails) -> EventEnvelope {
+        let risk = pluginRisk(details)
         return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "AUTHPLUGINS",
-            eventType: "persistence.item",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: rawRef,
-            confidence: 0.93
+            identity: EventEnvelope.Identity(
+                kind: "persistence.item",
+                label: "AUTHPLUGINS"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [
+                EntityID(kind: .persistence, value: "authplugin|\(details.name)|\(details.path)"),
+                EntityID(kind: .auth, value: "auth_plugin|\(details.bundleID)"),
+                .file(path: details.path),
+                .file(path: details.rawRef),
+            ],
+                properties: pluginFields(details, risk: risk),
+                provenance: details.rawRef,
+                confidence: 0.93
+            )
         )
     }
 }

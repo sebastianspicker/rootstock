@@ -36,10 +36,8 @@ public struct ShortcutsAppIntentsParser: ArtifactParser {
             return name == "shortcuts_app_intents.json"
                 || name == "shortcuts_app_intents.jsonl"
                 || name == "shortcuts_inventory.json"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -58,55 +56,44 @@ public struct ShortcutsAppIntentsParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let path = stringish(item["path"])
-            ?? stringish(item["automation_path"])
-            ?? stringish(item["intent_path"])
-            ?? stringish(item["shortcuts_path"])
-            ?? ""
-        let name = stringish(item["shortcut_name"])
-            ?? stringish(item["name"])
-            ?? ""
+        guard let details = shortcutDetails(from: item) else { return nil }
+        let fields = shortcutFields(item: item, details: details, sourceURL: sourceURL)
+        return shortcutEnvelope(item: item, sourceURL: sourceURL, details: details, fields: fields)
+    }
+
+    private struct ShortcutDetails {
+        let path: String
+        let name: String
+        let risk: [String]
+    }
+
+    private func shortcutDetails(from item: [String: Any]) -> ShortcutDetails? {
+        let path = stringish(item["path"]) ?? stringish(item["automation_path"]) ?? stringish(item["intent_path"]) ?? stringish(item["shortcuts_path"]) ?? ""
+        let name = stringish(item["shortcut_name"]) ?? stringish(item["name"]) ?? ""
         guard !path.isEmpty || !name.isEmpty else { return nil }
+        return ShortcutDetails(path: path, name: name, risk: shortcutRisk(item: item, path: path))
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        if boolish(item["automation_surface"]) == true || !path.isEmpty {
-            if !risk.contains("automation_surface") { risk.append("automation_surface") }
-        }
-        if boolish(item["runs_shell"]) == true || boolish(item["scripting"]) == true {
-            if !risk.contains("scripting_action") { risk.append("scripting_action") }
-        }
-        if boolish(item["remote_adjacent"]) == true, !risk.contains("remote_adjacent") {
-            risk.append("remote_adjacent")
-        }
+    private func shortcutRisk(item: [String: Any], path: String) -> [String] {
+        var risk = (stringish(item["risk_tags"]) ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        if boolish(item["automation_surface"]) == true || !path.isEmpty { appendRisk("automation_surface", to: &risk) }
+        if boolish(item["runs_shell"]) == true || boolish(item["scripting"]) == true { appendRisk("scripting_action", to: &risk) }
+        if boolish(item["remote_adjacent"]) == true { appendRisk("remote_adjacent", to: &risk) }
+        return risk
+    }
 
-        let user = stringish(item["user"]) ?? inferUser(from: path) ?? inferUser(from: sourceURL.path) ?? ""
-        var fields: [String: String] = [
-            "shortcuts.path": path,
-            "shortcuts.name": name,
-            "shortcuts.notes": stringish(item["notes"])
-                ?? "Shortcuts/App Intents path markers - never executes automations",
-            FieldTaxonomy.eventType: "shortcuts.automation",
-            FieldTaxonomy.userName: user,
-        ]
-        if !risk.isEmpty {
-            fields["shortcuts.risk_tags"] = risk.joined(separator: ",")
-        }
+    private func appendRisk(_ tag: String, to risk: inout [String]) {
+        if !risk.contains(tag) { risk.append(tag) }
+    }
 
-        return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "SHORTCUTSAPPINTENTS",
-            eventType: "shortcuts.automation",
-            entityRefs: [
-                EntityID(kind: .host, value: "shortcuts|\(name.isEmpty ? path : name)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
-        )
+    private func shortcutFields(item: [String: Any], details: ShortcutDetails, sourceURL: URL) -> [String: String] {
+        let user = stringish(item["user"]) ?? inferUser(from: details.path) ?? inferUser(from: sourceURL.path) ?? ""
+        var fields = ["shortcuts.path": details.path, "shortcuts.name": details.name, "shortcuts.notes": stringish(item["notes"]) ?? "Shortcuts/App Intents path markers - never executes automations", FieldTaxonomy.eventType: "shortcuts.automation", FieldTaxonomy.userName: user]
+        if !details.risk.isEmpty { fields["shortcuts.risk_tags"] = details.risk.joined(separator: ",") }
+        return fields
+    }
+
+    private func shortcutEnvelope(item: [String: Any], sourceURL: URL, details: ShortcutDetails, fields: [String: String]) -> EventEnvelope {
+        EventEnvelope(identity: EventEnvelope.Identity(kind: "shortcuts.automation", label: "SHORTCUTSAPPINTENTS"), capture: EventEnvelope.Capture(source: .parser, eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(), collectedAt: Date()), payload: EventEnvelope.Payload(entityRefs: [EntityID(kind: .host, value: "shortcuts|\(details.name.isEmpty ? details.path : details.name)")], properties: fields, provenance: ArtifactRoot.pathKey(sourceURL), confidence: 0.88))
     }
 }

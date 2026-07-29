@@ -92,106 +92,26 @@ final class Wave14MultiPlanePairTests: XCTestCase {
     }
 
     func testHardenAssessSyntheticEmitsTenWave14Controls() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser, sourcePlugin: "AUTOMATORWF", eventType: "automator.workflow",
-                fields: [
-                    "automator.path": "/Users/alice/Library/Preferences/automator_workflow.json",
-                    "automator.name": "Automator workflow delivery",
-                    "automator.risk_tags": "workflow_surface,wave14",
-                    "automator.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "ICLOUDDRIVEPATH", eventType: "icloud.drive_path",
-                fields: [
-                    "icldrv.path": "/Users/alice/Library/Preferences/icloud_drive_path.json",
-                    "icldrv.name": "iCloud Drive path plane",
-                    "icldrv.risk_tags": "icloud_path_surface,wave14",
-                    "icldrv.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "BTCONTINUITY", eventType: "bluetooth.continuity",
-                fields: [
-                    "btcont.path": "/Users/alice/Library/Preferences/bluetooth_continuity_depth.json",
-                    "btcont.name": "Bluetooth Continuity depth",
-                    "btcont.risk_tags": "bt_continuity_surface,wave14",
-                    "btcont.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "FONTVALIDATION", eventType: "font.validation",
-                fields: [
-                    "fontval.path": "/Users/alice/Library/Preferences/font_validation_dualuse.json",
-                    "fontval.name": "Font validation dual-use",
-                    "fontval.risk_tags": "font_surface,wave14",
-                    "fontval.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "QUICKLOOKCACHE", eventType: "quicklook.cache",
-                fields: [
-                    "qlcache.path": "/Users/alice/Library/Preferences/quicklook_cache_depth.json",
-                    "qlcache.name": "QuickLook cache depth",
-                    "qlcache.risk_tags": "quicklook_surface,wave14",
-                    "qlcache.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "DNSRESOLVER", eventType: "dns.resolver",
-                fields: [
-                    "dnsres.path": "/Users/alice/Library/Preferences/dns_resolver_dualuse.json",
-                    "dnsres.name": "DNS resolver dual-use",
-                    "dnsres.risk_tags": "dns_surface,wave14",
-                    "dnsres.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "LSQUARANTINEDB", eventType: "ls.quarantine_db",
-                fields: [
-                    "lsqdb.path": "/Users/alice/Library/Preferences/ls_quarantine_db_depth.json",
-                    "lsqdb.name": "LS QuarantineEvents depth",
-                    "lsqdb.risk_tags": "quarantine_db_surface,wave14",
-                    "lsqdb.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "PAMAUTHMODULE", eventType: "pam.module",
-                fields: [
-                    "pammod.path": "/Users/alice/Library/Preferences/pam_auth_module.json",
-                    "pammod.name": "PAM auth module surface",
-                    "pammod.risk_tags": "pam_surface,wave14",
-                    "pammod.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "CRONATJOB", eventType: "cron.at_job",
-                fields: [
-                    "cronat.path": "/Users/alice/Library/Preferences/cron_at_job_depth.json",
-                    "cronat.name": "Cron/at job depth",
-                    "cronat.risk_tags": "cron_at_surface,wave14",
-                    "cronat.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser, sourcePlugin: "NOTESMETADATA", eventType: "notes.metadata",
-                fields: [
-                    "notesmeta.path": "/Users/alice/Library/Preferences/notes_metadata_plane.json",
-                    "notesmeta.name": "Notes metadata plane",
-                    "notesmeta.risk_tags": "notes_surface,wave14",
-                    "notesmeta.secrets_exported": "false",
-                ]
-            ),
-        ]
+        let synthetic = HardeningTestFixtures.planeEvents(wave: "wave14", specifications: [
+            .init(plugin: "AUTOMATORWF", eventType: "automator.workflow", fieldPrefix: "automator", fileName: "automator_workflow.json", name: "Automator workflow delivery", riskTag: "workflow_surface"),
+            .init(plugin: "ICLOUDDRIVEPATH", eventType: "icloud.drive_path", fieldPrefix: "icldrv", fileName: "icloud_drive_path.json", name: "iCloud Drive path plane", riskTag: "icloud_path_surface"),
+            .init(plugin: "BTCONTINUITY", eventType: "bluetooth.continuity", fieldPrefix: "btcont", fileName: "bluetooth_continuity_depth.json", name: "Bluetooth Continuity depth", riskTag: "bt_continuity_surface"),
+            .init(plugin: "FONTVALIDATION", eventType: "font.validation", fieldPrefix: "fontval", fileName: "font_validation_dualuse.json", name: "Font validation dual-use", riskTag: "font_surface"),
+            .init(plugin: "QUICKLOOKCACHE", eventType: "quicklook.cache", fieldPrefix: "qlcache", fileName: "quicklook_cache_depth.json", name: "QuickLook cache depth", riskTag: "quicklook_surface"),
+            .init(plugin: "DNSRESOLVER", eventType: "dns.resolver", fieldPrefix: "dnsres", fileName: "dns_resolver_dualuse.json", name: "DNS resolver dual-use", riskTag: "dns_surface"),
+            .init(plugin: "LSQUARANTINEDB", eventType: "ls.quarantine_db", fieldPrefix: "lsqdb", fileName: "ls_quarantine_db_depth.json", name: "LS QuarantineEvents depth", riskTag: "quarantine_db_surface"),
+            .init(plugin: "PAMAUTHMODULE", eventType: "pam.module", fieldPrefix: "pammod", fileName: "pam_auth_module.json", name: "PAM auth module surface", riskTag: "pam_surface"),
+            .init(plugin: "CRONATJOB", eventType: "cron.at_job", fieldPrefix: "cronat", fileName: "cron_at_job_depth.json", name: "Cron/at job depth", riskTag: "cron_at_surface"),
+            .init(plugin: "NOTESMETADATA", eventType: "notes.metadata", fieldPrefix: "notesmeta", fileName: "notes_metadata_plane.json", name: "Notes metadata plane", riskTag: "notes_surface"),
+        ])
         let findings = HardeningAssessment.assess(events: synthetic)
         let controls = Set(findings.map(\.control))
-        for c in wave14HardenControls {
-            XCTAssertTrue(controls.contains(c), "missing \(c); got \(controls.sorted())")
+        for control in wave14HardenControls {
+            XCTAssertTrue(controls.contains(control), "missing \(control); got \(controls.sorted())")
         }
-        for f in findings where wave14HardenControls.contains(f.control) {
-            XCTAssertFalse(f.remediation.isEmpty)
-            XCTAssertFalse((f.detail + f.remediation + f.evidence).lowercased().contains("password=secret"))
+        for finding in findings where wave14HardenControls.contains(finding.control) {
+            XCTAssertFalse(finding.remediation.isEmpty)
+            XCTAssertFalse((finding.detail + finding.remediation + finding.evidence).lowercased().contains("password=secret"))
         }
     }
 

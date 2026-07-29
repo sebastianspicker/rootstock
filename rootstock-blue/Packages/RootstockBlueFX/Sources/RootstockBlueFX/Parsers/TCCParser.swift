@@ -59,15 +59,20 @@ public struct TCCParser: ArtifactParser {
             let modified = Epochs.dateFromMacAbsolute(row["last_modified"] ?? "")
 
             return EventEnvelope(
-                eventTime: modified,
-                collectedAt: Date(),
-                source: .parser,
-                sourcePlugin: "TCC",
-                eventType: "tcc.access",
-                entityRefs: [
+                identity: EventEnvelope.Identity(
+                    kind: "tcc.access",
+                    label: "TCC"
+                ),
+                capture: EventEnvelope.Capture(
+                    source: .parser,
+                    eventTime: modified,
+                    collectedAt: Date()
+                ),
+                payload: EventEnvelope.Payload(
+                    entityRefs: [
                     EntityID(kind: .tcc, value: "\(service)|\(client)"),
                 ],
-                fields: [
+                    properties: [
                     FieldTaxonomy.tccService: service,
                     "tcc.service_display": TCCServiceCatalog.displayName(for: service),
                     FieldTaxonomy.tccIdentity: client,
@@ -76,8 +81,9 @@ public struct TCCParser: ArtifactParser {
                     "tcc.db_path": ArtifactRoot.pathKey(url),
                     FieldTaxonomy.eventType: "tcc.access",
                 ],
-                rawRef: ArtifactRoot.pathKey(url),
-                confidence: 0.95
+                    provenance: ArtifactRoot.pathKey(url),
+                    confidence: 0.95
+                )
             )
         }
     }

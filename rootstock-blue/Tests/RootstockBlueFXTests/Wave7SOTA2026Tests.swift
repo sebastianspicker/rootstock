@@ -232,96 +232,20 @@ final class Wave7SOTA2026Tests: XCTestCase {
     }
 
     func testHardeningWave7PureFromSyntheticEvents() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "COOKIES",
-                eventType: "browser.cookie",
-                fields: [
-                    "cookie.domain": "evil.example",
-                    "cookie.name_marker": "sessionid",
-                    "cookie.value_exported": "false",
-                    "cookie.risk_tags": "evil_domain,session_cookie",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "BOOKMARKS",
-                eventType: "browser.bookmark",
-                fields: [
-                    "bookmark.url": "https://evil.example/panel",
-                    "bookmark.title": "Evil",
-                    "bookmark.risk_tags": "evil_domain",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "OFFICEMRU",
-                eventType: "mru.office",
-                fields: [
-                    "office.app": "Word",
-                    "office.path": "/tmp/evil-passwords.docx",
-                    "office.risk_tags": "sensitive_document,tmp_path",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "PRINTJOBS",
-                eventType: "print.job",
-                fields: [
-                    "print.document": "employee_passwords.pdf",
-                    "print.risk_tags": "sensitive_document",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "NOTES",
-                eventType: "notes.metadata",
-                fields: [
-                    "notes.title_marker": "WiFi password office",
-                    "notes.body_exported": "false",
-                    "notes.risk_tags": "sensitive_title",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "IDEVICEBACKUP",
-                eventType: "backup.idevice",
-                fields: [
-                    "backup.device_name": "Alice iPhone",
-                    "backup.encrypted": "false",
-                    "backup.risk_tags": "unencrypted_backup",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "MSRDC",
-                eventType: "remote.rdp_connection",
-                fields: [
-                    "rdp.host": "evil.example",
-                    "rdp.user": "admin",
-                    "rdp.risk_tags": "remote_connection,suspicious_host",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "CLOUDSYNC",
-                eventType: "cloud.provider_sync",
-                fields: [
-                    "cloud.provider": "dropbox",
-                    "cloud.sync_enabled": "true",
-                    "cloud.risk_tags": "sync_enabled,exfil_capable_provider",
-                ]
-            ),
+        let synthetic = [
+            HardeningTestFixtures.event("COOKIES", "browser.cookie", ["cookie.domain": "evil.example", "cookie.name_marker": "sessionid", "cookie.value_exported": "false", "cookie.risk_tags": "evil_domain,session_cookie"]),
+            HardeningTestFixtures.event("BOOKMARKS", "browser.bookmark", ["bookmark.url": "https://evil.example/panel", "bookmark.title": "Evil", "bookmark.risk_tags": "evil_domain"]),
+            HardeningTestFixtures.event("OFFICEMRU", "mru.office", ["office.app": "Word", "office.path": "/tmp/evil-passwords.docx", "office.risk_tags": "sensitive_document,tmp_path"]),
+            HardeningTestFixtures.event("PRINTJOBS", "print.job", ["print.document": "employee_passwords.pdf", "print.risk_tags": "sensitive_document"]),
+            HardeningTestFixtures.event("NOTES", "notes.metadata", ["notes.title_marker": "WiFi password office", "notes.body_exported": "false", "notes.risk_tags": "sensitive_title"]),
+            HardeningTestFixtures.event("IDEVICEBACKUP", "backup.idevice", ["backup.device_name": "Alice iPhone", "backup.encrypted": "false", "backup.risk_tags": "unencrypted_backup"]),
+            HardeningTestFixtures.event("MSRDC", "remote.rdp_connection", ["rdp.host": "evil.example", "rdp.user": "admin", "rdp.risk_tags": "remote_connection,suspicious_host"]),
+            HardeningTestFixtures.event("CLOUDSYNC", "cloud.provider_sync", ["cloud.provider": "dropbox", "cloud.sync_enabled": "true", "cloud.risk_tags": "sync_enabled,exfil_capable_provider"]),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)
         for control in wave7HardenControls {
-            XCTAssertTrue(
-                findings.contains { $0.control == control && $0.status == "fail" },
-                "expected fail for \(control); have \(findings.map(\.control))"
-            )
-            let f = findings.first { $0.control == control }!
-            XCTAssertFalse(f.remediation.isEmpty, control)
+            XCTAssertTrue(findings.contains { $0.control == control && $0.status == "fail" }, "expected fail for \(control); have \(findings.map(\.control))")
+            XCTAssertFalse(findings.first { $0.control == control }!.remediation.isEmpty, control)
         }
     }
 
@@ -346,43 +270,26 @@ final class Wave7SOTA2026Tests: XCTestCase {
 
     func testParseIntoCaseDetectsWave7Signals() throws {
         try XCTSkipIf(!FileManager.default.fileExists(atPath: relativeRoot.path))
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("wave7-case-\(UUID().uuidString).rsbcase")
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("wave7-case-\(UUID().uuidString).rsbcase")
         defer { try? FileManager.default.removeItem(at: tmp) }
         let pkg = try CasePackage.create(at: tmp, name: "wave7")
-        let n = try ForensicsEngine().parse(source: .directory(relativeRoot), into: pkg)
-        XCTAssertGreaterThan(n, 0)
-
+        XCTAssertGreaterThan(try ForensicsEngine().parse(source: .directory(relativeRoot), into: pkg), 0)
         let posture = try HostIRPosture.enumerateOffline(source: .directory(relativeRoot))
         _ = try HostIRPosture.writeToCase(posture, package: pkg, mode: "offline")
-
-        let harden = try HardeningAssessment.assessOffline(source: .directory(relativeRoot))
-        _ = try HardeningAssessment.writeToCase(harden, package: pkg, mode: "offline")
-
-        let inv = try PersistenceInventory.enumerate(source: .directory(relativeRoot))
-        _ = try PersistenceInventory.writeToCase(inv, package: pkg)
-
+        let hardening = try HardeningAssessment.assessOffline(source: .directory(relativeRoot))
+        _ = try HardeningAssessment.writeToCase(hardening, package: pkg, mode: "offline")
+        let inventory = try PersistenceInventory.enumerate(source: .directory(relativeRoot))
+        _ = try PersistenceInventory.writeToCase(inventory, package: pkg)
         let timeline = try CaseTimeline.merged(from: pkg)
         XCTAssertFalse(timeline.isEmpty)
         let plugins = Set(timeline.map(\.sourcePlugin))
-        for id in wave7IDs {
-            XCTAssertTrue(plugins.contains(id), "timeline missing \(id)")
-        }
+        for id in wave7IDs { XCTAssertTrue(plugins.contains(id), "timeline missing \(id)") }
         XCTAssertTrue(plugins.contains("HARDEN"))
-
         let rulesDir = URL(fileURLWithPath: "Content/detections/samples")
         try XCTSkipIf(!FileManager.default.fileExists(atPath: rulesDir.path))
-        let findings = try DetectionEngine().evaluate(rulesDirectory: rulesDir, events: timeline)
-        let ids = Set(findings.map(\.ruleID))
-        let wave7Hits = ids.filter {
-            $0.contains("cookie") || $0.contains("bookmark") || $0.contains("office_mru")
-                || $0.contains("print") || $0.contains("notes") || $0.contains("idevice")
-                || $0.contains("msrdc") || $0.contains("cloudsync")
-        }
-        XCTAssertFalse(
-            wave7Hits.isEmpty,
-            "expected wave-7 detection hits from real timeline, got rule ids: \(ids.sorted())"
-        )
+        let ids = Set(try DetectionEngine().evaluate(rulesDirectory: rulesDir, events: timeline).map(\.ruleID))
+        let fragments = ["cookie", "bookmark", "office_mru", "print", "notes", "idevice", "msrdc", "cloudsync"]
+        XCTAssertTrue(ids.contains { id in fragments.contains { id.contains($0) } }, "expected wave-7 detection hits from real timeline, got rule ids: \(ids.sorted())")
     }
 
     func testWave7DetectionFixturesViaFixtureRunner() throws {
@@ -417,32 +324,25 @@ final class Wave7SOTA2026Tests: XCTestCase {
     }
 
     func testNonGoalCookiesNoValueExportAndNotesNoBody() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "COOKIES",
-                eventType: "browser.cookie",
-                fields: [
-                    "cookie.domain": "evil.example",
-                    "cookie.name_marker": "sessionid",
-                    "cookie.value_exported": "false",
-                    "cookie.risk_tags": "evil_domain",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "NOTES",
-                eventType: "notes.metadata",
-                fields: [
-                    "notes.title_marker": "password dump",
-                    "notes.body_exported": "false",
-                    "notes.risk_tags": "sensitive_title",
-                ]
-            ),
-        ]
-        let findings = HardeningAssessment.assess(events: synthetic)
+        let findings = HardeningAssessment.assess(events: nonGoalSafetyEvents())
         XCTAssertTrue(findings.contains { $0.control == "cookie_evil_domain" })
         XCTAssertTrue(findings.contains { $0.control == "notes_sensitive_marker" })
+        assertNonGoalSafety(findings)
+    }
+
+    private func nonGoalSafetyEvents() -> [EventEnvelope] {
+        [nonGoalCookieEvent(), nonGoalNotesEvent()]
+    }
+
+    private func nonGoalCookieEvent() -> EventEnvelope {
+        EventEnvelope(identity: .init(kind: "browser.cookie", label: "COOKIES"), capture: .init(source: .parser), payload: .init(properties: ["cookie.domain": "evil.example", "cookie.name_marker": "sessionid", "cookie.value_exported": "false", "cookie.risk_tags": "evil_domain"]))
+    }
+
+    private func nonGoalNotesEvent() -> EventEnvelope {
+        EventEnvelope(identity: .init(kind: "notes.metadata", label: "NOTES"), capture: .init(source: .parser), payload: .init(properties: ["notes.title_marker": "password dump", "notes.body_exported": "false", "notes.risk_tags": "sensitive_title"]))
+    }
+
+    private func assertNonGoalSafety(_ findings: [HardeningAssessment.Finding]) {
         for f in findings {
             XCTAssertFalse(f.detail.lowercased().contains("-----begin"))
             XCTAssertFalse(f.remediation.lowercased().contains("export raw session cookie values into siem")

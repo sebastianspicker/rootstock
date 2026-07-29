@@ -22,15 +22,12 @@ public enum FindingsJSONLImporter: Sendable {
             let category = obj["category"] as? String ?? "other"
             let confidence = obj["confidence"] as? String ?? "medium"
             let event = EventEnvelope(
-                eventTime: Date(),
-                collectedAt: Date(),
-                source: .parser,
-                sourcePlugin: "rootstock-red",
-                eventType: "finding.import",
-                entityRefs: [
+                identity: .init(kind: "finding.import", label: "rootstock-red"),
+                capture: .init(source: .parser),
+                payload: .init(entityRefs: [
                     EntityID(kind: .auth, value: "finding:\(id)"),
                 ],
-                fields: [
+                properties: [
                     "finding.id": id,
                     "finding.title": title,
                     "finding.severity": severity,
@@ -38,9 +35,9 @@ public enum FindingsJSONLImporter: Sendable {
                     "finding.confidence": confidence,
                     "family.source": "rootstock-red",
                     FieldTaxonomy.eventType: "finding.import",
-                ],
-                rawRef: findingsURL.lastPathComponent,
+                ], provenance: findingsURL.lastPathComponent,
                 confidence: 0.85
+                )
             )
             try casePackage.appendEventJSONL(event, stream: "es")
             try casePackage.insertTimelineEvent(event)

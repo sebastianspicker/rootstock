@@ -18,8 +18,8 @@ public struct QuicklookCacheDepthParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let n = url.lastPathComponent
             return n == "quicklook_cache_depth.json" || n == "quicklook_cache_depth.jsonl"
-        }) {
-            if seen.insert(url) { events.append(contentsOf: parseFile(at: url)) }
+        }) where seen.insert(url) {
+            events.append(contentsOf: parseFile(at: url))
         }
         return events
     }
@@ -52,11 +52,21 @@ public struct QuicklookCacheDepthParser: ArtifactParser {
         ]
         if !risk.isEmpty { fields["qlcache.risk_tags"] = risk.joined(separator: ",") }
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(), source: .parser, sourcePlugin: "QUICKLOOKCACHE",
-            eventType: "quicklook.cache",
-            entityRefs: [EntityID(kind: .host, value: "qlcache|\(name.isEmpty ? path : name)")],
-            fields: fields, rawRef: ArtifactRoot.pathKey(sourceURL), confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "quicklook.cache",
+                label: "QUICKLOOKCACHE"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "qlcache|\(name.isEmpty ? path : name)")],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
     }
 }

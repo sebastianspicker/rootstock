@@ -20,33 +20,10 @@ public struct CloudSyncParser: ArtifactParser {
         var events: [EventEnvelope] = []
         var seen = PathDeduper()
 
-        for rel in [
-            "Library/Preferences/cloud_sync.json",
-            "Library/Preferences/cloud_providers.json",
-            "Library/Preferences/dropbox_sync.json",
-            "Library/Preferences/onedrive_sync.json",
-            "Library/Logs/cloud_sync.jsonl",
-        ] {
-            if let url = root.firstExisting([rel]) {
-                if seen.insert(url) {
-                    events.append(contentsOf: parseFile(at: url))
-                }
-            }
-        }
-
-        for url in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            return name == "cloud_sync.json"
-                || name == "cloud_providers.json"
-                || name == "dropbox_sync.json"
-                || name == "onedrive_sync.json"
-                || name == "gdrive_sync.json"
-                || name == "box_sync.json"
-                || name == "cloud_sync.jsonl"
-        }) {
-            if seen.insert(url) {
-                events.append(contentsOf: parseFile(at: url))
-            }
+        let configured = Self.configuredPaths.compactMap { root.firstExisting([$0]) }
+        let discovered = root.enumerate(matching: { Self.artifactNames.contains($0.lastPathComponent) })
+        for url in configured + discovered where seen.insert(url) {
+            events.append(contentsOf: parseFile(at: url))
         }
 
         return events
@@ -69,88 +46,116 @@ public struct CloudSyncParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        var provider = stringish(item["provider"])
-            ?? stringish(item["name"])
-            ?? stringish(item["service"])
-            ?? ""
-        // Infer provider from filename when missing
-        if provider.isEmpty {
-            let path = sourceURL.path.lowercased()
-            if path.contains("dropbox") { provider = "dropbox" }
-            else if path.contains("onedrive") { provider = "onedrive" }
-            else if path.contains("gdrive") || path.contains("google") { provider = "google_drive" }
-            else if path.contains("box") { provider = "box" }
-        }
-        let syncEnabled = boolish(item["sync_enabled"])
-            ?? boolish(item["enabled"])
-            ?? true
-        let folderPath = stringish(item["folder_path"])
-            ?? stringish(item["path"])
-            ?? stringish(item["sync_folder"])
-            ?? ""
-        // Account marker only - domain or partial, not full secrets
-        var accountMarker = stringish(item["account_marker"])
-            ?? stringish(item["account"])
-            ?? stringish(item["email"])
-            ?? ""
-        if accountMarker.contains("@") {
-            let parts = accountMarker.split(separator: "@")
-            if parts.count == 2 {
-                accountMarker = "***@" + String(parts[1])
-            }
-        }
-        let selectiveSync = boolish(item["selective_sync"]) ?? false
-
-        guard !provider.isEmpty || !folderPath.isEmpty || syncEnabled else { return nil }
-        if provider.isEmpty { provider = "unknown" }
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        if syncEnabled {
-            if !risk.contains("sync_enabled") { risk.append("sync_enabled") }
-        }
-        let knownExfil = ["dropbox", "onedrive", "google_drive", "gdrive", "box", "mega", "pcloud"]
-        if knownExfil.contains(provider.lowercased()) && syncEnabled {
-            if !risk.contains("exfil_capable_provider") { risk.append("exfil_capable_provider") }
-        }
-        if folderPath.lowercased().contains("desktop")
-            || folderPath.lowercased().contains("documents") {
-            if !risk.contains("desktop_documents_scope") { risk.append("desktop_documents_scope") }
-        }
-        if folderPath.lowercased().contains("evil") || provider.lowercased().contains("evil") {
-            if !risk.contains("suspicious_provider") { risk.append("suspicious_provider") }
-        }
-
-        let user = stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
-
-        var fields: [String: String] = [
-            "cloud.provider": provider.lowercased(),
-            "cloud.account_marker": accountMarker,
-            "cloud.sync_enabled": syncEnabled ? "true" : "false",
-            "cloud.folder_path": folderPath,
-            "cloud.selective_sync": selectiveSync ? "true" : "false",
-            FieldTaxonomy.eventType: "cloud.provider_sync",
-            FieldTaxonomy.userName: user,
-        ]
-        if !risk.isEmpty {
-            fields["cloud.risk_tags"] = risk.joined(separator: ",")
-        }
-
+        let record = CloudSyncRecord(item: item, sourceURL: sourceURL, inferredProvider: inferredProvider)
+        guard record.isMeaningful else { return nil }
         return EventEnvelope(
-            eventTime: parseDate(item["last_sync"] ?? item["timestamp"])
-                ?? Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "CLOUDSYNC",
-            eventType: "cloud.provider_sync",
-            entityRefs: [
-                EntityID(kind: .host, value: "cloud|\(provider.lowercased())|\(accountMarker)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
+            identity: EventEnvelope.Identity(
+                kind: "cloud.provider_sync",
+                label: "CLOUDSYNC"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["last_sync"] ?? item["timestamp"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: record.entities,
+                properties: record.fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
         )
+    }
+
+    private static let configuredPaths = [
+        "Library/Preferences/cloud_sync.json", "Library/Preferences/cloud_providers.json",
+        "Library/Preferences/dropbox_sync.json", "Library/Preferences/onedrive_sync.json", "Library/Logs/cloud_sync.jsonl",
+    ]
+
+    private static let artifactNames: Set<String> = [
+        "cloud_sync.json", "cloud_providers.json", "dropbox_sync.json", "onedrive_sync.json",
+        "gdrive_sync.json", "box_sync.json", "cloud_sync.jsonl",
+    ]
+
+    private struct CloudSyncRecord {
+        let provider: String
+        let accountMarker: String
+        let syncEnabled: Bool
+        let folderPath: String
+        let selectiveSync: Bool
+        let user: String
+        let riskTags: [String]
+
+        init(item: [String: Any], sourceURL: URL, inferredProvider: (String) -> String) {
+            let suppliedProvider = Self.firstString(in: item, keys: ["provider", "name", "service"])
+            provider = suppliedProvider.isEmpty ? inferredProvider(sourceURL.path) : suppliedProvider
+            syncEnabled = Self.firstBool(in: item, keys: ["sync_enabled", "enabled"]) ?? true
+            folderPath = Self.firstString(in: item, keys: ["folder_path", "path", "sync_folder"])
+            accountMarker = Self.maskedAccountMarker(Self.firstString(in: item, keys: ["account_marker", "account", "email"]))
+            selectiveSync = boolish(item["selective_sync"]) ?? false
+            user = stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
+            riskTags = Self.riskTags(item: item, provider: provider, folderPath: folderPath, syncEnabled: syncEnabled)
+        }
+
+        var isMeaningful: Bool { !provider.isEmpty || !folderPath.isEmpty || syncEnabled }
+        var entities: [EntityID] { [EntityID(kind: .host, value: "cloud|\(normalizedProvider)|\(accountMarker)")] }
+
+        var fields: [String: String] {
+            var values: [String: String] = ["cloud.provider": normalizedProvider, "cloud.account_marker": accountMarker, "cloud.sync_enabled": syncEnabled ? "true" : "false", "cloud.folder_path": folderPath, "cloud.selective_sync": selectiveSync ? "true" : "false", FieldTaxonomy.eventType: "cloud.provider_sync", FieldTaxonomy.userName: user]
+            if !riskTags.isEmpty { values["cloud.risk_tags"] = riskTags.joined(separator: ",") }
+            return values
+        }
+
+        private var normalizedProvider: String { provider.isEmpty ? "unknown" : provider.lowercased() }
+        private static func firstString(in item: [String: Any], keys: [String]) -> String { keys.lazy.compactMap { stringish(item[$0]) }.first ?? "" }
+        private static func firstBool(in item: [String: Any], keys: [String]) -> Bool? { keys.lazy.compactMap { boolish(item[$0]) }.first }
+        private static func maskedAccountMarker(_ value: String) -> String {
+            let parts = value.split(separator: "@")
+            return parts.count == 2 ? "***@" + String(parts[1]) : value
+        }
+        private static func riskTags(item: [String: Any], provider: String, folderPath: String, syncEnabled: Bool) -> [String] {
+            var tags = stringish(item["risk_tags"])? .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+            let additions = [
+                syncEnabled ? "sync_enabled" : nil,
+                syncEnabled && isExfilCapableProvider(provider) ? "exfil_capable_provider" : nil,
+                hasSensitiveFolderScope(folderPath) ? "desktop_documents_scope" : nil,
+                isSuspiciousProvider(provider, folderPath: folderPath) ? "suspicious_provider" : nil,
+            ].compactMap { $0 }
+            for tag in additions where !tags.contains(tag) { tags.append(tag) }
+            return tags
+        }
+
+        private static func isExfilCapableProvider(_ provider: String) -> Bool {
+            ["dropbox", "onedrive", "google_drive", "gdrive", "box", "mega", "pcloud"].contains(provider.lowercased())
+        }
+
+        private static func hasSensitiveFolderScope(_ folderPath: String) -> Bool {
+            ["desktop", "documents"].contains(where: folderPath.lowercased().contains)
+        }
+
+        private static func isSuspiciousProvider(_ provider: String, folderPath: String) -> Bool {
+            provider.lowercased().contains("evil") || folderPath.lowercased().contains("evil")
+        }
+    }
+
+    private func inferredProvider(from path: String) -> String {
+        let markers = [("dropbox", "dropbox"), ("onedrive", "onedrive"), ("gdrive", "google_drive"), ("google", "google_drive"), ("box", "box")]
+        return markers.first { path.lowercased().contains($0.0) }?.1 ?? ""
+    }
+
+    private func cloudRiskTags(provider: String, folderPath: String, syncEnabled: Bool) -> [String] {
+        let providerName = provider.lowercased()
+        let folder = folderPath.lowercased()
+        let knownExfil = ["dropbox", "onedrive", "google_drive", "gdrive", "box", "mega", "pcloud"]
+        return [
+            syncEnabled ? "sync_enabled" : nil,
+            syncEnabled && knownExfil.contains(providerName) ? "exfil_capable_provider" : nil,
+            ["desktop", "documents"].contains(where: folder.contains) ? "desktop_documents_scope" : nil,
+            folder.contains("evil") || providerName.contains("evil") ? "suspicious_provider" : nil,
+        ].compactMap { $0 }
+    }
+
+    private func appendRiskTags(_ additions: [String], to tags: inout [String]) {
+        for tag in additions where !tags.contains(tag) { tags.append(tag) }
     }
 }

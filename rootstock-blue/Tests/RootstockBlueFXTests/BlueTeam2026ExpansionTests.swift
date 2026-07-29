@@ -264,34 +264,20 @@ final class BlueTeam2026ExpansionTests: XCTestCase {
 
     func testParseIntoCaseAndDetectExpansionSignals() throws {
         try XCTSkipIf(!FileManager.default.fileExists(atPath: relativeRoot.path))
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("exp-case-\(UUID().uuidString).rsbcase")
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("exp-case-\(UUID().uuidString).rsbcase")
         defer { try? FileManager.default.removeItem(at: tmp) }
         let pkg = try CasePackage.create(at: tmp, name: "expansion")
-        let n = try ForensicsEngine().parse(source: .directory(relativeRoot), into: pkg)
-        XCTAssertGreaterThan(n, 0)
-
+        XCTAssertGreaterThan(try ForensicsEngine().parse(source: .directory(relativeRoot), into: pkg), 0)
         let posture = try HostIRPosture.enumerateOffline(source: .directory(relativeRoot))
         _ = try HostIRPosture.writeToCase(posture, package: pkg, mode: "offline")
-
-        let inv = try PersistenceInventory.enumerate(source: .directory(relativeRoot))
-        _ = try PersistenceInventory.writeToCase(inv, package: pkg)
-
+        let inventory = try PersistenceInventory.enumerate(source: .directory(relativeRoot))
+        _ = try PersistenceInventory.writeToCase(inventory, package: pkg)
         let timeline = try CaseTimeline.merged(from: pkg)
         XCTAssertFalse(timeline.isEmpty)
-
         let rulesDir = URL(fileURLWithPath: "Content/detections/samples")
         try XCTSkipIf(!FileManager.default.fileExists(atPath: rulesDir.path))
-        let findings = try DetectionEngine().evaluate(rulesDirectory: rulesDir, events: timeline)
-        let ids = Set(findings.map(\.ruleID))
-        let interesting = ids.filter {
-            $0.contains("cron") || $0.contains("login_item") || $0.contains("ssh")
-                || $0.contains("gatekeeper") || $0.contains("browser_extension")
-                || $0.contains("utmpx") || $0.contains("system_extension")
-                || $0.contains("firewall") || $0.contains("sip") || $0.contains("biome")
-                || $0.contains("screen_sharing") || $0.contains("wifi") || $0.contains("btm")
-                || $0.contains("config") || $0.contains("xprotect") || $0.contains("quarantine")
-        }
-        XCTAssertFalse(interesting.isEmpty, "expected expansion findings, got \(ids)")
+        let ids = Set(try DetectionEngine().evaluate(rulesDirectory: rulesDir, events: timeline).map(\.ruleID))
+        let fragments = ["cron", "login_item", "ssh", "gatekeeper", "browser_extension", "utmpx", "system_extension", "firewall", "sip", "biome", "screen_sharing", "wifi", "btm", "config", "xprotect", "quarantine"]
+        XCTAssertTrue(ids.contains { id in fragments.contains { id.contains($0) } }, "expected expansion findings, got \(ids)")
     }
 }

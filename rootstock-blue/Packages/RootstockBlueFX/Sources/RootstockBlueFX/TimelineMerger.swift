@@ -19,10 +19,8 @@ public enum TimelineMerger {
     public static func mergeUnique(_ events: [EventEnvelope]) -> [EventEnvelope] {
         var seen = Set<UUID>()
         var unique: [EventEnvelope] = []
-        for e in merge(events) {
-            if seen.insert(e.id).inserted {
+        for e in merge(events) where seen.insert(e.id).inserted {
                 unique.append(e)
-            }
         }
         return unique
     }

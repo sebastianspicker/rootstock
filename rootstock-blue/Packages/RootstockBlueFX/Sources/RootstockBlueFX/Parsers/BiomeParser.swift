@@ -15,24 +15,40 @@ public struct BiomeParser: ArtifactParser {
 
     public init() {}
 
+    private struct BiomeDetails {
+        let stream: String
+        let value: String
+        let timestamp: Date?
+        let user: String?
+        let sourceURL: URL
+        let extra: [String: Any]
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
+        let urls = discoveredBiomeURLs(root) + knownBiomeURLs(root)
+        return urls.flatMap(parseBiomeFile)
+    }
+
+    private func discoveredBiomeURLs(_ root: ArtifactRoot) -> [URL] {
         var urls: [URL] = []
         var seen = PathDeduper()
-
-        for found in root.enumerate(matching: { url in
-            let path = url.path
-            let name = url.lastPathComponent
-            guard path.contains("/Biome") || path.contains("/Library/Biome") else { return false }
-            if name == "streams.json" { return true }
-            if name.hasSuffix(".jsonl") || name.hasSuffix(".json") { return true }
-            return false
-        }) {
+        for found in root.enumerate(matching: isBiomeFile) {
             if !seen.insert(found) { continue }
             ArtifactRoot.appendUnique(&urls, found)
         }
+        return urls
+    }
 
-        // Explicit firstExisting for well-known fixture layout.
+    private func isBiomeFile(_ url: URL) -> Bool {
+        guard url.path.contains("/Biome") || url.path.contains("/Library/Biome") else { return false }
+        let name = url.lastPathComponent
+        return name == "streams.json" || name.hasSuffix(".jsonl") || name.hasSuffix(".json")
+    }
+
+    private func knownBiomeURLs(_ root: ArtifactRoot) -> [URL] {
+        var urls: [URL] = []
+        var seen = PathDeduper()
         for rel in [
             "Users/alice/Library/Biome/streams.json",
             "Users/alice/Library/Biome/streams/app_launch.jsonl",
@@ -45,18 +61,13 @@ public struct BiomeParser: ArtifactParser {
                 }
             }
         }
+        return urls
+    }
 
-        var events: [EventEnvelope] = []
-        for url in urls {
-            if url.lastPathComponent == "streams.json" {
-                events.append(contentsOf: parseStreamsInventory(at: url))
-            } else if url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl") {
-                events.append(contentsOf: parseJSONL(at: url))
-            } else if url.pathExtension == "json" {
-                events.append(contentsOf: parseJSONArrayOrObject(at: url))
-            }
-        }
-        return events
+    private func parseBiomeFile(_ url: URL) -> [EventEnvelope] {
+        if url.lastPathComponent == "streams.json" { return parseStreamsInventory(at: url) }
+        if url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl") { return parseJSONL(at: url) }
+        return url.pathExtension == "json" ? parseJSONArrayOrObject(at: url) : []
     }
 
     // MARK: - streams.json inventory
@@ -64,35 +75,10 @@ public struct BiomeParser: ArtifactParser {
     private func parseStreamsInventory(at url: URL) -> [EventEnvelope] {
         guard let obj = ArtifactIO.jsonObject(contentsOf: url) else { return [] }
 
-        let items: [[String: Any]]
-        if let arr = obj as? [[String: Any]] {
-            items = arr
-        } else if let dict = obj as? [String: Any] {
-            if let arr = dict["streams"] as? [[String: Any]] {
-                items = arr
-            } else if let arr = dict["items"] as? [[String: Any]] {
-                items = arr
-            } else {
-                items = []
-            }
-        } else {
-            return []
-        }
-
+        let items = streamInventoryItems(obj)
         let user = inferUser(from: url)
         return items.compactMap { item in
-            makeEvent(
-                stream: stringValue(item["stream"]) ?? stringValue(item["name"]) ?? stringValue(item["id"]) ?? "unknown",
-                value: stringValue(item["value"])
-                    ?? stringValue(item["app"])
-                    ?? stringValue(item["bundle_id"])
-                    ?? stringValue(item["title"])
-                    ?? "",
-                timestamp: parseDate(item["timestamp"] ?? item["time"] ?? item["start"]),
-                user: user,
-                sourceURL: url,
-                extra: item
-            )
+            makeEvent(inventoryDetails(item, user: user, sourceURL: url))
         }
     }
 
@@ -101,32 +87,9 @@ public struct BiomeParser: ArtifactParser {
     private func parseJSONL(at url: URL) -> [EventEnvelope] {
         let user = inferUser(from: url)
         let streamHint = streamNameFromPath(url)
-        var events: [EventEnvelope] = []
-
-        for obj in ArtifactIO.jsonlDictionaries(contentsOf: url) {
-            let stream = stringValue(obj["stream"])
-                ?? stringValue(obj["stream_name"])
-                ?? streamHint
-            let value = stringValue(obj["value"])
-                ?? stringValue(obj["app"])
-                ?? stringValue(obj["bundle_id"])
-                ?? stringValue(obj["title"])
-                ?? stringValue(obj["media_title"])
-                ?? ""
-            guard !stream.isEmpty || !value.isEmpty else { continue }
-
-            if let event = makeEvent(
-                stream: stream.isEmpty ? "biome.unknown" : stream,
-                value: value,
-                timestamp: parseDate(obj["timestamp"] ?? obj["time"] ?? obj["start"] ?? obj["event_time"]),
-                user: user,
-                sourceURL: url,
-                extra: obj
-            ) {
-                events.append(event)
-            }
+        return ArtifactIO.jsonlDictionaries(contentsOf: url).compactMap { obj in
+            makeEvent(jsonlDetails(obj, streamHint: streamHint, user: user, sourceURL: url))
         }
-        return events
     }
 
     // MARK: - JSON array of events (non-inventory)
@@ -134,104 +97,110 @@ public struct BiomeParser: ArtifactParser {
     private func parseJSONArrayOrObject(at url: URL) -> [EventEnvelope] {
         guard let obj = ArtifactIO.jsonObject(contentsOf: url) else { return [] }
 
-        let entries: [[String: Any]]
-        if let arr = obj as? [[String: Any]] {
-            entries = arr
-        } else if let dict = obj as? [String: Any] {
-            if let arr = dict["events"] as? [[String: Any]] {
-                entries = arr
-            } else if let arr = dict["items"] as? [[String: Any]] {
-                entries = arr
-            } else if dict["stream"] != nil || dict["value"] != nil || dict["app"] != nil {
-                entries = [dict]
-            } else {
-                return []
-            }
-        } else {
-            return []
-        }
-
+        let entries = eventEntries(obj)
         let user = inferUser(from: url)
         let streamHint = streamNameFromPath(url)
         return entries.compactMap { item in
-            makeEvent(
-                stream: stringValue(item["stream"]) ?? streamHint,
-                value: stringValue(item["value"])
-                    ?? stringValue(item["app"])
-                    ?? stringValue(item["bundle_id"])
-                    ?? "",
-                timestamp: parseDate(item["timestamp"] ?? item["time"] ?? item["start"]),
-                user: user,
-                sourceURL: url,
-                extra: item
-            )
+            makeEvent(eventDetails(item, streamHint: streamHint, user: user, sourceURL: url))
         }
     }
 
     // MARK: - event builder
 
-    private func makeEvent(
-        stream: String,
-        value: String,
-        timestamp: Date?,
-        user: String?,
-        sourceURL: URL,
-        extra: [String: Any]
-    ) -> EventEnvelope? {
-        guard !stream.isEmpty || !value.isEmpty else { return nil }
-
-        var eventType = "pol.biome.event"
-        let lower = stream.lowercased()
-        if lower.contains("app_launch") || lower.contains("app/launch") || lower.contains("applaunch") {
-            eventType = "pol.biome.app_launch"
-        } else if lower.contains("screen_time") || lower.contains("screentime") {
-            eventType = "pol.biome.screen_time"
-        } else if lower.contains("media") || lower.contains("playback") {
-            eventType = "pol.biome.media_playback"
-        }
-
-        var fields: [String: String] = [
-            "pol.stream": stream,
-            "pol.value": value,
-            "pol.source": "biome",
-            FieldTaxonomy.eventType: eventType,
-            FieldTaxonomy.filePath: ArtifactRoot.pathKey(sourceURL),
-        ]
-        if let user, !user.isEmpty {
-            fields[FieldTaxonomy.userName] = user
-        }
-        if let duration = stringValue(extra["duration"]) ?? stringValue(extra["duration_seconds"]) {
-            fields["pol.duration_seconds"] = duration
-        }
-        if let bundle = stringValue(extra["bundle_id"]) ?? stringValue(extra["bundleId"]) {
-            fields["pol.bundle_id"] = bundle
-        }
-
-        var entities: [EntityID] = [
-            EntityID(kind: .host, value: "biome|\(stream)"),
-        ]
-        if !value.isEmpty {
-            entities.append(EntityID(kind: .persistence, value: "biome|\(value)"))
-        }
-        if let user, !user.isEmpty {
-            entities.append(.user(name: user))
-        }
-
-        let mtime = fileMTime(sourceURL)
+    private func makeEvent(_ details: BiomeDetails) -> EventEnvelope? {
+        guard !details.stream.isEmpty || !details.value.isEmpty else { return nil }
+        let eventType = biomeEventType(details.stream)
         return EventEnvelope(
-            eventTime: timestamp ?? mtime,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "BIOME",
-            eventType: eventType,
-            entityRefs: entities,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: eventType,
+                label: "BIOME"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: details.timestamp ?? fileMTime(details.sourceURL),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: biomeEntities(details),
+                properties: biomeFields(details, eventType: eventType),
+                provenance: ArtifactRoot.pathKey(details.sourceURL),
+                confidence: 0.88
+            )
         )
     }
 
+    private func biomeEventType(_ stream: String) -> String {
+        let lower = stream.lowercased()
+        if lower.contains("app_launch") || lower.contains("app/launch") || lower.contains("applaunch") { return "pol.biome.app_launch" }
+        if lower.contains("screen_time") || lower.contains("screentime") { return "pol.biome.screen_time" }
+        return (lower.contains("media") || lower.contains("playback")) ? "pol.biome.media_playback" : "pol.biome.event"
+    }
+
+    private func biomeFields(_ details: BiomeDetails, eventType: String) -> [String: String] {
+        var fields: [String: String] = [
+            "pol.stream": details.stream,
+            "pol.value": details.value,
+            "pol.source": "biome",
+            FieldTaxonomy.eventType: eventType,
+            FieldTaxonomy.filePath: ArtifactRoot.pathKey(details.sourceURL),
+        ]
+        if let user = details.user, !user.isEmpty {
+            fields[FieldTaxonomy.userName] = user
+        }
+        if let duration = stringValue(details.extra["duration"]) ?? stringValue(details.extra["duration_seconds"]) {
+            fields["pol.duration_seconds"] = duration
+        }
+        if let bundle = stringValue(details.extra["bundle_id"]) ?? stringValue(details.extra["bundleId"]) {
+            fields["pol.bundle_id"] = bundle
+        }
+        return fields
+    }
+
+    private func biomeEntities(_ details: BiomeDetails) -> [EntityID] {
+        var entities: [EntityID] = [
+            EntityID(kind: .host, value: "biome|\(details.stream)"),
+        ]
+        if !details.value.isEmpty {
+            entities.append(EntityID(kind: .persistence, value: "biome|\(details.value)"))
+        }
+        if let user = details.user, !user.isEmpty {
+            entities.append(.user(name: user))
+        }
+        return entities
+    }
+
     // MARK: - helpers
+
+    private func streamInventoryItems(_ obj: Any) -> [[String: Any]] {
+        if let items = obj as? [[String: Any]] { return items }
+        let dict = obj as? [String: Any]
+        return (dict?["streams"] as? [[String: Any]]) ?? (dict?["items"] as? [[String: Any]]) ?? []
+    }
+
+    private func eventEntries(_ obj: Any) -> [[String: Any]] {
+        if let entries = obj as? [[String: Any]] { return entries }
+        guard let dict = obj as? [String: Any] else { return [] }
+        if let entries = dict["events"] as? [[String: Any]] { return entries }
+        if let entries = dict["items"] as? [[String: Any]] { return entries }
+        return (dict["stream"] != nil || dict["value"] != nil || dict["app"] != nil) ? [dict] : []
+    }
+
+    private func inventoryDetails(_ item: [String: Any], user: String?, sourceURL: URL) -> BiomeDetails {
+        BiomeDetails(stream: firstString(item, keys: ["stream", "name", "id"], fallback: "unknown"), value: firstString(item, keys: ["value", "app", "bundle_id", "title"]), timestamp: parseDate(item["timestamp"] ?? item["time"] ?? item["start"]), user: user, sourceURL: sourceURL, extra: item)
+    }
+
+    private func jsonlDetails(_ item: [String: Any], streamHint: String, user: String?, sourceURL: URL) -> BiomeDetails {
+        let stream = firstString(item, keys: ["stream", "stream_name"], fallback: streamHint)
+        return BiomeDetails(stream: stream.isEmpty ? "biome.unknown" : stream, value: firstString(item, keys: ["value", "app", "bundle_id", "title", "media_title"]), timestamp: parseDate(item["timestamp"] ?? item["time"] ?? item["start"] ?? item["event_time"]), user: user, sourceURL: sourceURL, extra: item)
+    }
+
+    private func eventDetails(_ item: [String: Any], streamHint: String, user: String?, sourceURL: URL) -> BiomeDetails {
+        BiomeDetails(stream: firstString(item, keys: ["stream"], fallback: streamHint), value: firstString(item, keys: ["value", "app", "bundle_id"]), timestamp: parseDate(item["timestamp"] ?? item["time"] ?? item["start"]), user: user, sourceURL: sourceURL, extra: item)
+    }
+
+    private func firstString(_ item: [String: Any], keys: [String], fallback: String = "") -> String {
+        keys.lazy.compactMap { stringValue(item[$0]) }.first ?? fallback
+    }
 
     private func streamNameFromPath(_ url: URL) -> String {
         let name = url.deletingPathExtension().lastPathComponent

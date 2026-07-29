@@ -13,6 +13,49 @@ public enum EventSource: String, Codable, Sendable {
 
 /// JSONL-friendly event wrapper shared by live ES, offline parsers, and fixtures.
 public struct EventEnvelope: Codable, Sendable, Identifiable {
+    public struct Identity: Sendable {
+        public var id: UUID
+        public var kind: String
+        public var label: String
+
+        public init(id: UUID = UUID(), kind: String, label: String) {
+            self.id = id
+            self.kind = kind
+            self.label = label
+        }
+    }
+
+    public struct Capture: Sendable {
+        public var source: EventSource
+        public var eventTime: Date
+        public var collectedAt: Date
+
+        public init(source: EventSource, eventTime: Date = Date(), collectedAt: Date = Date()) {
+            self.source = source
+            self.eventTime = eventTime
+            self.collectedAt = collectedAt
+        }
+    }
+
+    public struct Payload: Sendable {
+        public var entityRefs: [EntityID]
+        public var properties: [String: String]
+        public var provenance: String?
+        public var confidence: Double
+
+        public init(
+            entityRefs: [EntityID] = [],
+            properties: [String: String] = [:],
+            provenance: String? = nil,
+            confidence: Double = 1.0
+        ) {
+            self.entityRefs = entityRefs
+            self.properties = properties
+            self.provenance = provenance
+            self.confidence = confidence
+        }
+    }
+
     public var id: UUID
     public var eventTime: Date
     public var collectedAt: Date
@@ -24,29 +67,19 @@ public struct EventEnvelope: Codable, Sendable, Identifiable {
     public var rawRef: String?
     public var confidence: Double
 
-    public init(
-        id: UUID = UUID(),
-        eventTime: Date = Date(),
-        collectedAt: Date = Date(),
-        source: EventSource,
-        sourcePlugin: String,
-        eventType: String,
-        entityRefs: [EntityID] = [],
-        fields: [String: String] = [:],
-        rawRef: String? = nil,
-        confidence: Double = 1.0
-    ) {
-        self.id = id
-        self.eventTime = eventTime
-        self.collectedAt = collectedAt
-        self.source = source
-        self.sourcePlugin = sourcePlugin
-        self.eventType = eventType
-        self.entityRefs = entityRefs
-        self.fields = fields
-        self.rawRef = rawRef
-        self.confidence = confidence
+    public init(identity: Identity, capture: Capture, payload: Payload) {
+        id = identity.id
+        eventTime = capture.eventTime
+        collectedAt = capture.collectedAt
+        source = capture.source
+        sourcePlugin = identity.label
+        eventType = identity.kind
+        entityRefs = payload.entityRefs
+        fields = payload.properties
+        rawRef = payload.provenance
+        confidence = payload.confidence
     }
+
 }
 
 /// Decode/encode `EventEnvelope` rows as JSONL (one ISO-8601 JSON object per line).

@@ -18,8 +18,8 @@ public struct XpcMachServiceDepthParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let n = url.lastPathComponent
             return n == "xpc_mach_service_depth.json" || n == "xpc_mach_service_depth.jsonl"
-        }) {
-            if seen.insert(url) { events.append(contentsOf: parseFile(at: url)) }
+        }) where seen.insert(url) {
+            events.append(contentsOf: parseFile(at: url))
         }
         return events
     }
@@ -52,11 +52,21 @@ public struct XpcMachServiceDepthParser: ArtifactParser {
         ]
         if !risk.isEmpty { fields["xpcmach.risk_tags"] = risk.joined(separator: ",") }
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(), source: .parser, sourcePlugin: "XPCMACHSERVICE",
-            eventType: "xpc.mach_service",
-            entityRefs: [EntityID(kind: .host, value: "xpcmach|\(name.isEmpty ? path : name)")],
-            fields: fields, rawRef: ArtifactRoot.pathKey(sourceURL), confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "xpc.mach_service",
+                label: "XPCMACHSERVICE"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "xpcmach|\(name.isEmpty ? path : name)")],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
     }
 }

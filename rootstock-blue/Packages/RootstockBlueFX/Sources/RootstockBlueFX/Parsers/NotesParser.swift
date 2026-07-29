@@ -6,16 +6,19 @@ import RootstockBlueCore
 /// Does not export full note body content (privacy non-goal, same class as
 /// NOTIFICATIONS body export refusal).
 public struct NotesParser: ArtifactParser {
+    private struct NoteDetails {
+        let title: String
+        let folder: String
+        let bodyExported: Bool
+        let user: String
+        let risk: [String]
+    }
+
     public let manifest = PluginManifest(
         id: "NOTES",
         tier: .tier2,
         description: "Apple Notes metadata markers (no full body dumps)"
     )
-
-    private static let forbiddenBodyKeys: Set<String> = [
-        "body", "content", "text", "note_body", "html", "attributed_body",
-        "snippet_full", "plaintext", "full_text",
-    ]
 
     public init() {}
 
@@ -41,10 +44,8 @@ public struct NotesParser: ArtifactParser {
             return name == "notes_metadata.json"
                 || name == "notes_export.json"
                 || name == "notes_metadata.jsonl"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -67,79 +68,76 @@ public struct NotesParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        // Never copy body keys
-        for key in item.keys {
-            if Self.forbiddenBodyKeys.contains(key.lowercased()) {
-                continue
-            }
-        }
-
-        let titleMarker = stringish(item["title_marker"])
-            ?? stringish(item["title"])
-            ?? stringish(item["name"])
-            ?? ""
-        let folder = stringish(item["folder"])
-            ?? stringish(item["account"])
-            ?? ""
+        let titleMarker = noteValue(item, keys: ["title_marker", "title", "name"])
+        let folder = noteValue(item, keys: ["folder", "account"])
         let cappedTitle = String(titleMarker.prefix(120))
 
         guard !cappedTitle.isEmpty || !folder.isEmpty else { return nil }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        let lower = cappedTitle.lowercased()
-        if lower.contains("password") || lower.contains("credential")
-            || lower.contains("secret") || lower.contains("api key")
-            || lower.contains("private key") || lower.contains("ssn")
-            || lower.contains("wifi password") {
-            if !risk.contains("sensitive_title") { risk.append("sensitive_title") }
-        }
-        if lower.contains("evil") || lower.contains("c2") || lower.contains("implant") {
-            if !risk.contains("suspicious_title") { risk.append("suspicious_title") }
-        }
+        let risk = riskTags(for: item, title: cappedTitle)
 
         let user = stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
         let bodyExported = boolish(item["body_exported"]) == true
-
-        var fields: [String: String] = [
-            "notes.title_marker": cappedTitle,
-            "notes.folder": folder,
-            "notes.body_exported": bodyExported ? "true" : "false",
-            FieldTaxonomy.eventType: "notes.metadata",
-            FieldTaxonomy.userName: user,
-        ]
-        if let modified = stringish(item["modified_at"]) ?? stringish(item["timestamp"]) {
-            fields["notes.modified_at"] = modified
-        }
-        if let created = stringish(item["created_at"]) {
-            fields["notes.created_at"] = created
-        }
-        if let noteID = stringish(item["note_id"]) ?? stringish(item["id"]) {
-            fields["notes.note_id_marker"] = String(noteID.prefix(40))
-        }
-        if !risk.isEmpty {
-            fields["notes.risk_tags"] = risk.joined(separator: ",")
-        }
-
-        fields.removeValue(forKey: "notes.body")
-        fields.removeValue(forKey: "body")
-        fields.removeValue(forKey: "content")
+        let details = NoteDetails(title: cappedTitle, folder: folder, bodyExported: bodyExported, user: user, risk: risk)
+        let fields = noteFields(item, details: details)
 
         return EventEnvelope(
-            eventTime: parseDate(item["modified_at"] ?? item["timestamp"] ?? item["created_at"])
+            identity: EventEnvelope.Identity(
+                kind: "notes.metadata",
+                label: "NOTES"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["modified_at"] ?? item["timestamp"] ?? item["created_at"])
                 ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "NOTES",
-            eventType: "notes.metadata",
-            entityRefs: [
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [
                 EntityID(kind: .host, value: "notes|\(cappedTitle.prefix(40))"),
             ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
         )
+    }
+
+    private func noteValue(_ item: [String: Any], keys: [String]) -> String {
+        keys.lazy.compactMap { stringish(item[$0]) }.first ?? ""
+    }
+
+    private func riskTags(for item: [String: Any], title: String) -> [String] {
+        var tags = stringish(item["risk_tags"])?.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        } ?? []
+        let lower = title.lowercased()
+        append("sensitive_title", when: ["password", "credential", "secret", "api key", "private key", "ssn", "wifi password"].contains { lower.contains($0) }, to: &tags)
+        append("suspicious_title", when: ["evil", "c2", "implant"].contains { lower.contains($0) }, to: &tags)
+        return tags
+    }
+
+    private func append(_ tag: String, when condition: Bool, to tags: inout [String]) {
+        if condition, !tags.contains(tag) {
+            tags.append(tag)
+        }
+    }
+
+    private func noteFields(
+        _ item: [String: Any],
+        details: NoteDetails
+    ) -> [String: String] {
+        var fields: [String: String] = [
+            "notes.title_marker": details.title,
+            "notes.folder": details.folder,
+            "notes.body_exported": details.bodyExported ? "true" : "false",
+            FieldTaxonomy.eventType: "notes.metadata",
+            FieldTaxonomy.userName: details.user,
+        ]
+        if let modified = stringish(item["modified_at"]) ?? stringish(item["timestamp"]) { fields["notes.modified_at"] = modified }
+        if let created = stringish(item["created_at"]) { fields["notes.created_at"] = created }
+        if let noteID = stringish(item["note_id"]) ?? stringish(item["id"]) { fields["notes.note_id_marker"] = String(noteID.prefix(40)) }
+        if !details.risk.isEmpty { fields["notes.risk_tags"] = details.risk.joined(separator: ",") }
+        return fields
     }
 }

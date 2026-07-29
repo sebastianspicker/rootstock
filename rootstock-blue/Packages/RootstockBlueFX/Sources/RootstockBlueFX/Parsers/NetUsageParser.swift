@@ -24,30 +24,10 @@ public struct NetUsageParser: ArtifactParser {
         var events: [EventEnvelope] = []
         var seen = PathDeduper()
 
-        for rel in [
-            "Library/Preferences/netusage.json",
-            "Library/Preferences/com.apple.networkusage.json",
-            "private/var/networkd/netusage.sqlite.json",
-            "var/networkd/netusage.sqlite.json",
-        ] {
-            if let url = root.firstExisting([rel]),
-               let json = ArtifactIO.jsonObject(contentsOf: url),
-               seen.insert(url) {
-                events.append(contentsOf: parseJSONInventory(json, rawRef: ArtifactRoot.pathKey(url)))
-            }
-        }
-
-        // Also discover by name under the tree (alternate collector layouts)
-        for url in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            if name == "netusage.json" || name == "com.apple.networkusage.json" { return true }
-            if name == "netusage.sqlite.json" { return true }
-            return false
-        }) {
-            guard seen.insert(url) else { continue }
-            if let json = ArtifactIO.jsonObject(contentsOf: url) {
-                events.append(contentsOf: parseJSONInventory(json, rawRef: ArtifactRoot.pathKey(url)))
-            }
+        let configured = Self.configuredPaths.compactMap { root.firstExisting([$0]) }
+        let discovered = root.enumerate(matching: { Self.artifactNames.contains($0.lastPathComponent) })
+        for url in configured + discovered where seen.insert(url) {
+            events.append(contentsOf: parseInventory(at: url))
         }
 
         return events
@@ -62,100 +42,106 @@ public struct NetUsageParser: ArtifactParser {
         return items.compactMap { makeEvent(from: $0, rawRef: rawRef) }
     }
 
+    private func parseInventory(at url: URL) -> [EventEnvelope] {
+        guard let json = ArtifactIO.jsonObject(contentsOf: url) else { return [] }
+        return parseJSONInventory(json, rawRef: ArtifactRoot.pathKey(url))
+    }
+
+    private static let configuredPaths = [
+        "Library/Preferences/netusage.json", "Library/Preferences/com.apple.networkusage.json",
+        "private/var/networkd/netusage.sqlite.json", "var/networkd/netusage.sqlite.json",
+    ]
+
+    private static let artifactNames: Set<String> = ["netusage.json", "com.apple.networkusage.json", "netusage.sqlite.json"]
+
     private func makeEvent(from item: [String: Any], rawRef: String) -> EventEnvelope? {
-        let process = stringish(item["process"])
-            ?? stringish(item["process_name"])
-            ?? stringish(item["proc"])
-            ?? stringish(item["name"])
-            ?? stringish(item["bundle_id"])
-            ?? ""
-        let domain = stringish(item["domain"])
-            ?? stringish(item["host"])
-            ?? stringish(item["destination"])
-            ?? stringish(item["remote_host"])
-            ?? ""
-        let bytesIn = int64ish(item["bytes_in"])
-            ?? int64ish(item["rx_bytes"])
-            ?? int64ish(item["received"])
-            ?? 0
-        let bytesOut = int64ish(item["bytes_out"])
-            ?? int64ish(item["tx_bytes"])
-            ?? int64ish(item["sent"])
-            ?? 0
-
-        guard !process.isEmpty || !domain.isEmpty || bytesOut > 0 || bytesIn > 0 else { return nil }
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-
-        let lowerProc = process.lowercased()
-        let lowerDomain = domain.lowercased()
-
-        if lowerProc.contains("evil") || lowerProc.contains("/tmp/") || lowerProc.contains("curl") {
-            if !risk.contains("suspicious_process") { risk.append("suspicious_process") }
-        }
-        if bytesOut >= Self.highVolumeThreshold {
-            if !risk.contains("high_volume") { risk.append("high_volume") }
-        }
-        // C2-ish domains (fixture + common patterns)
-        if lowerDomain.contains("evil.example")
-            || lowerDomain.contains("c2.")
-            || lowerDomain.hasSuffix(".evil")
-            || (lowerDomain.contains("evil") && lowerDomain.contains(".")) {
-            if !risk.contains("anomalous_egress") { risk.append("anomalous_egress") }
-        }
-        // High egress from suspicious process is also anomalous
-        if risk.contains("suspicious_process") && bytesOut > 1_000_000 {
-            if !risk.contains("anomalous_egress") { risk.append("anomalous_egress") }
-        }
-
-        var fields: [String: String] = [
-            "net.usage.process": process,
-            "net.usage.bytes_in": String(bytesIn),
-            "net.usage.bytes_out": String(bytesOut),
-            "net.usage.domain": domain,
-            FieldTaxonomy.eventType: "network.usage",
-        ]
-        if !process.isEmpty {
-            fields[FieldTaxonomy.processPath] = process
-        }
-        if !domain.isEmpty {
-            fields["net.domain"] = domain
-        }
-        if !risk.isEmpty {
-            fields["net.risk_tags"] = risk.joined(separator: ",")
-            fields["net.usage.risk_tags"] = risk.joined(separator: ",")
-        }
-        if let firstSeen = stringish(item["first_seen"]) ?? stringish(item["timestamp"]) {
-            fields["net.usage.first_seen"] = firstSeen
-        }
-
-        var entities: [EntityID] = [
-            EntityID(kind: .network, value: "netusage|\(process)|\(domain)|\(bytesOut)"),
-        ]
-        if !process.isEmpty {
-            entities.append(EntityID(kind: .process, value: "path=\(process)"))
-        }
-        if !domain.isEmpty {
-            entities.append(EntityID(kind: .network, value: "domain=\(domain)"))
-        }
-
-        let eventTime = parseDate(item["timestamp"] ?? item["last_seen"] ?? item["first_seen"])
-            ?? Date(timeIntervalSince1970: 0)
-
+        let record = NetworkUsageRecord(item: item, highVolumeThreshold: Self.highVolumeThreshold)
+        guard record.isMeaningful else { return nil }
         return EventEnvelope(
-            eventTime: eventTime,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "NETUSAGE",
-            eventType: "network.usage",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: rawRef,
-            confidence: 0.88
+            identity: EventEnvelope.Identity(
+                kind: "network.usage",
+                label: "NETUSAGE"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["last_seen"] ?? item["first_seen"]) ?? Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: record.entities,
+                properties: record.fields,
+                provenance: rawRef,
+                confidence: 0.88
+            )
         )
+    }
+
+    private struct NetworkUsageRecord {
+        let process: String
+        let domain: String
+        let bytesIn: Int64
+        let bytesOut: Int64
+        let riskTags: [String]
+        let firstSeen: String?
+
+        init(item: [String: Any], highVolumeThreshold: Int64) {
+            process = Self.firstString(in: item, keys: ["process", "process_name", "proc", "name", "bundle_id"])
+            domain = Self.firstString(in: item, keys: ["domain", "host", "destination", "remote_host"])
+            bytesIn = Self.firstInt64(in: item, keys: ["bytes_in", "rx_bytes", "received"])
+            bytesOut = Self.firstInt64(in: item, keys: ["bytes_out", "tx_bytes", "sent"])
+            firstSeen = Self.firstOptionalString(in: item, keys: ["first_seen", "timestamp"])
+            riskTags = Self.riskTags(item: item, process: process, domain: domain, bytesOut: bytesOut, highVolumeThreshold: highVolumeThreshold)
+        }
+
+        var isMeaningful: Bool { !process.isEmpty || !domain.isEmpty || bytesOut > 0 || bytesIn > 0 }
+
+        var fields: [String: String] {
+            var values: [String: String] = ["net.usage.process": process, "net.usage.bytes_in": String(bytesIn), "net.usage.bytes_out": String(bytesOut), "net.usage.domain": domain, FieldTaxonomy.eventType: "network.usage"]
+            if !process.isEmpty { values[FieldTaxonomy.processPath] = process }
+            if !domain.isEmpty { values["net.domain"] = domain }
+            if !riskTags.isEmpty {
+                let joined = riskTags.joined(separator: ",")
+                values["net.risk_tags"] = joined
+                values["net.usage.risk_tags"] = joined
+            }
+            if let firstSeen { values["net.usage.first_seen"] = firstSeen }
+            return values
+        }
+
+        var entities: [EntityID] {
+            var values: [EntityID] = [EntityID(kind: .network, value: "netusage|\(process)|\(domain)|\(bytesOut)")]
+            if !process.isEmpty { values.append(EntityID(kind: .process, value: "path=\(process)")) }
+            if !domain.isEmpty { values.append(EntityID(kind: .network, value: "domain=\(domain)")) }
+            return values
+        }
+
+        private static func firstString(in item: [String: Any], keys: [String]) -> String { firstOptionalString(in: item, keys: keys) ?? "" }
+        private static func firstOptionalString(in item: [String: Any], keys: [String]) -> String? { keys.lazy.compactMap { stringish(item[$0]) }.first }
+        private static func firstInt64(in item: [String: Any], keys: [String]) -> Int64 { keys.lazy.compactMap { int64ish($0) }.first ?? 0 }
+
+        private static func riskTags(item: [String: Any], process: String, domain: String, bytesOut: Int64, highVolumeThreshold: Int64) -> [String] {
+            var tags = stringish(item["risk_tags"])? .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+            let lowerProcess = process.lowercased()
+            let lowerDomain = domain.lowercased()
+            let suspiciousProcess = ["evil", "/tmp/", "curl"].contains(where: lowerProcess.contains)
+            let anomalousDomain = lowerDomain.contains("evil.example") || lowerDomain.contains("c2.") || lowerDomain.hasSuffix(".evil") || (lowerDomain.contains("evil") && lowerDomain.contains("."))
+            append("suspicious_process", when: suspiciousProcess, to: &tags)
+            append("high_volume", when: bytesOut >= highVolumeThreshold, to: &tags)
+            append("anomalous_egress", when: anomalousDomain || (suspiciousProcess && bytesOut > 1_000_000), to: &tags)
+            return tags
+        }
+
+        private static func int64ish(_ value: Any?) -> Int64? {
+            if let n = value as? NSNumber { return n.int64Value }
+            if let i = value as? Int64 { return i }
+            if let i = value as? Int { return Int64(i) }
+            if let s = value as? String, let i = Int64(s) { return i }
+            return nil
+        }
+
+        private static func append(_ tag: String, when condition: Bool, to tags: inout [String]) {
+            if condition && !tags.contains(tag) { tags.append(tag) }
+        }
     }
 
     private func int64ish(_ value: Any?) -> Int64? {

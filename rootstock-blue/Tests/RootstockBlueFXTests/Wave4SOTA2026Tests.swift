@@ -196,55 +196,16 @@ final class Wave4SOTA2026Tests: XCTestCase {
     }
 
     func testHardeningWave4PureFromSyntheticEvents() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "LOGINHOOKS",
-                eventType: "persistence.item",
-                fields: [
-                    "persistence.kind": "login_hook",
-                    "loginwindow.hook_type": "login",
-                    "loginwindow.script_path": "/tmp/hook.sh",
-                    "persistence.command": "/tmp/hook.sh",
-                ]
-            ),
-            EventEnvelope(
-                source: .collect,
-                sourcePlugin: "IRPOSTURE",
-                eventType: "ir.posture.remote_access",
-                fields: [
-                    "protection.name": "RemoteLogin",
-                    "protection.enabled": "true",
-                    "remote.service": "ssh",
-                    "remote.enabled": "true",
-                ]
-            ),
-            EventEnvelope(
-                source: .collect,
-                sourcePlugin: "IRPOSTURE",
-                eventType: "ir.posture.account",
-                fields: [
-                    "account.kind": "guest",
-                    "account.enabled": "true",
-                    "account.guest_enabled": "true",
-                ]
-            ),
-            EventEnvelope(
-                source: .collect,
-                sourcePlugin: "IRPOSTURE",
-                eventType: "ir.posture.software_update",
-                fields: [
-                    "protection.name": "SoftwareUpdateCatalog",
-                    "su.catalog_url": "https://evil.example/catalog",
-                    "su.catalog_non_apple": "true",
-                ]
-            ),
+        let synthetic = [
+            HardeningTestFixtures.event("LOGINHOOKS", "persistence.item", ["persistence.kind": "login_hook", "loginwindow.hook_type": "login", "loginwindow.script_path": "/tmp/hook.sh", "persistence.command": "/tmp/hook.sh"]),
+            HardeningTestFixtures.event("IRPOSTURE", "ir.posture.remote_access", ["protection.name": "RemoteLogin", "protection.enabled": "true", "remote.service": "ssh", "remote.enabled": "true"]),
+            HardeningTestFixtures.event("IRPOSTURE", "ir.posture.account", ["account.kind": "guest", "account.enabled": "true", "account.guest_enabled": "true"]),
+            HardeningTestFixtures.event("IRPOSTURE", "ir.posture.software_update", ["protection.name": "SoftwareUpdateCatalog", "su.catalog_url": "https://evil.example/catalog", "su.catalog_non_apple": "true"]),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)
-        XCTAssertTrue(findings.contains { $0.control == "login_hook_present" && $0.status == "fail" })
-        XCTAssertTrue(findings.contains { $0.control == "remote_login" && $0.status == "fail" })
-        XCTAssertTrue(findings.contains { $0.control == "guest_account" && $0.status == "fail" })
-        XCTAssertTrue(findings.contains { $0.control == "software_update_catalog" && $0.status == "fail" })
+        for control in ["login_hook_present", "remote_login", "guest_account", "software_update_catalog"] {
+            XCTAssertTrue(findings.contains { $0.control == control && $0.status == "fail" })
+        }
         let login = findings.first { $0.control == "login_hook_present" }!
         XCTAssertTrue(login.remediation.lowercased().contains("login") || login.remediation.contains("defaults"))
     }

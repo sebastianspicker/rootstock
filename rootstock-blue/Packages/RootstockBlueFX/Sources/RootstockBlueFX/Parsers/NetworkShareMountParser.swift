@@ -32,10 +32,8 @@ public struct NetworkShareMountParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let name = url.lastPathComponent
             return name == "network_share_mount.json" || name == "network_share_mount.jsonl"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -54,57 +52,18 @@ public struct NetworkShareMountParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let secretKeys = ["password", "cookie", "cookie_value", "secret", "token", "keychain_data"]
-        for k in secretKeys { _ = item[k] }
-
-        let path = stringish(item["path"])
-            ?? stringish(item["tile_path"])
-            ?? stringish(item["handler_path"])
-            ?? stringish(item["tool_path"])
-            ?? ""
-        let name = stringish(item["name"])
-            ?? stringish(item["rule_name"])
-            ?? stringish(item["kind"])
-            ?? stringish(item["label"])
-            ?? ""
-        guard !path.isEmpty || !name.isEmpty else { return nil }
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.lowercased().contains("password_dump") }
-        }
-        if risk.isEmpty { risk.append("share_surface") }
-        if !risk.contains("share_surface") { risk.append("share_surface") }
-
-        let user = stringish(item["user"]) ?? inferUser(from: path) ?? inferUser(from: sourceURL.path) ?? ""
-        var fields: [String: String] = [
-            "share.path": path,
-            "share.name": name,
-            "share.notes": stringish(item["notes"]) ?? "Network share mount markers - never mounts attacker shares or writes credentials to NetAuth",
-            "share.secrets_exported": "false",
-            FieldTaxonomy.eventType: "network.share_mount",
-            FieldTaxonomy.userName: user,
-        ]
-        if let host = stringish(item["url_host"]) { fields["share.url_host"] = host }
-        if let share = stringish(item["share_url"]) { fields["share.share_url"] = share }
-        if let depth = stringish(item["depth"]) { fields["share.depth"] = depth }
-        if boolish(item["runs_script"]) == true { fields["share.runs_script"] = "true" }
-        if boolish(item["tool_present"]) == true { fields["share.tool_present"] = "true" }
-        if !risk.isEmpty { fields["share.risk_tags"] = risk.joined(separator: ",") }
-
-        return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "NETWORKSHAREMOUNT",
-            eventType: "network.share_mount",
-            entityRefs: [
-                EntityID(kind: .host, value: "share|\(name.isEmpty ? path : name)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
+        SurfaceMarkerEventBuilder.makeEvent(
+            from: item,
+            sourceURL: sourceURL,
+            spec: SurfaceMarkerEventSpec(
+                fieldPrefix: "share",
+                eventType: "network.share_mount",
+                identityKind: "network.share_mount",
+                identityLabel: "NETWORKSHAREMOUNT",
+                entityPrefix: "share",
+                defaultRiskTag: "share_surface",
+                defaultNotes: "Network share mount markers - never mounts attacker shares or writes credentials to NetAuth"
+            )
         )
     }
 }

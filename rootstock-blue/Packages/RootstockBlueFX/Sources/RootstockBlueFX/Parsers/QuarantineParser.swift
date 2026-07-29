@@ -60,34 +60,35 @@ public struct QuarantineParser: ArtifactParser {
             """
         )
 
-        return rows.map { row in
-            let ts = Epochs.dateFromMacAbsolute(row["ts"] ?? "")
-            let dataURL = row["data_url"] ?? ""
-            let origin = row["origin_url"] ?? ""
-            var entities: [EntityID] = []
-            if !dataURL.isEmpty {
-                entities.append(.file(path: dataURL))
-            }
-            return EventEnvelope(
-                eventTime: ts,
-                collectedAt: Date(),
+        return rows.map { quarantineEvent(from: $0, databaseURL: url) }
+    }
+
+    private func quarantineEvent(from row: [String: String], databaseURL: URL) -> EventEnvelope {
+        let dataURL = row["data_url"] ?? ""
+        let rawRef = ArtifactRoot.pathKey(databaseURL)
+        let fields = [
+            "quarantine.id": row["id"] ?? "", "quarantine.agent": row["agent"] ?? "",
+            "quarantine.agent_name": row["agent_name"] ?? "", "quarantine.data_url": dataURL,
+            "quarantine.origin_url": row["origin_url"] ?? "", "quarantine.sender": row["sender"] ?? "",
+            FieldTaxonomy.filePath: dataURL, FieldTaxonomy.eventType: "quarantine.event",
+        ]
+        let entities: [EntityID] = dataURL.isEmpty ? [] : [.file(path: dataURL)]
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "quarantine.event",
+                label: "QUARANTINE"
+            ),
+            capture: EventEnvelope.Capture(
                 source: .parser,
-                sourcePlugin: "QUARANTINE",
-                eventType: "quarantine.event",
+                eventTime: Epochs.dateFromMacAbsolute(row["ts"] ?? ""),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
                 entityRefs: entities,
-                fields: [
-                    "quarantine.id": row["id"] ?? "",
-                    "quarantine.agent": row["agent"] ?? "",
-                    "quarantine.agent_name": row["agent_name"] ?? "",
-                    "quarantine.data_url": dataURL,
-                    "quarantine.origin_url": origin,
-                    "quarantine.sender": row["sender"] ?? "",
-                    FieldTaxonomy.filePath: dataURL,
-                    FieldTaxonomy.eventType: "quarantine.event",
-                ],
-                rawRef: ArtifactRoot.pathKey(url),
+                properties: fields,
+                provenance: rawRef,
                 confidence: 0.95
             )
-        }
+        )
     }
 }

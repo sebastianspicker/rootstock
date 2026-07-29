@@ -32,28 +32,47 @@ public struct CollectionPack: Codable, Sendable {
 
 public enum CollectionPackLoader {
     public static func load(from url: URL) throws -> CollectionPack {
-        let text = try String(contentsOf: url, encoding: .utf8)
-        var name = url.deletingPathExtension().lastPathComponent
+        var parser = PackParser(defaultName: url.deletingPathExtension().lastPathComponent)
+        for line in try String(contentsOf: url, encoding: .utf8).components(separatedBy: .newlines) {
+            parser.consume(line)
+        }
+        return parser.pack
+    }
+
+    private struct PackParser {
+        var name: String
         var description = ""
         var requiresFDA = true
         var requiresES = false
         var artifacts: [String] = []
         var inArtifacts = false
 
-        for rawLine in text.components(separatedBy: .newlines) {
+        init(defaultName: String) {
+            name = defaultName
+        }
+
+        var pack: CollectionPack {
+            CollectionPack(name: name, description: description, requiresFDA: requiresFDA, requiresES: requiresES, artifacts: artifacts)
+        }
+
+        mutating func consume(_ rawLine: String) {
             let line = rawLine.split(separator: "#", maxSplits: 1).first.map(String.init) ?? rawLine
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty { continue }
-            if trimmed.hasPrefix("- ") && inArtifacts {
-                artifacts.append(String(trimmed.dropFirst(2)).trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
-                continue
-            }
-            guard trimmed.contains(":") else { continue }
-            let parts = trimmed.split(separator: ":", maxSplits: 1).map {
-                $0.trimmingCharacters(in: .whitespaces)
-            }
-            let key = parts[0]
-            let value = parts.count > 1 ? parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"")) : ""
+            guard !trimmed.isEmpty else { return }
+            if consumeArtifact(trimmed) { return }
+            consumeScalar(trimmed)
+        }
+
+        private mutating func consumeArtifact(_ line: String) -> Bool {
+            guard line.hasPrefix("- "), inArtifacts else { return false }
+            artifacts.append(String(line.dropFirst(2)).trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
+            return true
+        }
+
+        private mutating func consumeScalar(_ line: String) {
+            guard let colon = line.firstIndex(of: ":") else { return }
+            let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             switch key {
             case "name": name = value; inArtifacts = false
             case "description": description = value; inArtifacts = false
@@ -63,14 +82,6 @@ public enum CollectionPackLoader {
             default: break
             }
         }
-
-        return CollectionPack(
-            name: name,
-            description: description,
-            requiresFDA: requiresFDA,
-            requiresES: requiresES,
-            artifacts: artifacts
-        )
     }
 
     public static func loadDirectory(_ dir: URL) throws -> [CollectionPack] {

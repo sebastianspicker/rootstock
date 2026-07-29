@@ -18,12 +18,27 @@ public struct PrivHelpersParser: ArtifactParser {
 
     public init() {}
 
+    private struct HelperDetails {
+        let label: String
+        let path: String
+        let program: String
+        let launchdPlist: String
+        let teamID: String
+        let signingID: String
+        let programArgs: String
+        let extra: [String: String]
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
+        return collectJSONEvents(root, seen: &seen)
+            + collectHelperFileEvents(root, seen: &seen)
+            + collectLaunchDaemonEvents(root, seen: &seen)
+    }
 
-        // JSON inventory (fixture-friendly)
+    private func collectJSONEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for rel in [
             "Library/PrivilegedHelperTools/helpers.json",
             "Library/Preferences/privileged_helpers.json",
@@ -34,8 +49,11 @@ public struct PrivHelpersParser: ArtifactParser {
                 events.append(contentsOf: parseJSONInventory(json, rawRef: ArtifactRoot.pathKey(url)))
             }
         }
+        return events
+    }
 
-        // Binary / marker files under PrivilegedHelperTools
+    private func collectHelperFileEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for url in root.enumerate(matching: { url in
             let path = url.path
             guard path.contains("/PrivilegedHelperTools/") else { return false }
@@ -48,85 +66,80 @@ public struct PrivHelpersParser: ArtifactParser {
             guard seen.insert(url) else { continue }
             let key = ArtifactRoot.pathKey(url)
             let label = url.lastPathComponent
-            events.append(
-                makeEvent(
-                    label: label,
-                    path: key,
-                    program: key.hasPrefix("/") ? key : "/Library/PrivilegedHelperTools/\(label)",
-                    launchdPlist: "",
-                    teamID: "",
-                    signingID: "",
-                    programArgs: "",
-                    extra: [:]
-                )
-            )
+            events.append(makeEvent(HelperDetails(
+                label: label,
+                path: key,
+                program: key.hasPrefix("/") ? key : "/Library/PrivilegedHelperTools/\(label)",
+                launchdPlist: "",
+                teamID: "",
+                signingID: "",
+                programArgs: "",
+                extra: [:]
+            )))
         }
-
-        // LaunchDaemons that point into PrivilegedHelperTools or have helper-ish labels
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            guard url.pathExtension == "plist" else { return false }
-            return path.contains("/LaunchDaemons/")
-        }) {
-            guard let data = ArtifactIO.data(contentsOf: url),
-                  let dict = ArtifactIO.plistDict(from: data)
-            else { continue }
-
-            let label = stringish(dict["Label"]) ?? url.deletingPathExtension().lastPathComponent
-            let program = stringish(dict["Program"]) ?? ""
-            let args = stringArray(dict["ProgramArguments"])
-            let programPath = program.isEmpty ? (args.first ?? "") : program
-            let fullArgs = args.isEmpty ? programPath : args.joined(separator: " ")
-
-            let isHelperPath = programPath.contains("PrivilegedHelperTools")
-                || fullArgs.contains("PrivilegedHelperTools")
-            let isHelperLabel = label.lowercased().contains("helper")
-                || url.lastPathComponent.lowercased().contains("helper")
-            guard isHelperPath || isHelperLabel else { continue }
-
-            let pathKey = ArtifactRoot.pathKey(url)
-            // Dedupe against JSON/binary by label+program
-            let dedupe = "helper|\(label)|\(programPath)"
-            guard seen.insert(pathKey: dedupe) else { continue }
-            _ = seen.insert(pathKey: pathKey)
-
-            var risk: [String] = []
-            let lower = programPath.lowercased()
-            if lower.contains("/tmp/") || lower.contains("/var/tmp/") || lower.contains("/users/shared/") {
-                risk.append("tmp_path_program")
-            }
-            if label.lowercased().contains("evil") || programPath.lowercased().contains("evil") {
-                risk.append("unknown_team")
-            }
-
-            events.append(
-                makeEvent(
-                    label: label,
-                    path: isHelperPath ? programPath : pathKey,
-                    program: programPath.isEmpty ? label : programPath,
-                    launchdPlist: pathKey,
-                    teamID: stringish(dict["TeamIdentifier"]) ?? "",
-                    signingID: stringish(dict["SigningIdentifier"]) ?? "",
-                    programArgs: fullArgs,
-                    extra: risk.isEmpty ? [:] : ["persistence.risk_tags": risk.joined(separator: ",")]
-                )
-            )
-        }
-
         return events
     }
 
-    private func parseJSONInventory(_ json: Any, rawRef: String) -> [EventEnvelope] {
-        var items = ArtifactIO.dictionaryEntries(
-            from: json,
-            nestedKeys: ["helpers", "privileged_helpers"]
-        )
-        if items.isEmpty, let dict = json as? [String: Any] {
-            items = [dict]
-        } else if items.isEmpty, let arr = json as? [[String: Any]] {
-            items = arr
+    private func collectLaunchDaemonEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
+        for url in root.enumerate(matching: isLaunchDaemon) {
+            guard let details = launchDaemonDetails(url),
+                  insertLaunchDaemon(details.label, program: details.program, at: url, seen: &seen)
+            else { continue }
+            events.append(makeEvent(details))
         }
-        return items.compactMap { item -> EventEnvelope? in
+        return events
+    }
+
+    private func isLaunchDaemon(_ url: URL) -> Bool {
+        url.pathExtension == "plist" && url.path.contains("/LaunchDaemons/")
+    }
+
+    private func launchDaemonDetails(_ url: URL) -> HelperDetails? {
+        guard let data = ArtifactIO.data(contentsOf: url),
+              let dict = ArtifactIO.plistDict(from: data)
+        else { return nil }
+        let label = stringish(dict["Label"]) ?? url.deletingPathExtension().lastPathComponent
+        let program = stringish(dict["Program"]) ?? ""
+        let args = stringArray(dict["ProgramArguments"])
+        let programPath = program.isEmpty ? (args.first ?? "") : program
+        let fullArgs = args.isEmpty ? programPath : args.joined(separator: " ")
+        guard refersToHelper(label: label, program: programPath, arguments: fullArgs, fileName: url.lastPathComponent) else {
+            return nil
+        }
+        let pathKey = ArtifactRoot.pathKey(url)
+        let risk = daemonRiskTags(label: label, program: programPath)
+        let extra = risk.isEmpty ? [:] : ["persistence.risk_tags": risk.joined(separator: ",")]
+        return HelperDetails(
+            label: label,
+            path: containsHelperPath(programPath, arguments: fullArgs) ? programPath : pathKey,
+            program: programPath.isEmpty ? label : programPath,
+            launchdPlist: pathKey,
+            teamID: stringish(dict["TeamIdentifier"]) ?? "",
+            signingID: stringish(dict["SigningIdentifier"]) ?? "",
+            programArgs: fullArgs,
+            extra: extra
+        )
+    }
+
+    private func refersToHelper(label: String, program: String, arguments: String, fileName: String) -> Bool {
+        containsHelperPath(program, arguments: arguments)
+            || label.lowercased().contains("helper")
+            || fileName.lowercased().contains("helper")
+    }
+
+    private func containsHelperPath(_ program: String, arguments: String) -> Bool {
+        program.contains("PrivilegedHelperTools") || arguments.contains("PrivilegedHelperTools")
+    }
+
+    private func insertLaunchDaemon(_ label: String, program: String, at url: URL, seen: inout PathDeduper) -> Bool {
+        guard seen.insert(pathKey: "helper|\(label)|\(program)") else { return false }
+        _ = seen.insert(pathKey: ArtifactRoot.pathKey(url))
+        return true
+    }
+
+    private func parseJSONInventory(_ json: Any, rawRef: String) -> [EventEnvelope] {
+        inventoryItems(json).compactMap { item -> EventEnvelope? in
             let label = stringish(item["label"])
                 ?? stringish(item["name"])
                 ?? stringish(item["bundle_id"])
@@ -144,32 +157,8 @@ public struct PrivHelpersParser: ArtifactParser {
                 ?? stringish(item["program_arguments"])
                 ?? program
 
-            var risk: [String] = []
-            if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-                risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            }
-            let lower = program.lowercased()
-            if lower.contains("/tmp/") || lower.contains("/var/tmp/") {
-                if !risk.contains("tmp_path_program") { risk.append("tmp_path_program") }
-            }
-            if team.isEmpty || team.lowercased() == "unknown" {
-                if label.lowercased().contains("evil") || program.lowercased().contains("evil") {
-                    if !risk.contains("unknown_team") { risk.append("unknown_team") }
-                }
-            }
-            if boolish(item["orphan"]) == true {
-                if !risk.contains("orphan_helper") { risk.append("orphan_helper") }
-            }
-
-            var extra: [String: String] = [:]
-            if !risk.isEmpty {
-                extra["persistence.risk_tags"] = risk.joined(separator: ",")
-            }
-            if let bundle = stringish(item["bundle_id"]) {
-                extra["privhelper.bundle_id"] = bundle
-            }
-
-            return makeEvent(
+            let extra = inventoryExtra(item, label: label, program: program, team: team)
+            return makeEvent(HelperDetails(
                 label: label,
                 path: path,
                 program: program,
@@ -178,77 +167,129 @@ public struct PrivHelpersParser: ArtifactParser {
                 signingID: signing,
                 programArgs: args,
                 extra: extra
-            )
+            ))
         }
     }
 
-    private func makeEvent(
-        label: String,
-        path: String,
-        program: String,
-        launchdPlist: String,
-        teamID: String,
-        signingID: String,
-        programArgs: String,
-        extra: [String: String]
-    ) -> EventEnvelope {
+    private func inventoryItems(_ json: Any) -> [[String: Any]] {
+        let items = ArtifactIO.dictionaryEntries(from: json, nestedKeys: ["helpers", "privileged_helpers"])
+        if !items.isEmpty { return items }
+        if let dict = json as? [String: Any] { return [dict] }
+        return json as? [[String: Any]] ?? []
+    }
+
+    private func inventoryExtra(_ item: [String: Any], label: String, program: String, team: String) -> [String: String] {
+        var tags = taggedRisks(item)
+        appendInventoryRisks(&tags, label: label, program: program, team: team, orphan: boolish(item["orphan"]) == true)
+        var extra = tags.isEmpty ? [:] : ["persistence.risk_tags": tags.joined(separator: ",")]
+        if let bundle = stringish(item["bundle_id"]) { extra["privhelper.bundle_id"] = bundle }
+        return extra
+    }
+
+    private func taggedRisks(_ item: [String: Any]) -> [String] {
+        guard let tags = stringish(item["risk_tags"]), !tags.isEmpty else { return [] }
+        return tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func appendInventoryRisks(_ tags: inout [String], label: String, program: String, team: String, orphan: Bool) {
+        if temporaryProgram(program) { appendUnique("tmp_path_program", to: &tags) }
+        if untrustedEvilHelper(label: label, program: program, team: team) { appendUnique("unknown_team", to: &tags) }
+        if orphan { appendUnique("orphan_helper", to: &tags) }
+    }
+
+    private func daemonRiskTags(label: String, program: String) -> [String] {
+        var tags: [String] = []
+        if temporaryProgram(program, includeShared: true) { tags.append("tmp_path_program") }
+        if label.lowercased().contains("evil") || program.lowercased().contains("evil") { tags.append("unknown_team") }
+        return tags
+    }
+
+    private func temporaryProgram(_ program: String, includeShared: Bool = false) -> Bool {
+        let lower = program.lowercased()
+        return lower.contains("/tmp/") || lower.contains("/var/tmp/") || (includeShared && lower.contains("/users/shared/"))
+    }
+
+    private func untrustedEvilHelper(label: String, program: String, team: String) -> Bool {
+        (team.isEmpty || team.lowercased() == "unknown")
+            && (label.lowercased().contains("evil") || program.lowercased().contains("evil"))
+    }
+
+    private func appendUnique(_ tag: String, to tags: inout [String]) {
+        if !tags.contains(tag) { tags.append(tag) }
+    }
+
+    private func makeEvent(_ details: HelperDetails) -> EventEnvelope {
+        EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "persistence.item",
+                label: "PRIVHELPERS"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: helperEntities(details),
+                properties: helperFields(details),
+                provenance: details.path,
+                confidence: 0.94
+            )
+        )
+    }
+
+    private func helperFields(_ details: HelperDetails) -> [String: String] {
         var fields: [String: String] = [
             "persistence.kind": "privileged_helper",
-            "persistence.label": label,
-            "persistence.path": path,
-            "persistence.command": program,
-            "persistence.program": program,
-            "privhelper.label": label,
-            "privhelper.path": path,
-            "helper.label": label,
-            "helper.path": path,
-            FieldTaxonomy.filePath: path,
+            "persistence.label": details.label,
+            "persistence.path": details.path,
+            "persistence.command": details.program,
+            "persistence.program": details.program,
+            "privhelper.label": details.label,
+            "privhelper.path": details.path,
+            "helper.label": details.label,
+            "helper.path": details.path,
+            FieldTaxonomy.filePath: details.path,
             FieldTaxonomy.eventType: "persistence.item",
         ]
-        if !program.isEmpty {
-            fields[FieldTaxonomy.processPath] = program
+        if !details.program.isEmpty {
+            fields[FieldTaxonomy.processPath] = details.program
         }
-        if !launchdPlist.isEmpty {
-            fields["privhelper.launchd_plist"] = launchdPlist
-            fields["helper.launchd_plist"] = launchdPlist
+        if !details.launchdPlist.isEmpty {
+            fields["privhelper.launchd_plist"] = details.launchdPlist
+            fields["helper.launchd_plist"] = details.launchdPlist
         }
-        if !teamID.isEmpty {
-            fields["privhelper.team_id"] = teamID
-            fields["helper.team_id"] = teamID
-            fields[FieldTaxonomy.processTeamID] = teamID
+        if !details.teamID.isEmpty {
+            fields["privhelper.team_id"] = details.teamID
+            fields["helper.team_id"] = details.teamID
+            fields[FieldTaxonomy.processTeamID] = details.teamID
         }
-        if !signingID.isEmpty {
-            fields["privhelper.signing_id"] = signingID
-            fields["helper.signing_id"] = signingID
-            fields[FieldTaxonomy.processSigningID] = signingID
+        if !details.signingID.isEmpty {
+            fields["privhelper.signing_id"] = details.signingID
+            fields["helper.signing_id"] = details.signingID
+            fields[FieldTaxonomy.processSigningID] = details.signingID
         }
-        if !programArgs.isEmpty {
-            fields["privhelper.program_args"] = programArgs
-            fields["helper.program_args"] = programArgs
-            fields["persistence.program_arguments"] = programArgs
+        if !details.programArgs.isEmpty {
+            fields["privhelper.program_args"] = details.programArgs
+            fields["helper.program_args"] = details.programArgs
+            fields["persistence.program_arguments"] = details.programArgs
         }
-        for (k, v) in extra where !v.isEmpty {
+        for (k, v) in details.extra where !v.isEmpty {
             fields[k] = v
         }
 
+        return fields
+    }
+
+    private func helperEntities(_ details: HelperDetails) -> [EntityID] {
         var entities: [EntityID] = [
-            EntityID(kind: .persistence, value: "privhelper|\(label)|\(path)"),
-            .file(path: path),
+            EntityID(kind: .persistence, value: "privhelper|\(details.label)|\(details.path)"),
+            .file(path: details.path),
         ]
-        if !program.isEmpty && program != path {
-            entities.append(.file(path: program))
+        if !details.program.isEmpty && details.program != details.path {
+            entities.append(.file(path: details.program))
         }
 
-        return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "PRIVHELPERS",
-            eventType: "persistence.item",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: path,
-            confidence: 0.94
-        )
+        return entities
     }
 }

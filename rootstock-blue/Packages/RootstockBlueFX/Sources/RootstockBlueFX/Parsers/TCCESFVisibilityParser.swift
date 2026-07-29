@@ -12,6 +12,13 @@ public struct TCCESFVisibilityParser: ArtifactParser {
         description: "TCC/ESF visibility depth (strong|partial|thin)"
     )
 
+    private struct VisibilityReport {
+        let tccListable: Bool
+        let toolPresent: Bool
+        let toolPath: String
+        let user: String
+    }
+
     public init() {}
 
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
@@ -33,10 +40,8 @@ public struct TCCESFVisibilityParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let name = url.lastPathComponent
             return name == "tcc_esf_visibility.json" || name == "tcc_esf_visibility.jsonl"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -55,71 +60,81 @@ public struct TCCESFVisibilityParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        var depth = (stringish(item["depth"])
-            ?? stringish(item["visibility_depth"])
-            ?? "").lowercased()
-        let tccListable = boolish(item["tcc_path_listable"])
-            ?? boolish(item["tcc_listable"])
-            ?? boolish(item["tcc_readable"])
-            ?? false
-        let toolPresent = boolish(item["tool_present"])
-            ?? stringish(item["tool_path"]).map { !$0.isEmpty }
-            ?? false
-        let toolPath = stringish(item["tool_path"])
-            ?? stringish(item["visibility_tool"])
-            ?? ""
-        let user = stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
-
-        if depth.isEmpty {
-            // Heuristic when depth omitted
-            if tccListable && toolPresent {
-                depth = "strong"
-            } else if tccListable || toolPresent {
-                depth = "partial"
-            } else {
-                depth = "thin"
-            }
-        }
-        let allowed = ["strong", "partial", "thin"]
-        if !allowed.contains(depth) {
-            depth = "thin"
-        }
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        if depth == "thin" {
-            if !risk.contains("thin_visibility") { risk.append("thin_visibility") }
-            if !risk.contains("sensor_gap_adjacent") { risk.append("sensor_gap_adjacent") }
-        } else if depth == "partial" {
-            if !risk.contains("partial_visibility") { risk.append("partial_visibility") }
-        }
-
-        var fields: [String: String] = [
-            "visibility.depth": depth,
-            "visibility.tcc_path_listable": tccListable ? "true" : "false",
-            "visibility.tool_present": toolPresent ? "true" : "false",
-            "visibility.tool_path": toolPath,
-            FieldTaxonomy.eventType: "tcc_esf.visibility",
-            FieldTaxonomy.userName: user,
-        ]
-        if !risk.isEmpty {
-            fields["visibility.risk_tags"] = risk.joined(separator: ",")
-        }
+        let report = VisibilityReport(
+            tccListable: boolish(item["tcc_path_listable"]) ?? boolish(item["tcc_listable"])
+                ?? boolish(item["tcc_readable"]) ?? false,
+            toolPresent: boolish(item["tool_present"])
+                ?? stringish(item["tool_path"]).map { !$0.isEmpty } ?? false,
+            toolPath: stringish(item["tool_path"]) ?? stringish(item["visibility_tool"]) ?? "",
+            user: stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
+        )
+        let depth = visibilityDepth(item: item, tccListable: report.tccListable, toolPresent: report.toolPresent)
+        let risk = visibilityRiskTags(item: item, depth: depth)
 
         return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["assessed_at"]) ?? Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "TCCESFVISIBILITY",
-            eventType: "tcc_esf.visibility",
-            entityRefs: [
-                EntityID(kind: .host, value: "visibility|\(depth)|\(toolPresent)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
+            identity: EventEnvelope.Identity(
+                kind: "tcc_esf.visibility",
+                label: "TCCESFVISIBILITY"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["timestamp"] ?? item["assessed_at"]) ?? Date(),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "visibility|\(depth)|\(report.toolPresent)")],
+                properties: visibilityFields(depth: depth, report: report, risk: risk),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
         )
+    }
+
+    private func visibilityDepth(item: [String: Any], tccListable: Bool, toolPresent: Bool) -> String {
+        let reported = (stringish(item["depth"]) ?? stringish(item["visibility_depth"]) ?? "").lowercased()
+        if ["strong", "partial", "thin"].contains(reported) { return reported }
+        if tccListable && toolPresent { return "strong" }
+        return tccListable || toolPresent ? "partial" : "thin"
+    }
+
+    private func visibilityRiskTags(item: [String: Any], depth: String) -> [String] {
+        var risk = visibilityItemRiskTags(item)
+        switch depth {
+        case "thin":
+            appendVisibilityRiskTag("thin_visibility", to: &risk)
+            appendVisibilityRiskTag("sensor_gap_adjacent", to: &risk)
+        case "partial":
+            appendVisibilityRiskTag("partial_visibility", to: &risk)
+        default:
+            break
+        }
+        return risk
+    }
+
+    private func visibilityItemRiskTags(_ item: [String: Any]) -> [String] {
+        guard let tags = stringish(item["risk_tags"]), !tags.isEmpty else { return [] }
+        return tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func appendVisibilityRiskTag(_ tag: String, to risk: inout [String]) {
+        guard !risk.contains(tag) else { return }
+        risk.append(tag)
+    }
+
+    private func visibilityFields(
+        depth: String,
+        report: VisibilityReport,
+        risk: [String]
+    ) -> [String: String] {
+        var fields: [String: String] = [
+            "visibility.depth": depth,
+            "visibility.tcc_path_listable": report.tccListable ? "true" : "false",
+            "visibility.tool_present": report.toolPresent ? "true" : "false",
+            "visibility.tool_path": report.toolPath,
+            FieldTaxonomy.eventType: "tcc_esf.visibility",
+            FieldTaxonomy.userName: report.user,
+        ]
+        if !risk.isEmpty { fields["visibility.risk_tags"] = risk.joined(separator: ",") }
+        return fields
     }
 }

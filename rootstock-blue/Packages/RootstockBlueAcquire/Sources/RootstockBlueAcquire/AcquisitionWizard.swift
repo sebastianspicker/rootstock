@@ -14,64 +14,46 @@ public struct AcquisitionWizard: Sendable {
         actor: String = NSUserName()
     ) throws -> CasePackage {
         let fileManager = FileManager.default
-        guard !pathEntryExistsOrIsSymlink(outputCase, fileManager: fileManager) else {
-            throw RootstockBlueError.caseAlreadyExists(outputCase)
-        }
-
-        try fileManager.createDirectory(
-            at: outputCase.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        let stagedCase = outputCase.deletingLastPathComponent().appendingPathComponent(
-            ".\(outputCase.lastPathComponent).rootstock-staging-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        var published = false
-        defer {
-            if !published, pathEntryExistsOrIsSymlink(stagedCase, fileManager: fileManager) {
-                try? fileManager.removeItem(at: stagedCase)
-            }
-        }
-
-        let pkg = try CasePackage.create(
-            at: stagedCase,
-            name: outputCase.deletingPathExtension().lastPathComponent
-        )
-
-        if let sourceTree {
-            let acquisitionRoot = pkg.rootURL.appendingPathComponent(
-                "artifacts/logical_acquire",
-                isDirectory: true
-            )
-            let result = try LogicalAcquire.materializeFixtureBundle(
-                from: sourceTree,
-                to: acquisitionRoot,
-                actor: actor
-            )
-            try pkg.appendCustody(
-                CustodyEvent(
-                    actor: actor,
-                    action: "acquisition_wizard",
-                    detail: "Materialized \(result.filesCopied) files from \(sourceTree.path) into logical_acquire (hashes=\(result.custodyHashes.count))"
-                )
-            )
-        } else {
-            try pkg.appendCustody(
-                CustodyEvent(
-                    actor: actor,
-                    action: "acquisition_wizard",
-                    detail: "Case created without a source tree"
-                )
-            )
-        }
-        try pkg.updateHashes()
-
-        guard !pathEntryExistsOrIsSymlink(outputCase, fileManager: fileManager) else {
-            throw RootstockBlueError.caseAlreadyExists(outputCase)
-        }
+        try validateDestination(outputCase, fileManager: fileManager)
+        let stagedCase = stagingCaseURL(for: outputCase)
+        defer { removeUnpublishedStaging(stagedCase, fileManager: fileManager) }
+        let package = try createStagedCase(at: stagedCase, outputCase: outputCase)
+        try recordAcquisition(package: package, sourceTree: sourceTree, actor: actor)
+        try package.updateHashes()
+        try validateDestination(outputCase, fileManager: fileManager)
         try fileManager.moveItem(at: stagedCase, to: outputCase)
-        published = true
         return try CasePackage.open(at: outputCase)
+    }
+
+    private func validateDestination(_ outputCase: URL, fileManager: FileManager) throws {
+        guard !pathEntryExistsOrIsSymlink(outputCase, fileManager: fileManager) else {
+            throw RootstockBlueError.caseAlreadyExists(outputCase)
+        }
+        try fileManager.createDirectory(at: outputCase.deletingLastPathComponent(), withIntermediateDirectories: true)
+    }
+
+    private func stagingCaseURL(for outputCase: URL) -> URL {
+        outputCase.deletingLastPathComponent().appendingPathComponent(".\(outputCase.lastPathComponent).rootstock-staging-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func removeUnpublishedStaging(_ stagedCase: URL, fileManager: FileManager) {
+        if pathEntryExistsOrIsSymlink(stagedCase, fileManager: fileManager) {
+            try? fileManager.removeItem(at: stagedCase)
+        }
+    }
+
+    private func createStagedCase(at stagedCase: URL, outputCase: URL) throws -> CasePackage {
+        try CasePackage.create(at: stagedCase, name: outputCase.deletingPathExtension().lastPathComponent)
+    }
+
+    private func recordAcquisition(package: CasePackage, sourceTree: URL?, actor: String) throws {
+        guard let sourceTree else {
+            try package.appendCustody(CustodyEvent(actor: actor, action: "acquisition_wizard", detail: "Case created without a source tree"))
+            return
+        }
+        let acquisitionRoot = package.rootURL.appendingPathComponent("artifacts/logical_acquire", isDirectory: true)
+        let result = try LogicalAcquire.materializeFixtureBundle(from: sourceTree, to: acquisitionRoot, actor: actor)
+        try package.appendCustody(CustodyEvent(actor: actor, action: "acquisition_wizard", detail: "Materialized \(result.filesCopied) files from \(sourceTree.path) into logical_acquire (hashes=\(result.custodyHashes.count))"))
     }
 
     /// Return the acquisition preflight summary.

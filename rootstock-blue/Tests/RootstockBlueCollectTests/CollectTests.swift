@@ -40,48 +40,43 @@ final class CollectTests: XCTestCase {
         XCTAssertTrue(offline.passed)
     }
 
+    private func assertArtifactPath(
+        _ artifact: String,
+        exactPaths: [String] = [],
+        containing fragments: [String] = []
+    ) {
+        let paths = CollectRunner.artifactPaths(for: artifact)
+        XCTAssertTrue(paths.contains { path in
+            exactPaths.contains(path) || fragments.contains { path.contains($0) }
+        })
+    }
+
     func testArtifactPathsExpandedMappings() {
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "btm").contains {
-            $0.contains("backgroundtaskmanagement")
-        })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "wifi").contains {
-            $0.contains("airport.preferences") || $0.contains("wifi")
-        })
-        XCTAssertEqual(
-            CollectRunner.artifactPaths(for: "security_posture"),
-            ["Library/Preferences/security_posture.json"]
-        )
-        XCTAssertEqual(
-            CollectRunner.artifactPaths(for: "alf"),
-            ["Library/Preferences/com.apple.alf.plist"]
-        )
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "ssh").contains("Users"))
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "configprofiles").contains {
-            $0.contains("ConfigurationProfiles") || $0.contains("Managed Preferences")
-        })
-        // btm is no longer aliased to LaunchAgents
+        assertArtifactPath("btm", containing: ["backgroundtaskmanagement"])
+        assertArtifactPath("wifi", containing: ["airport.preferences", "wifi"])
+        XCTAssertEqual(CollectRunner.artifactPaths(for: "security_posture"), ["Library/Preferences/security_posture.json"])
+        XCTAssertEqual(CollectRunner.artifactPaths(for: "alf"), ["Library/Preferences/com.apple.alf.plist"])
+        assertArtifactPath("ssh", exactPaths: ["Users"])
+        assertArtifactPath("configprofiles", containing: ["ConfigurationProfiles", "Managed Preferences"])
         XCTAssertFalse(CollectRunner.artifactPaths(for: "btm").contains("Library/LaunchAgents"))
 
-        // Expansion surfaces
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "cron").contains { $0.contains("crontab") || $0.contains("at/tabs") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "loginitems").contains { $0.contains("sharedfilelist") || $0 == "Users" })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "systemextensions").contains { $0.contains("SystemExtensions") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "utmpx").contains { $0.contains("utmpx") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "biome").contains { $0.contains("Biome") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "gatekeeper").contains { $0.contains("Gatekeeper") || $0.contains("gk.json") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "netlocation").contains { $0.contains("network_locations") || $0.contains("SystemConfiguration") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "browser_extensions").contains { $0.contains("Chrome") || $0 == "Users" })
-
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "shell_profiles").contains { $0 == "Users" || $0.contains("profile") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "emond").contains { $0.contains("emond") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "sudoers").contains { $0.contains("sudoers") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "launchd_overrides").contains { $0.contains("xpc.launchd") || $0.contains("launchd_disabled") })
-
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "privhelpers").contains { $0.contains("PrivilegedHelperTools") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "folder_actions").contains { $0 == "Users" || $0.contains("Scripts") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "login_hooks").contains { $0.contains("loginwindow") || $0.contains("login_hooks") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "software_update").contains { $0.contains("SoftwareUpdate") })
-        XCTAssertTrue(CollectRunner.artifactPaths(for: "file_sharing").contains { $0.contains("smb") || $0.contains("AppleFileServer") })
+        assertArtifactPath("cron", containing: ["crontab", "at/tabs"])
+        assertArtifactPath("loginitems", exactPaths: ["Users"], containing: ["sharedfilelist"])
+        assertArtifactPath("systemextensions", containing: ["SystemExtensions"])
+        assertArtifactPath("utmpx", containing: ["utmpx"])
+        assertArtifactPath("biome", containing: ["Biome"])
+        assertArtifactPath("gatekeeper", containing: ["Gatekeeper", "gk.json"])
+        assertArtifactPath("netlocation", containing: ["network_locations", "SystemConfiguration"])
+        assertArtifactPath("browser_extensions", exactPaths: ["Users"], containing: ["Chrome"])
+        assertArtifactPath("shell_profiles", exactPaths: ["Users"], containing: ["profile"])
+        assertArtifactPath("emond", containing: ["emond"])
+        assertArtifactPath("sudoers", containing: ["sudoers"])
+        assertArtifactPath("launchd_overrides", containing: ["xpc.launchd", "launchd_disabled"])
+        assertArtifactPath("privhelpers", containing: ["PrivilegedHelperTools"])
+        assertArtifactPath("folder_actions", exactPaths: ["Users"], containing: ["Scripts"])
+        assertArtifactPath("login_hooks", containing: ["loginwindow", "login_hooks"])
+        assertArtifactPath("software_update", containing: ["SoftwareUpdate"])
+        assertArtifactPath("file_sharing", containing: ["smb", "AppleFileServer"])
     }
 
     func testNetworkAndAccessSurfacePacksLoad() throws {

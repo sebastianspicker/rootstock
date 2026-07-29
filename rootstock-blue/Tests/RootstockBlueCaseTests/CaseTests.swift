@@ -13,10 +13,16 @@ final class CaseTests: XCTestCase {
         try created.verifyLayout()
 
         let env = EventEnvelope(
-            source: .es,
-            sourcePlugin: "test",
-            eventType: "NOTIFY_EXEC",
-            fields: [FieldTaxonomy.processPath: "/usr/bin/true"]
+            identity: EventEnvelope.Identity(
+                kind: "NOTIFY_EXEC",
+                label: "test"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .es
+            ),
+            payload: EventEnvelope.Payload(
+                properties: [FieldTaxonomy.processPath: "/usr/bin/true"]
+            )
         )
         try created.appendEventJSONL(env)
         try created.appendCustody(CustodyEvent(actor: "test", action: "note", detail: "hello"))
@@ -47,10 +53,16 @@ final class CaseTests: XCTestCase {
         let pkg = try CasePackage.create(at: tmp, name: "bind-test")
         let evilSummaryPath = "/Users/o'brian/bin/evil's tool"
         let env = EventEnvelope(
-            source: .es,
-            sourcePlugin: "test'plugin",
-            eventType: "NOTIFY_EXEC",
-            fields: [FieldTaxonomy.processPath: evilSummaryPath]
+            identity: EventEnvelope.Identity(
+                kind: "NOTIFY_EXEC",
+                label: "test'plugin"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .es
+            ),
+            payload: EventEnvelope.Payload(
+                properties: [FieldTaxonomy.processPath: evilSummaryPath]
+            )
         )
         try pkg.insertTimelineEvent(env)
         try pkg.appendCustody(

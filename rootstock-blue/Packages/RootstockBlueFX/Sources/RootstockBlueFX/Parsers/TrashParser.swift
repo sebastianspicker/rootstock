@@ -16,56 +16,48 @@ public struct TrashParser: ArtifactParser {
 
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
-
-        for rel in [
-            "Library/Preferences/trash_inventory.json",
-            "Library/Logs/trash_export.jsonl",
-            "Library/Preferences/trash_export.json",
-        ] {
-            if let url = root.firstExisting([rel]), seen.insert(url) {
-                events.append(contentsOf: parseInventoryFile(at: url))
-            }
-        }
-
-        for url in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            return name == "trash_inventory.json"
-                || name == "trash_export.json"
-                || name == "trash_export.jsonl"
-        }) {
-            if seen.insert(url) {
-                events.append(contentsOf: parseInventoryFile(at: url))
-            }
-        }
-
-        // Walk .Trash / .Trashes for residual files not already covered by inventory.
-        // Paths are emitted image-relative (under ArtifactRoot), not host-absolute.
-        let inventoriedNames = Set(events.compactMap { $0.fields["trash.filename"] }.filter { !$0.isEmpty })
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            let lower = path.lowercased()
-            guard lower.contains("/.trash/") || lower.contains("/.trashes/") else { return false }
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue else {
-                return false
-            }
-            let name = url.lastPathComponent
-            return name != "trash_inventory.json" && !name.hasSuffix(".jsonl") && !name.hasSuffix(".json")
-        }) {
-            let filename = url.lastPathComponent
-            // Avoid duplicate rows when inventory already listed the same item
-            if inventoriedNames.contains(filename) { continue }
-            let relKey = "trash-file:" + relativePath(of: url, under: root)
-            if seen.insert(pathKey: relKey) {
-                if let event = makeFromTrashFile(url: url, root: root) {
-                    events.append(event)
-                }
-            }
-        }
-
+        var events = inventoryEvents(root: root, seen: &seen)
+        events.append(contentsOf: residualTrashEvents(root: root, inventoriedNames: Set(events.compactMap { $0.fields["trash.filename"] }.filter { !$0.isEmpty }), seen: &seen))
         return events
+    }
+
+    private func inventoryEvents(root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        let paths = ["Library/Preferences/trash_inventory.json", "Library/Logs/trash_export.jsonl", "Library/Preferences/trash_export.json"]
+        var events: [EventEnvelope] = []
+        for path in paths {
+            if let url = root.firstExisting([path]), seen.insert(url) { events.append(contentsOf: parseInventoryFile(at: url)) }
+        }
+        for url in root.enumerate(matching: isTrashInventoryFile) where seen.insert(url) {
+            events.append(contentsOf: parseInventoryFile(at: url))
+        }
+        return events
+    }
+
+    private func isTrashInventoryFile(_ url: URL) -> Bool {
+        ["trash_inventory.json", "trash_export.json", "trash_export.jsonl"].contains(url.lastPathComponent)
+    }
+
+    private func residualTrashEvents(root: ArtifactRoot, inventoriedNames: Set<String>, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
+        for url in root.enumerate(matching: isResidualTrashFile) {
+            guard !inventoriedNames.contains(url.lastPathComponent) else { continue }
+            let key = "trash-file:" + relativePath(of: url, under: root)
+            if seen.insert(pathKey: key), let event = makeFromTrashFile(url: url, root: root) { events.append(event) }
+        }
+        return events
+    }
+
+    private func isResidualTrashFile(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        guard path.contains("/.trash/") || path.contains("/.trashes/") else { return false }
+        guard isRegularTrashFile(url) else { return false }
+        return !isTrashInventoryFile(url) && !url.lastPathComponent.hasSuffix(".jsonl") && !url.lastPathComponent.hasSuffix(".json")
+    }
+
+    private func isRegularTrashFile(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && !isDirectory.boolValue
     }
 
     private func parseInventoryFile(at url: URL) -> [EventEnvelope] {
@@ -97,107 +89,108 @@ public struct TrashParser: ArtifactParser {
         )
     }
 
+    private struct TrashDetails {
+        let filename: String
+        let original: String
+        let trashPath: String
+        let deletedAt: String
+        let risk: [String]
+    }
+
     private func makeEvent(
         from item: [String: Any],
         sourceURL: URL,
         imageRoot: ArtifactRoot? = nil
     ) -> EventEnvelope? {
-        let filename = stringish(item["filename"])
-            ?? stringish(item["name"])
-            ?? stringish(item["item"])
-            ?? ""
-        let original = stringish(item["original_path"])
-            ?? stringish(item["originalPath"])
-            ?? stringish(item["where_from"])
-            ?? ""
-        var trashPath = stringish(item["trash_path"])
-            ?? stringish(item["path"])
-            ?? ""
-        // Prefer image-relative path when source is under a known artifact root
-        if trashPath.isEmpty, let imageRoot {
-            trashPath = relativePath(of: sourceURL, under: imageRoot)
-        } else if trashPath.isEmpty {
-            // Last resort: still try to strip a host Users/.../Users/ image prefix
-            trashPath = imageRelativePath(ArtifactRoot.pathKey(sourceURL))
-        } else {
-            trashPath = imageRelativePath(trashPath)
-        }
-        let deletedAt = stringish(item["deleted_at"])
-            ?? stringish(item["deletion_date"])
-            ?? stringish(item["timestamp"])
-            ?? ""
+        guard let details = trashDetails(item: item, sourceURL: sourceURL, imageRoot: imageRoot) else { return nil }
+        let fields = trashFields(item: item, details: details, sourceURL: sourceURL)
+        let refs = trashReferences(filename: details.filename, original: details.original, trashPath: details.trashPath)
+        return trashEnvelope(item: item, sourceURL: sourceURL, details: details, fields: fields, references: refs)
+    }
 
-        guard !filename.isEmpty || !original.isEmpty || trashPath.lowercased().contains(".trash") else {
-            return nil
-        }
+    private func trashDetails(item: [String: Any], sourceURL: URL, imageRoot: ArtifactRoot?) -> TrashDetails? {
+        let filename = stringish(item["filename"]) ?? stringish(item["name"]) ?? stringish(item["item"]) ?? ""
+        let original = stringish(item["original_path"]) ?? stringish(item["originalPath"]) ?? stringish(item["where_from"]) ?? ""
+        let trashPath = normalizedTrashPath(item: item, sourceURL: sourceURL, imageRoot: imageRoot)
+        guard !filename.isEmpty || !original.isEmpty || trashPath.lowercased().contains(".trash") else { return nil }
+        let deletedAt = stringish(item["deleted_at"]) ?? stringish(item["deletion_date"]) ?? stringish(item["timestamp"]) ?? ""
+        return TrashDetails(filename: filename, original: original, trashPath: trashPath, deletedAt: deletedAt, risk: trashRiskTags(item: item, filename: filename, original: original))
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        let lowerName = filename.lowercased()
-        let lowerOrig = original.lowercased()
-        if lowerName.contains("id_rsa") || lowerName.hasSuffix(".pem")
-            || lowerOrig.contains(".ssh/") || lowerName.contains("password")
-            || lowerName.contains("credential") || lowerName.contains("secret") {
-            if !risk.contains("credential_material") { risk.append("credential_material") }
-            if !risk.contains("sensitive_path") { risk.append("sensitive_path") }
-        }
-        if lowerName.contains("evil") || lowerOrig.contains("evil")
-            || lowerName.contains("payload") || lowerName.contains("implant") {
-            if !risk.contains("suspicious_name") { risk.append("suspicious_name") }
-        }
-        if lowerOrig.contains("/tmp/") || lowerOrig.contains("/downloads/") {
-            if !risk.contains("tmp_origin") { risk.append("tmp_origin") }
-        }
-        // Heuristic: no extension + name looks like agent/binary
-        if !lowerName.contains(".")
-            && (lowerName.contains("agent") || lowerName.contains("implant") || lowerName.contains("payload")
-                || boolish(item["executable"]) == true) {
-            if !risk.contains("executable") { risk.append("executable") }
-        }
-        if boolish(item["executable"]) == true, !risk.contains("executable") {
-            risk.append("executable")
-        }
+    private func normalizedTrashPath(item: [String: Any], sourceURL: URL, imageRoot: ArtifactRoot?) -> String {
+        let path = stringish(item["trash_path"]) ?? stringish(item["path"]) ?? ""
+        if !path.isEmpty { return imageRelativePath(path) }
+        if let imageRoot { return relativePath(of: sourceURL, under: imageRoot) }
+        return imageRelativePath(ArtifactRoot.pathKey(sourceURL))
+    }
 
-        // Never copy private key material into fields - metadata only
-        var fields: [String: String] = [
-            "trash.filename": filename,
-            "trash.original_path": original,
-            "trash.trash_path": trashPath,
-            "trash.deleted_at": deletedAt,
+    private func trashEnvelope(item: [String: Any], sourceURL: URL, details: TrashDetails, fields: [String: String], references: [EntityID]) -> EventEnvelope {
+        EventEnvelope(identity: EventEnvelope.Identity(kind: "filesystem.trash", label: "TRASH"), capture: EventEnvelope.Capture(source: .parser, eventTime: parseDate(item["deleted_at"] ?? item["deletion_date"] ?? item["timestamp"]) ?? Date(timeIntervalSince1970: 0), collectedAt: Date()), payload: EventEnvelope.Payload(entityRefs: references, properties: fields, provenance: ArtifactRoot.pathKey(sourceURL), confidence: 0.9))
+    }
+
+    private func trashRiskTags(item: [String: Any], filename: String, original: String) -> [String] {
+        var tags = (stringish(item["risk_tags"]) ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let name = filename.lowercased()
+        let origin = original.lowercased()
+        if hasCredentialMarker(name: name, origin: origin) {
+            appendRiskTags(["credential_material", "sensitive_path"], to: &tags)
+        }
+        if hasSuspiciousMarker(name: name, origin: origin) {
+            appendRiskTags(["suspicious_name"], to: &tags)
+        }
+        if hasTransientOrigin(origin) {
+            appendRiskTags(["tmp_origin"], to: &tags)
+        }
+        if isExecutable(item: item, name: name) {
+            appendRiskTags(["executable"], to: &tags)
+        }
+        return tags
+    }
+
+    private func hasCredentialMarker(name: String, origin: String) -> Bool {
+        ["id_rsa", "password", "credential", "secret"].contains(where: name.contains) || name.hasSuffix(".pem") || origin.contains(".ssh/")
+    }
+
+    private func hasSuspiciousMarker(name: String, origin: String) -> Bool {
+        ["evil", "payload", "implant"].contains(where: name.contains) || origin.contains("evil")
+    }
+
+    private func hasTransientOrigin(_ origin: String) -> Bool {
+        ["/tmp/", "/downloads/"].contains(where: origin.contains)
+    }
+
+    private func isExecutable(item: [String: Any], name: String) -> Bool {
+        boolish(item["executable"]) == true || (!name.contains(".") && ["agent", "implant", "payload"].contains(where: name.contains))
+    }
+
+    private func appendRiskTags(_ additions: [String], to tags: inout [String]) {
+        for tag in additions where !tags.contains(tag) {
+            tags.append(tag)
+        }
+    }
+
+    private func trashFields(item: [String: Any], details: TrashDetails, sourceURL: URL) -> [String: String] {
+        var fields = [
+            "trash.filename": details.filename, "trash.original_path": details.original,
+            "trash.trash_path": details.trashPath, "trash.deleted_at": details.deletedAt,
             FieldTaxonomy.eventType: "filesystem.trash",
         ]
-        if !risk.isEmpty {
-            fields["trash.risk_tags"] = risk.joined(separator: ",")
-        }
-        if let size = stringish(item["size_bytes"]) ?? stringish(item["size"]) {
-            fields["trash.size_bytes"] = size
-        }
-        // Prefer last Users/ segment so fixture trees under /Users/<dev>/…/Users/alice resolve to alice
-        if let user = inferUser(from: trashPath.isEmpty ? original : trashPath)
-            ?? inferUser(from: original)
-            ?? inferUser(from: ArtifactRoot.pathKey(sourceURL)) {
+        if !details.risk.isEmpty { fields["trash.risk_tags"] = details.risk.joined(separator: ",") }
+        if let size = stringish(item["size_bytes"]) ?? stringish(item["size"]) { fields["trash.size_bytes"] = size }
+        if let user = inferUser(from: details.trashPath.isEmpty ? details.original : details.trashPath)
+            ?? inferUser(from: details.original) ?? inferUser(from: ArtifactRoot.pathKey(sourceURL)) {
             fields[FieldTaxonomy.userName] = user
         }
+        return fields
+    }
 
-        var refs: [EntityID] = []
-        if !original.isEmpty { refs.append(.file(path: original)) }
-        if !trashPath.isEmpty { refs.append(.file(path: trashPath)) }
-        refs.append(EntityID(kind: .host, value: "trash|\(filename)"))
-
-        return EventEnvelope(
-            eventTime: parseDate(item["deleted_at"] ?? item["deletion_date"] ?? item["timestamp"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "TRASH",
-            eventType: "filesystem.trash",
-            entityRefs: refs,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
-        )
+    private func trashReferences(filename: String, original: String, trashPath: String) -> [EntityID] {
+        var references = [EntityID(kind: .host, value: "trash|\(filename)")]
+        if !original.isEmpty { references.insert(.file(path: original), at: 0) }
+        if !trashPath.isEmpty { references.insert(.file(path: trashPath), at: original.isEmpty ? 0 : 1) }
+        return references
     }
 
     /// Path relative to the artifact image root (POSIX separators).

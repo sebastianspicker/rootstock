@@ -9,7 +9,11 @@ public enum ApplicationTestFactory {
         let quarantineInfo: QuarantineInfo?
 
         public init(
-            signing: Application.Signing = ApplicationTestFactory.defaultSigning,
+            signing: Application.Signing = Application.Signing(
+                hardenedRuntime: true,
+                libraryValidation: true,
+                signed: true
+            ),
             security: Application.Security = Application.Security(),
             entitlementState: Application.EntitlementState = Application.EntitlementState(),
             sandboxProfile: SandboxProfile? = nil,
@@ -22,19 +26,13 @@ public enum ApplicationTestFactory {
             self.quarantineInfo = quarantineInfo
         }
     }
-    private static let defaultFlags = Application.Flags(isElectron: false, isSystem: false)
-    private static let defaultSigning = Application.Signing(
-        hardenedRuntime: true,
-        libraryValidation: true,
-        signed: true
-    )
 
     public static func make(
         name: String = "TestApp",
         bundleId: String = "com.example.test",
         path: String = "/Applications/TestApp.app",
         version: String? = "1.0",
-        flags: Application.Flags = defaultFlags,
+        flags: Application.Flags = Application.Flags(isElectron: false, isSystem: false),
         options: Options = Options()
     ) -> Application {
         Application(

@@ -4,12 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
-import os
 import posixpath
 import re
 import sys
-import tempfile
 import tomllib
 from pathlib import Path
 from urllib.parse import unquote
@@ -59,30 +58,26 @@ def read_text(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+async def _run_git_async(
+    args: tuple[str, ...], input_text: str | None
+) -> tuple[int, str, str]:
+    process = await asyncio.create_subprocess_exec(
+        "/usr/bin/git",
+        "-C",
+        str(ROOT),
+        *args,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate(
+        input_text.encode() if input_text is not None else None
+    )
+    return process.returncode, stdout.decode(), stderr.decode()
+
+
 def _run_git(*args: str, input_text: str | None = None) -> tuple[int, str, str]:
-    with (
-        tempfile.TemporaryFile() as stdin,
-        tempfile.TemporaryFile() as stdout,
-        tempfile.TemporaryFile() as stderr,
-    ):
-        if input_text is not None:
-            stdin.write(input_text.encode())
-            stdin.seek(0)
-        actions = [
-            (os.POSIX_SPAWN_DUP2, stdin.fileno(), 0),
-            (os.POSIX_SPAWN_DUP2, stdout.fileno(), 1),
-            (os.POSIX_SPAWN_DUP2, stderr.fileno(), 2),
-        ]
-        pid = os.posix_spawn(
-            "/usr/bin/git",
-            ["/usr/bin/git", "-C", str(ROOT), *args],
-            os.environ,
-            file_actions=actions,
-        )
-        _, status = os.waitpid(pid, 0)
-        stdout.seek(0)
-        stderr.seek(0)
-        return os.waitstatus_to_exitcode(status), stdout.read().decode(), stderr.read().decode()
+    return asyncio.run(_run_git_async(args, input_text))
 
 
 def git_output(*args: str) -> str:

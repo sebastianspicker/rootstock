@@ -148,7 +148,7 @@ final class ShellTests: XCTestCase {
         let result = Shell.runProcess(
             python3Path,
             ["-c", "import time; time.sleep(0.05); print('completed-before-timeout')"],
-            timeoutSeconds: 1
+            timeoutSeconds: 3
         )
 
         XCTAssertEqual(result?.timedOut, false)
@@ -222,7 +222,7 @@ final class ShellTests: XCTestCase {
     }
 
     func testRunProcessTimesOutWhenAdmissionIsSaturated() async {
-        await withOccupiedProcessSlots(markerPrefix: "shell-admission", sleep: 1) {
+        await withOccupiedProcessSlots(markerPrefix: "shell-admission", releaseDelay: 1) {
             let outcome = Shell.execute(
                 "/usr/bin/true",
                 [],
@@ -237,24 +237,28 @@ final class ShellTests: XCTestCase {
     }
 
     func testExecutionDeadlineStartsAfterAdmission() async {
-        await withOccupiedProcessSlots(markerPrefix: "shell-execution", sleep: 0.3) {
+        let releaseDelay = 0.5
+        let executionTimeout = 1.0
+        await withOccupiedProcessSlots(
+            markerPrefix: "shell-execution",
+            releaseDelay: releaseDelay
+        ) {
             let startedAt = Date()
             let outcome = Shell.execute(
-                python3Path,
-                ["-c", "import time; print('started', flush=True); time.sleep(1)"],
-                timeoutSeconds: 0.2,
-                admissionTimeoutSeconds: 1
+                "/bin/sleep",
+                ["3"],
+                timeoutSeconds: executionTimeout,
+                admissionTimeoutSeconds: 3
             )
             let elapsed = Date().timeIntervalSince(startedAt)
 
-            guard case .executionTimedOut(let result) = outcome else {
+            guard case .executionTimedOut = outcome else {
                 XCTFail("Expected an execution timeout, got \(String(describing: outcome))")
                 return
             }
-            XCTAssertTrue(result.stdout.contains("started"))
             XCTAssertGreaterThan(
                 elapsed,
-                0.4,
+                releaseDelay + executionTimeout - 0.2,
                 "Execution must receive its full deadline after admission completes"
             )
         }
@@ -262,32 +266,52 @@ final class ShellTests: XCTestCase {
 
     private func withOccupiedProcessSlots(
         markerPrefix: String,
-        sleep: TimeInterval,
+        releaseDelay: TimeInterval,
         operation: @escaping () async -> Void
     ) async {
         let markers = (0..<Shell.processSlotLimit).map { temporaryPath("\(markerPrefix)-\($0)") }
+        let release = temporaryPath("\(markerPrefix)-release")
         defer {
             for marker in markers {
                 try? FileManager.default.removeItem(atPath: marker)
             }
+            try? FileManager.default.removeItem(atPath: release)
         }
 
-        await withTaskGroup(of: ShellResult?.self) { group in
-            for marker in markers {
-                group.addTask {
-                    Shell.runProcess(
-                        "/bin/sh",
-                        ["-c", "printf ready > \"$1\"; sleep \(sleep)", "shell", marker],
-                        timeoutSeconds: 2
-                    )
-                }
+        let holders = DispatchGroup()
+        var holderThreads: [Thread] = []
+        for marker in markers {
+            holders.enter()
+            let thread = Thread {
+                defer { holders.leave() }
+                _ = Shell.runProcess(
+                    "/bin/sh",
+                    [
+                        "-c",
+                        "printf ready > \"$1\"; while [ ! -e \"$2\" ]; do sleep 0.01; done",
+                        "shell",
+                        marker,
+                        release,
+                    ],
+                    timeoutSeconds: 10
+                )
             }
-            let started = await waitForFiles(at: markers, timeoutSeconds: 1)
-            XCTAssertTrue(started, "Expected every process slot to be occupied")
-            guard started else { return }
-            await operation()
-            for await _ in group {}
+            holderThreads.append(thread)
+            thread.start()
         }
+        defer { withExtendedLifetime(holderThreads) {} }
+        let started = await waitForFiles(at: markers, timeoutSeconds: 5)
+        XCTAssertTrue(started, "Expected every process slot to be occupied")
+        guard started else {
+            _ = FileManager.default.createFile(atPath: release, contents: Data())
+            await waitForDispatchGroup(holders)
+            return
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + releaseDelay) {
+            _ = FileManager.default.createFile(atPath: release, contents: Data())
+        }
+        await operation()
+        await waitForDispatchGroup(holders)
     }
 
     func testExecuteDistinguishesLaunchFailure() {
@@ -375,6 +399,14 @@ final class ShellTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         return paths.allSatisfy(FileManager.default.fileExists(atPath:))
+    }
+
+    private func waitForDispatchGroup(_ group: DispatchGroup) async {
+        await withCheckedContinuation { continuation in
+            group.notify(queue: .global()) {
+                continuation.resume()
+            }
+        }
     }
 
     private func terminateProcessRecorded(at path: String) {

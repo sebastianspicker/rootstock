@@ -1,5 +1,6 @@
 import CodeSigning
 import Entitlements
+import Foundation
 import Models
 import Quarantine
 import Sandbox

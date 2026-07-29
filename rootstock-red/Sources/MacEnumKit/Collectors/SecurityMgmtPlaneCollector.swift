@@ -67,13 +67,10 @@ public struct SecurityMgmtPlaneCollector: Collector {
             unloadHints.append(root)
             notes.append("mgmt_root: \(root)")
             if let entries = try? fm.contentsOfDirectory(atPath: root) {
-                for entry in entries.prefix(80) {
-                    let lower = entry.lowercased()
-                    if Self.securityNameTokens.contains(where: { lower.contains($0) }) {
-                        let full = (root as NSString).appendingPathComponent(entry)
-                        helpers.append(full)
-                        notes.append("security_helper_hint: \(full)")
-                    }
+                for entry in entries.prefix(80) where Self.isSecurityHelperName(entry) {
+                    let full = (root as NSString).appendingPathComponent(entry)
+                    helpers.append(full)
+                    notes.append("security_helper_hint: \(full)")
                 }
             }
         }
@@ -102,5 +99,10 @@ public struct SecurityMgmtPlaneCollector: Collector {
             "mgmt=\(mgmt.count) helpers=\(helpers.count) "
             + "unloadHints=\(unloadHints.count) surface=\(surface)"
         return state
+    }
+
+    private static func isSecurityHelperName(_ entry: String) -> Bool {
+        let lower = entry.lowercased()
+        return securityNameTokens.contains { lower.contains($0) }
     }
 }

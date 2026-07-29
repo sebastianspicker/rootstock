@@ -4,6 +4,11 @@ import RootstockMacFacts
 
 /// Shared launchd plist enumeration helpers backed by `LaunchdPlistFacts`.
 enum LaunchPlistSupport {
+    struct FileMeta {
+        let exists: Bool
+        let size: Int64?
+        let mtime: Date?
+    }
     static func enumeratePlists(in directory: URL) -> [LaunchAgentEntry] {
         LaunchdPlistFacts.listPlistPaths(in: directory.path)
             .map { parseLaunchPlist(at: URL(fileURLWithPath: $0)) }
@@ -40,16 +45,16 @@ enum LaunchPlistSupport {
         return total
     }
 
-    static func fileMeta(at path: String) -> (exists: Bool, size: Int64?, mtime: Date?) {
+    static func fileMeta(at path: String) -> FileMeta {
         let fm = FileManager.default
         var isDir: ObjCBool = false
         let exists = fm.fileExists(atPath: path, isDirectory: &isDir)
         guard exists, !isDir.boolValue else {
-            return (exists, nil, nil)
+            return FileMeta(exists: exists, size: nil, mtime: nil)
         }
         let url = URL(fileURLWithPath: path)
         let values = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
         let size = values?.fileSize.map { Int64($0) }
-        return (true, size, values?.contentModificationDate)
+        return FileMeta(exists: true, size: size, mtime: values?.contentModificationDate)
     }
 }

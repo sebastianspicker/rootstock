@@ -37,55 +37,12 @@ public struct PatchDebtCollector: Collector {
         ]
         var lastUpdateHints: [String] = []
 
-        var susPresent: Bool?
-        for path in Self.susPlistCandidates {
-            if fm.fileExists(atPath: path) {
-                susPresent = true
-                lastUpdateHints.append("sus_plist:\(path)")
-                notes.append("Software Update prefs present: \(path)")
-            }
-        }
-        if susPresent == nil {
-            susPresent = false
-            notes.append("No Software Update preference plists observed at catalog paths")
-        }
-
-        for path in Self.installHistoryCandidates {
-            if fm.fileExists(atPath: path) {
-                lastUpdateHints.append("install_history_path:\(path)")
-                notes.append("Install history / receipts path present: \(path)")
-            }
-        }
-
-        // Optional: read OS build via `sw_vers`-equivalent without shell when possible.
-        var osBuild: String?
-        let versionPlist = URL(fileURLWithPath: "/System/Library/CoreServices/SystemVersion.plist")
-        if let data = try? Data(contentsOf: versionPlist),
-           let dict = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-        {
-            if let build = dict["ProductBuildVersion"] as? String {
-                osBuild = build
-                notes.append("ProductBuildVersion=\(build)")
-            }
-            if let productVersion = dict["ProductUserVisibleVersion"] as? String
-                ?? dict["ProductVersion"] as? String
-            {
-                notes.append("ProductVersion=\(productVersion)")
-            }
-        } else {
-            notes.append("SystemVersion.plist unreadable - using ProcessInfo only")
-        }
+        let susPresent = softwareUpdateState(fm, hints: &lastUpdateHints, notes: &notes)
+        installHistoryNotes(fm, hints: &lastUpdateHints, notes: &notes)
+        let osBuild = systemVersionMetadata(notes: &notes)
 
         let majorLag = max(0, Self.knownCurrentMajor - os.majorVersion)
-        if majorLag > 0 {
-            notes.append(
-                "majorVersionLag=\(majorLag) (host major \(os.majorVersion) vs baseline \(Self.knownCurrentMajor))"
-            )
-        } else {
-            notes.append(
-                "majorVersionLag=0 (host major \(os.majorVersion) ≥ baseline \(Self.knownCurrentMajor))"
-            )
-        }
+        lagNote(majorLag, hostMajor: os.majorVersion, notes: &notes)
 
         var state = CollectedState()
         state.patchDebt = PatchDebtState(
@@ -100,4 +57,15 @@ public struct PatchDebtCollector: Collector {
             "os=\(osVersion) build=\(osBuild ?? "nil") lag=\(majorLag) sus=\(susPresent.map(String.init(describing:)) ?? "nil")"
         return state
     }
+
+    private func softwareUpdateState(_ fm: FileManager, hints: inout [String], notes: inout [String]) -> Bool? {
+        let paths = Self.susPlistCandidates.filter { fm.fileExists(atPath: $0) }
+        for path in paths { hints.append("sus_plist:\(path)"); notes.append("Software Update prefs present: \(path)") }
+        if paths.isEmpty { notes.append("No Software Update preference plists observed at catalog paths") }
+        return !paths.isEmpty
+    }
+
+    private func installHistoryNotes(_ fm: FileManager, hints: inout [String], notes: inout [String]) { for path in Self.installHistoryCandidates where fm.fileExists(atPath: path) { hints.append("install_history_path:\(path)"); notes.append("Install history / receipts path present: \(path)") } }
+    private func systemVersionMetadata(notes: inout [String]) -> String? { let url = URL(fileURLWithPath: "/System/Library/CoreServices/SystemVersion.plist"); guard let data = try? Data(contentsOf: url), let dict = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else { notes.append("SystemVersion.plist unreadable - using ProcessInfo only"); return nil }; let build = dict["ProductBuildVersion"] as? String; if let build { notes.append("ProductBuildVersion=\(build)") }; if let version = dict["ProductUserVisibleVersion"] as? String ?? dict["ProductVersion"] as? String { notes.append("ProductVersion=\(version)") }; return build }
+    private func lagNote(_ lag: Int, hostMajor: Int, notes: inout [String]) { notes.append(lag > 0 ? "majorVersionLag=\(lag) (host major \(hostMajor) vs baseline \(Self.knownCurrentMajor))" : "majorVersionLag=0 (host major \(hostMajor) ≥ baseline \(Self.knownCurrentMajor))") }
 }

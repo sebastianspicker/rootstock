@@ -48,62 +48,36 @@ public struct PackageKitInstallerDesignCollector: Collector {
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
-        let fm = FileManager.default
-        var notes: [String] = [
-            "PackageKit installer design surface: path presence only - never builds pkgs, never invokes installd/package_script_service",
-        ]
+        var notes = ["PackageKit installer design surface: path presence only - never builds pkgs, never invokes installd/package_script_service"]
+        let services = existing(Self.servicePaths, notePrefix: "installer_service", notes: &notes)
+        let receipts = receiptPaths(notes: &notes)
+        let plugins = existing(Self.pluginPaths, notePrefix: "installer_plugin_dir", notes: &notes)
+        let tooling = existing(Self.toolingPaths, notePrefix: "installer_tool", notes: &notes)
+        return Self.state(services: services, receipts: receipts, plugins: plugins, tooling: tooling, notes: notes)
+    }
 
-        var services: [String] = []
-        for path in Self.servicePaths where fm.fileExists(atPath: path) {
-            services.append(path)
-            notes.append("installer_service: \(path)")
+
+    private func existing(_ paths: [String], notePrefix: String, notes: inout [String]) -> [String] {
+        let matches = paths.filter { FileManager.default.fileExists(atPath: $0) }
+        notes.append(contentsOf: matches.map { "\(notePrefix): \($0)" })
+        return Array(Set(matches)).sorted()
+    }
+
+    private func receiptPaths(notes: inout [String]) -> [String] {
+        let matches = Self.receiptHistoryPaths.filter { FileManager.default.fileExists(atPath: $0) }
+        let receipts = matches.filter { $0 != "/private/var/folders" }
+        notes.append(contentsOf: receipts.map { "receipt_or_history: \($0)" })
+        if matches.contains("/private/var/folders") {
+            notes.append("var_folders_present: /private/var/folders (InstallerSandboxes class may live under randomized subpaths - not enumerated)")
         }
+        return Array(Set(receipts)).sorted()
+    }
 
-        var receipts: [String] = []
-        for path in Self.receiptHistoryPaths where fm.fileExists(atPath: path) {
-            // Skip generic /private/var/folders (always present) unless paired with InstallerSandboxes note.
-            if path == "/private/var/folders" {
-                notes.append("var_folders_present: \(path) (InstallerSandboxes class may live under randomized subpaths - not enumerated)")
-                continue
-            }
-            receipts.append(path)
-            notes.append("receipt_or_history: \(path)")
-        }
-
-        var plugins: [String] = []
-        for path in Self.pluginPaths where fm.fileExists(atPath: path) {
-            plugins.append(path)
-            notes.append("installer_plugin_dir: \(path)")
-        }
-
-        var tooling: [String] = []
-        for path in Self.toolingPaths where fm.fileExists(atPath: path) {
-            tooling.append(path)
-            notes.append("installer_tool: \(path)")
-        }
-
-        services = Array(Set(services)).sorted()
-        receipts = Array(Set(receipts)).sorted()
-        plugins = Array(Set(plugins)).sorted()
-        tooling = Array(Set(tooling)).sorted()
-
-        let surface =
-            !services.isEmpty
-            || receipts.count >= 1
-            || tooling.count >= 2
-
+    private static func state(services: [String], receipts: [String], plugins: [String], tooling: [String], notes: [String]) -> CollectedState {
+        let surface = !services.isEmpty || receipts.count >= 1 || tooling.count >= 2
         var state = CollectedState()
-        state.packageKitInstallerDesign = PackageKitInstallerDesignState(
-            installerServicePaths: services,
-            receiptAndHistoryPaths: receipts,
-            installerPluginPaths: plugins,
-            toolingPaths: tooling,
-            designSurfacePresent: surface,
-            notes: notes
-        )
-        state.collectorNotes[Self.id] =
-            "services=\(services.count) receipts=\(receipts.count) "
-            + "plugins=\(plugins.count) tooling=\(tooling.count) surface=\(surface)"
+        state.packageKitInstallerDesign = PackageKitInstallerDesignState(installerServicePaths: services, receiptAndHistoryPaths: receipts, installerPluginPaths: plugins, toolingPaths: tooling, designSurfacePresent: surface, notes: notes)
+        state.collectorNotes[Self.id] = "services=\(services.count) receipts=\(receipts.count) " + "plugins=\(plugins.count) tooling=\(tooling.count) surface=\(surface)"
         return state
     }
 }

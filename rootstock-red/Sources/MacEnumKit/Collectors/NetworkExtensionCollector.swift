@@ -99,17 +99,7 @@ public struct NetworkExtensionCollector: Collector {
             "Stock pf/ALF paths recorded as stock_os artifacts only (not contentFilterHints)",
         ]
 
-        var frameworkPresent: Bool?
-        for path in Self.frameworkProbes {
-            if fm.fileExists(atPath: path) {
-                frameworkPresent = true
-                notes.append("framework present: \(path)")
-            }
-        }
-        if frameworkPresent == nil {
-            frameworkPresent = false
-            notes.append("NetworkExtension.framework not observed at catalog paths")
-        }
+        let frameworkPresent = Self.frameworkPresence(fileManager: fm, notes: &notes)
 
         // Note-only: bare SystemExtensions root is stock-macOS noise (see ESF collector).
         let sysextRoot = "/Library/SystemExtensions"
@@ -119,89 +109,102 @@ public struct NetworkExtensionCollector: Collector {
             )
         }
 
-        var vpnConfigPaths: [String] = []
-        for path in Self.vpnConfigProbes {
-            if fm.fileExists(atPath: path) {
-                vpnConfigPaths.append(path)
-                notes.append("vpn_config path: \(path)")
-            }
-        }
-
-        // Glob-ish: list /Library/Preferences for com.apple.networkextension* names (shallow).
-        let prefsDir = "/Library/Preferences"
-        if let entries = try? fm.contentsOfDirectory(atPath: prefsDir) {
-            for name in entries where name.hasPrefix("com.apple.networkextension") {
-                let full = (prefsDir as NSString).appendingPathComponent(name)
-                if !vpnConfigPaths.contains(full), fm.fileExists(atPath: full) {
-                    vpnConfigPaths.append(full)
-                    notes.append("vpn_config listed: \(full)")
-                }
-            }
-        }
-
-        // Stock OS network artifacts → notes only (never contentFilterHints).
-        var stockArtifactCount = 0
-        for probe in Self.stockNetworkArtifacts {
-            if fm.fileExists(atPath: probe.path) {
-                stockArtifactCount += 1
-                notes.append("stock_os_network: \(probe.name) path=\(probe.path)")
-            }
-        }
-
-        // Enterprise content-filter signals only.
-        var contentFilterHints: [String] = []
-        for probe in Self.enterpriseContentFilterProbes {
-            if fm.fileExists(atPath: probe.path) {
-                contentFilterHints.append("\(probe.name):\(probe.path)")
-                notes.append("enterprise_content_filter: \(probe.name) path=\(probe.path)")
-            }
-        }
-
-        var packetTunnelHints: [String] = []
-        for probe in Self.packetTunnelProbes {
-            if fm.fileExists(atPath: probe.path) {
-                packetTunnelHints.append("\(probe.name):\(probe.path)")
-                notes.append("packet_tunnel: \(probe.name) path=\(probe.path)")
-            }
-        }
-
-        var neAppPaths: [String] = []
-        for probe in Self.neAppProbes {
-            if fm.fileExists(atPath: probe.path) {
-                neAppPaths.append(probe.path)
-                notes.append("ne_app: \(probe.name) path=\(probe.path)")
-            }
-        }
-
-        vpnConfigPaths = Array(Set(vpnConfigPaths)).sorted()
+        let vpnConfigPaths = Self.vpnConfigPaths(fileManager: fm, notes: &notes)
+        let stockArtifactCount = Self.recordStockArtifacts(fileManager: fm, notes: &notes)
+        let contentFilterHints = Self.probeHints(
+            Self.enterpriseContentFilterProbes,
+            prefix: "enterprise_content_filter",
+            fileManager: fm,
+            notes: &notes
+        )
         // Defensive: never let stock paths leak into contentFilterHints.
-        contentFilterHints = Array(Set(contentFilterHints))
+        let filteredContentFilterHints = Array(Set(contentFilterHints))
             .filter { Self.isEnterpriseContentFilterHint($0) }
             .sorted()
-        packetTunnelHints = Array(Set(packetTunnelHints)).sorted()
-        neAppPaths = Array(Set(neAppPaths)).sorted()
+        let packetTunnelHints = Self.probeHints(
+            Self.packetTunnelProbes,
+            prefix: "packet_tunnel",
+            fileManager: fm,
+            notes: &notes
+        )
+        let neAppPaths = Self.appPaths(fileManager: fm, notes: &notes)
 
         var state = CollectedState()
         state.networkExtension = NetworkExtensionState(
             frameworkPresent: frameworkPresent,
             vpnConfigPaths: vpnConfigPaths,
-            contentFilterHints: contentFilterHints,
+            contentFilterHints: filteredContentFilterHints,
             packetTunnelHints: packetTunnelHints,
             neAppPaths: neAppPaths,
             notes: notes
         )
-        state.collectorNotes[Self.id] =
-            "framework=\(frameworkPresent.map(String.init(describing:)) ?? "nil") "
-            + "vpnConfigs=\(vpnConfigPaths.count) "
-            + "contentFilter=\(contentFilterHints.count) "
-            + "packetTunnel=\(packetTunnelHints.count) "
-            + "neApps=\(neAppPaths.count) "
-            + "stockNetworkArtifacts=\(stockArtifactCount)"
+        let frameworkNote = frameworkPresent.map(String.init(describing:)) ?? "nil"
+        state.collectorNotes[Self.id] = "framework=\(frameworkNote) vpnConfigs=\(vpnConfigPaths.count) "
+            + "contentFilter=\(filteredContentFilterHints.count) packetTunnel=\(packetTunnelHints.count) "
+            + "neApps=\(neAppPaths.count) stockNetworkArtifacts=\(stockArtifactCount)"
         // Explicit gap-friendly token when no enterprise filter inventory (stock pf alone is not coverage).
-        if contentFilterHints.isEmpty && neAppPaths.isEmpty {
+        if filteredContentFilterHints.isEmpty && neAppPaths.isEmpty {
             state.collectorNotes["ne.filter_gap"] =
                 "enterprise_content_filter=0 neApps=0 stock_os_network=\(stockArtifactCount)"
         }
         return state
+    }
+
+    private static func frameworkPresence(fileManager: FileManager, notes: inout [String]) -> Bool? {
+        let paths = frameworkProbes.filter { fileManager.fileExists(atPath: $0) }
+        for path in paths {
+            notes.append("framework present: \(path)")
+        }
+        guard !paths.isEmpty else {
+            notes.append("NetworkExtension.framework not observed at catalog paths")
+            return false
+        }
+        return true
+    }
+
+    private static func vpnConfigPaths(fileManager: FileManager, notes: inout [String]) -> [String] {
+        var paths = vpnConfigProbes.filter { fileManager.fileExists(atPath: $0) }
+        for path in paths {
+            notes.append("vpn_config path: \(path)")
+        }
+        let preferencesDirectory = "/Library/Preferences"
+        if let entries = try? fileManager.contentsOfDirectory(atPath: preferencesDirectory) {
+            for name in entries where name.hasPrefix("com.apple.networkextension") {
+                let path = (preferencesDirectory as NSString).appendingPathComponent(name)
+                guard !paths.contains(path), fileManager.fileExists(atPath: path) else { continue }
+                paths.append(path)
+                notes.append("vpn_config listed: \(path)")
+            }
+        }
+        return Array(Set(paths)).sorted()
+    }
+
+    private static func recordStockArtifacts(fileManager: FileManager, notes: inout [String]) -> Int {
+        let probes = stockNetworkArtifacts.filter { fileManager.fileExists(atPath: $0.path) }
+        for probe in probes {
+            notes.append("stock_os_network: \(probe.name) path=\(probe.path)")
+        }
+        return probes.count
+    }
+
+    private static func probeHints(
+        _ probes: [(name: String, path: String)],
+        prefix: String,
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> [String] {
+        let present = probes.filter { fileManager.fileExists(atPath: $0.path) }
+        for probe in present {
+            notes.append("\(prefix): \(probe.name) path=\(probe.path)")
+        }
+        return Array(Set(present.map { "\($0.name):\($0.path)" })).sorted()
+    }
+
+    private static func appPaths(fileManager: FileManager, notes: inout [String]) -> [String] {
+        let probes = neAppProbes.filter { fileManager.fileExists(atPath: $0.path) }
+        for probe in probes {
+            notes.append("ne_app: \(probe.name) path=\(probe.path)")
+        }
+        return Array(Set(probes.map(\.path))).sorted()
     }
 }

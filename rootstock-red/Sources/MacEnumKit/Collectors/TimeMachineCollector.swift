@@ -37,80 +37,122 @@ public struct TimeMachineCollector: Collector {
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
-        let fm = FileManager.default
-        var notes: [String] = [
+        let probe = Self.probe(fileManager: .default)
+        let notes = [
             "Time Machine surface: path presence only - no backup content read, no tmutil restore",
-        ]
+        ] + probe.notes
+        return Self.state(from: probe, notes: notes)
+    }
 
+    private struct Probe {
         var preferencesPresent: Bool?
-        for path in Self.preferencePaths {
-            if fm.fileExists(atPath: path) {
-                preferencesPresent = true
-                notes.append("TM prefs present: \(path) (not parsing destinations)")
-            }
-        }
-        if preferencesPresent == nil {
-            preferencesPresent = false
-            notes.append("Time Machine preference plists not observed at catalog paths")
-        }
+        var backupPaths: [String]
+        var localSnapshotHints: [String]
+        var volumeMountHints: [String]
+        var notes: [String]
+    }
 
-        var backupPaths: [String] = []
-        for path in Self.backupPathCandidates {
-            if fm.fileExists(atPath: path) {
-                backupPaths.append(path)
-                notes.append("backup_path: \(path)")
-            }
-        }
+    private static func probe(fileManager: FileManager) -> Probe {
+        var notes: [String] = []
+        let preferencesPresent = preferencesPresent(fileManager: fileManager, notes: &notes)
+        var backupPaths = existingPaths(
+            in: backupPathCandidates,
+            notePrefix: "backup_path",
+            fileManager: fileManager,
+            notes: &notes
+        )
+        let localSnapshotHints = existingPaths(
+            in: localSnapshotCandidates,
+            notePrefix: "local_snapshot_hint",
+            fileManager: fileManager,
+            notes: &notes
+        )
+        let volumeMountHints = volumeMountHints(
+            fileManager: fileManager,
+            backupPaths: &backupPaths,
+            notes: &notes
+        )
+        return Probe(
+            preferencesPresent: preferencesPresent,
+            backupPaths: uniquePaths(backupPaths),
+            localSnapshotHints: uniquePaths(localSnapshotHints),
+            volumeMountHints: uniquePaths(volumeMountHints),
+            notes: notes
+        )
+    }
 
-        var localSnapshotHints: [String] = []
-        for path in Self.localSnapshotCandidates {
-            if fm.fileExists(atPath: path) {
-                localSnapshotHints.append(path)
-                notes.append("local_snapshot_hint: \(path)")
-            }
+    private static func preferencesPresent(fileManager: FileManager, notes: inout [String]) -> Bool? {
+        let paths = preferencePaths.filter { fileManager.fileExists(atPath: $0) }
+        for path in paths {
+            notes.append("TM prefs present: \(path) (not parsing destinations)")
         }
+        guard paths.isEmpty else { return true }
+        notes.append("Time Machine preference plists not observed at catalog paths")
+        return false
+    }
 
-        // Shallow /Volumes scan for Backup / Time Machine named mounts (name only).
-        var volumeMountHints: [String] = []
+    private static func existingPaths(
+        in candidates: [String],
+        notePrefix: String,
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> [String] {
+        let paths = candidates.filter { fileManager.fileExists(atPath: $0) }
+        for path in paths {
+            notes.append("\(notePrefix): \(path)")
+        }
+        return paths
+    }
+
+    private static func volumeMountHints(
+        fileManager: FileManager,
+        backupPaths: inout [String],
+        notes: inout [String]
+    ) -> [String] {
         let volumesRoot = "/Volumes"
-        if let volumes = try? fm.contentsOfDirectory(atPath: volumesRoot) {
-            for name in volumes {
-                let lower = name.lowercased()
-                if lower.contains("backup")
-                    || lower.contains("time machine")
-                    || lower.contains("timemachine")
-                    || lower.contains("tm ")
-                {
-                    let full = (volumesRoot as NSString).appendingPathComponent(name)
-                    volumeMountHints.append(full)
-                    notes.append("volume_mount_hint: \(full)")
-                    if !backupPaths.contains(full) {
-                        backupPaths.append(full)
-                    }
-                }
-            }
-            notes.append("Volumes listed count=\(volumes.count) (name filter only)")
-        } else {
+        guard let volumes = try? fileManager.contentsOfDirectory(atPath: volumesRoot) else {
             notes.append("Volumes directory unreadable")
+            return []
         }
 
-        backupPaths = Array(Set(backupPaths)).sorted()
-        localSnapshotHints = Array(Set(localSnapshotHints)).sorted()
-        volumeMountHints = Array(Set(volumeMountHints)).sorted()
+        let hints = volumes.filter(isTimeMachineVolumeMount).map {
+            (volumesRoot as NSString).appendingPathComponent($0)
+        }
+        for hint in hints {
+            notes.append("volume_mount_hint: \(hint)")
+            if !backupPaths.contains(hint) {
+                backupPaths.append(hint)
+            }
+        }
+        notes.append("Volumes listed count=\(volumes.count) (name filter only)")
+        return hints
+    }
 
+    private static func isTimeMachineVolumeMount(_ name: String) -> Bool {
+        let lowercasedName = name.lowercased()
+        return ["backup", "time machine", "timemachine", "tm "].contains {
+            lowercasedName.contains($0)
+        }
+    }
+
+    private static func uniquePaths(_ paths: [String]) -> [String] {
+        Array(Set(paths)).sorted()
+    }
+
+    private static func state(from probe: Probe, notes: [String]) -> CollectedState {
         var state = CollectedState()
         state.timeMachine = TimeMachineState(
-            preferencesPresent: preferencesPresent,
-            backupPaths: backupPaths,
-            localSnapshotHints: localSnapshotHints,
-            volumeMountHints: volumeMountHints,
+            preferencesPresent: probe.preferencesPresent,
+            backupPaths: probe.backupPaths,
+            localSnapshotHints: probe.localSnapshotHints,
+            volumeMountHints: probe.volumeMountHints,
             notes: notes
         )
         state.collectorNotes[Self.id] =
-            "prefs=\(preferencesPresent.map(String.init(describing:)) ?? "nil") "
-            + "backups=\(backupPaths.count) "
-            + "snapshots=\(localSnapshotHints.count) "
-            + "volumes=\(volumeMountHints.count)"
+            "prefs=\(probe.preferencesPresent.map(String.init(describing:)) ?? "nil") "
+            + "backups=\(probe.backupPaths.count) "
+            + "snapshots=\(probe.localSnapshotHints.count) "
+            + "volumes=\(probe.volumeMountHints.count)"
         return state
     }
 }

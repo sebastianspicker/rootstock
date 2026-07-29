@@ -58,33 +58,27 @@ public struct ThirdPartyTCCInheritanceCollector: Collector {
         for app in Self.thickClientCandidates where fm.fileExists(atPath: app) {
             thick.append(app)
             notes.append("thick_client: \(app)")
-            for rel in Self.interpreterRelPaths {
-                let full = (app as NSString).appendingPathComponent(rel)
-                if fm.fileExists(atPath: full) {
-                    interpreters.append(full)
-                    let lower = rel.lowercased()
-                    if lower.contains("electron") || lower.contains("chromium") || lower.contains("node")
-                        || lower.contains("asar") || lower.contains("squirrel")
-                    {
-                        electron.append(full)
-                    }
-                    notes.append("embedded_component: \(full)")
-                }
-            }
+            Self.appendEmbeddedComponents(
+                for: app,
+                fileManager: fm,
+                interpreters: &interpreters,
+                electron: &electron,
+                notes: &notes
+            )
         }
 
         // System-wide interpreters that apps may spawn (path presence only)
-        for path in ["/usr/bin/python3", "/usr/bin/ruby", "/usr/local/bin/node", "/opt/homebrew/bin/node"]
-        where fm.fileExists(atPath: path) {
-            interpreters.append(path)
-            notes.append("host_interpreter: \(path)")
-        }
+        Self.appendHostInterpreters(fileManager: fm, interpreters: &interpreters, notes: &notes)
 
         thick = Array(Set(thick)).sorted()
         interpreters = Array(Set(interpreters)).sorted()
         electron = Array(Set(electron)).sorted()
 
-        let surface = !thick.isEmpty && (!interpreters.isEmpty || !electron.isEmpty)
+        let surface = Self.hasInheritanceSurface(
+            thickClients: thick,
+            interpreters: interpreters,
+            electronHelpers: electron
+        )
 
         var state = CollectedState()
         state.thirdPartyTCCInheritance = ThirdPartyTCCInheritanceState(
@@ -98,5 +92,51 @@ public struct ThirdPartyTCCInheritanceCollector: Collector {
             "thick=\(thick.count) interpreters=\(interpreters.count) "
             + "electron=\(electron.count) surface=\(surface)"
         return state
+    }
+
+    private static func appendEmbeddedComponents(
+        for app: String,
+        fileManager: FileManager,
+        interpreters: inout [String],
+        electron: inout [String],
+        notes: inout [String]
+    ) {
+        for relativePath in interpreterRelPaths {
+            let fullPath = (app as NSString).appendingPathComponent(relativePath)
+            guard fileManager.fileExists(atPath: fullPath) else { continue }
+
+            interpreters.append(fullPath)
+            if isElectronComponent(relativePath) {
+                electron.append(fullPath)
+            }
+            notes.append("embedded_component: \(fullPath)")
+        }
+    }
+
+    private static func appendHostInterpreters(
+        fileManager: FileManager,
+        interpreters: inout [String],
+        notes: inout [String]
+    ) {
+        let paths = ["/usr/bin/python3", "/usr/bin/ruby", "/usr/local/bin/node", "/opt/homebrew/bin/node"]
+        for path in paths where fileManager.fileExists(atPath: path) {
+            interpreters.append(path)
+            notes.append("host_interpreter: \(path)")
+        }
+    }
+
+    private static func isElectronComponent(_ relativePath: String) -> Bool {
+        let lowercasedPath = relativePath.lowercased()
+        return ["electron", "chromium", "node", "asar", "squirrel"].contains {
+            lowercasedPath.contains($0)
+        }
+    }
+
+    private static func hasInheritanceSurface(
+        thickClients: [String],
+        interpreters: [String],
+        electronHelpers: [String]
+    ) -> Bool {
+        !thickClients.isEmpty && (!interpreters.isEmpty || !electronHelpers.isEmpty)
     }
 }

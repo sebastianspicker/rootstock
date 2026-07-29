@@ -24,145 +24,136 @@ public struct ConfigProfileSideloadCollector: Collector {
     /// Prefs basenames that look like config-profile / MDM surface (not SystemProfiler).
     public static func isConfigurationProfilePrefName(_ name: String) -> Bool {
         let lower = name.lowercased()
-        // Explicit exclusions: system profiler and similar false friends.
-        if lower.contains("systemprofiler") || lower.contains("system_profiler") {
-            return false
-        }
-        if lower.contains("activitymonitor") {
-            return false
-        }
-        // Positive signals for configuration-profile / MDM prefs.
-        if lower.hasSuffix(".mobileconfig") { return true }
-        if lower.contains("mobileconfig") { return true }
-        if lower.contains("configurationprofile") { return true }
-        if lower.contains("configurationprofiles") { return true }
-        if lower.hasPrefix("com.apple.managedclient") { return true }
-        if lower.contains("mdm") && (lower.contains("profile") || lower.contains("enroll")) {
+        let exclusions = ["systemprofiler", "system_profiler", "activitymonitor"]
+        guard !exclusions.contains(where: lower.contains) else { return false }
+
+        let directSignals = ["mobileconfig", "configurationprofile", "configurationprofiles", "pppc", "tcc.configuration"]
+        if lower.hasSuffix(".mobileconfig")
+            || lower.hasPrefix("com.apple.managedclient")
+            || directSignals.contains(where: lower.contains)
+        {
             return true
         }
-        if lower.contains("pppc") || lower.contains("tcc.configuration") {
-            return true
-        }
-        // "profile" alone is too broad (SystemProfiler). Require config/mdm/enroll context.
-        if lower.contains("config") && lower.contains("profile") {
-            return true
-        }
-        if lower.contains("enroll") && lower.contains("profile") {
-            return true
-        }
-        return false
+
+        let mdmContext = lower.contains("mdm")
+            && ["profile", "enroll"].contains(where: lower.contains)
+        let contextualProfile = [["config", "profile"], ["enroll", "profile"]]
+            .contains { fragments in fragments.allSatisfy(lower.contains) }
+        return mdmContext || contextualProfile
     }
 
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         let home = NSHomeDirectory()
         var notes: [String] = [
             "Config profile sideload surface: path/count only - no install, no payload parse",
             "Prefs filter excludes SystemProfiler and other non-config-profile names",
         ]
 
-        var userMobileconfigPaths: [String] = []
-        var downloadsProfileHints: [String] = []
+        let mobileconfigs = Self.discoverMobileconfigs(
+            fileManager: fileManager,
+            home: home,
+            notes: &notes
+        )
+        var userPaths = mobileconfigs.paths
+        var profileHints = mobileconfigs.downloadHints
+        profileHints += Self.preferenceHints(fileManager: fileManager, home: home, notes: &notes)
+        let profileStorePresent = Self.profileStorePresent(fileManager: fileManager, notes: &notes)
 
-        // ~/Downloads/*.mobileconfig (list dir - existence/count only).
-        let downloads = (home as NSString).appendingPathComponent("Downloads")
-        if fm.fileExists(atPath: downloads) {
-            if let items = try? fm.contentsOfDirectory(atPath: downloads) {
-                let mobileconfigs = items.filter {
-                    $0.lowercased().hasSuffix(".mobileconfig")
-                }
-                for name in mobileconfigs {
-                    let full = (downloads as NSString).appendingPathComponent(name)
-                    userMobileconfigPaths.append(full)
-                    downloadsProfileHints.append(full)
-                }
-                notes.append(
-                    "Downloads mobileconfig count=\(mobileconfigs.count) dir=\(downloads)"
-                )
-            } else {
-                notes.append("Downloads present but listing denied: \(downloads)")
-            }
-        } else {
-            notes.append("Downloads directory absent: \(downloads)")
-        }
-
-        // Other user-writable mobileconfig drop zones (shallow).
-        let extraUserDirs = [
-            (home as NSString).appendingPathComponent("Desktop"),
-            (home as NSString).appendingPathComponent("Documents"),
-        ]
-        for dir in extraUserDirs {
-            guard fm.fileExists(atPath: dir),
-                  let items = try? fm.contentsOfDirectory(atPath: dir)
-            else { continue }
-            for name in items where name.lowercased().hasSuffix(".mobileconfig") {
-                let full = (dir as NSString).appendingPathComponent(name)
-                userMobileconfigPaths.append(full)
-                notes.append("user_mobileconfig: \(full)")
-            }
-        }
-
-        // ~/Library/Preferences profile-ish hints (tight name filter).
-        let userPrefs = (home as NSString).appendingPathComponent("Library/Preferences")
-        if let items = try? fm.contentsOfDirectory(atPath: userPrefs) {
-            let profileish = items.filter { Self.isConfigurationProfilePrefName($0) }
-            for name in profileish {
-                let full = (userPrefs as NSString).appendingPathComponent(name)
-                downloadsProfileHints.append("prefs:\(full)")
-                notes.append("user_prefs_config_profile_hint: \(name)")
-            }
-            // Record that SystemProfiler-style names were considered and rejected when present.
-            if items.contains(where: { $0.lowercased().contains("systemprofiler") }) {
-                notes.append("excluded_prefs_false_friend: SystemProfiler (not configuration profile)")
-            }
-        } else {
-            notes.append("User Preferences dir unreadable or absent")
-        }
-
-        // System profile install DB presence (not secrets).
-        var profileInstallDbPresent: Bool?
-        for path in Self.profileInstallDbCandidates {
-            if fm.fileExists(atPath: path) {
-                profileInstallDbPresent = true
-                notes.append("profile_store present: \(path) (not dumping contents)")
-            }
-        }
-        if profileInstallDbPresent == nil {
-            profileInstallDbPresent = false
-            notes.append("ConfigurationProfiles store not observed at catalog paths")
-        }
-
-        // Cap path lists for report size (count still reflected in notes).
-        let maxPaths = 50
-        if userMobileconfigPaths.count > maxPaths {
-            notes.append(
-                "userMobileconfigPaths truncated \(userMobileconfigPaths.count)→\(maxPaths)"
-            )
-            userMobileconfigPaths = Array(userMobileconfigPaths.prefix(maxPaths))
-        }
-        if downloadsProfileHints.count > maxPaths {
-            notes.append(
-                "downloadsProfileHints truncated \(downloadsProfileHints.count)→\(maxPaths)"
-            )
-            downloadsProfileHints = Array(downloadsProfileHints.prefix(maxPaths))
-        }
-
-        userMobileconfigPaths = Array(Set(userMobileconfigPaths)).sorted()
-        downloadsProfileHints = Array(Set(downloadsProfileHints)).sorted()
+        userPaths = Self.capped(userPaths, named: "userMobileconfigPaths", notes: &notes)
+        profileHints = Self.capped(profileHints, named: "downloadsProfileHints", notes: &notes)
+        userPaths = Array(Set(userPaths)).sorted()
+        profileHints = Array(Set(profileHints)).sorted()
 
         var state = CollectedState()
         state.configProfileSideload = ConfigProfileSideloadState(
-            userMobileconfigPaths: userMobileconfigPaths,
-            downloadsProfileHints: downloadsProfileHints,
-            profileInstallDbPresent: profileInstallDbPresent,
+            userMobileconfigPaths: userPaths,
+            downloadsProfileHints: profileHints,
+            profileInstallDbPresent: profileStorePresent,
             notes: notes
         )
         state.collectorNotes[Self.id] =
-            "mobileconfigs=\(userMobileconfigPaths.count) "
-            + "hints=\(downloadsProfileHints.count) "
-            + "profileDb=\(profileInstallDbPresent.map(String.init(describing:)) ?? "nil")"
+            "mobileconfigs=\(userPaths.count) hints=\(profileHints.count) "
+            + "profileDb=\(profileStorePresent.map(String.init(describing:)) ?? "nil")"
         return state
+    }
+
+    private static func discoverMobileconfigs(
+        fileManager: FileManager,
+        home: String,
+        notes: inout [String]
+    ) -> (paths: [String], downloadHints: [String]) {
+        let downloads = (home as NSString).appendingPathComponent("Downloads")
+        var paths: [String] = []
+        var downloadHints: [String] = []
+
+        switch (fileManager.fileExists(atPath: downloads), try? fileManager.contentsOfDirectory(atPath: downloads)) {
+        case (true, let items?):
+            let names = items.filter { $0.lowercased().hasSuffix(".mobileconfig") }
+            let found = names.map { (downloads as NSString).appendingPathComponent($0) }
+            paths += found
+            downloadHints += found
+            notes.append("Downloads mobileconfig count=\(found.count) dir=\(downloads)")
+        case (true, nil):
+            notes.append("Downloads present but listing denied: \(downloads)")
+        case (false, _):
+            notes.append("Downloads directory absent: \(downloads)")
+        }
+
+        for directory in ["Desktop", "Documents"].map({ (home as NSString).appendingPathComponent($0) }) {
+            guard
+                fileManager.fileExists(atPath: directory),
+                let items = try? fileManager.contentsOfDirectory(atPath: directory)
+            else { continue }
+
+            for name in items where name.lowercased().hasSuffix(".mobileconfig") {
+                let path = (directory as NSString).appendingPathComponent(name)
+                paths.append(path)
+                notes.append("user_mobileconfig: \(path)")
+            }
+        }
+        return (paths, downloadHints)
+    }
+
+    private static func preferenceHints(
+        fileManager: FileManager,
+        home: String,
+        notes: inout [String]
+    ) -> [String] {
+        let directory = (home as NSString).appendingPathComponent("Library/Preferences")
+        guard let items = try? fileManager.contentsOfDirectory(atPath: directory) else {
+            notes.append("User Preferences dir unreadable or absent")
+            return []
+        }
+
+        let profileHints = items.filter(isConfigurationProfilePrefName)
+        for name in profileHints {
+            notes.append("user_prefs_config_profile_hint: \(name)")
+        }
+        if items.contains(where: { $0.lowercased().contains("systemprofiler") }) {
+            notes.append("excluded_prefs_false_friend: SystemProfiler (not configuration profile)")
+        }
+        return profileHints.map { "prefs:\((directory as NSString).appendingPathComponent($0))" }
+    }
+
+    private static func profileStorePresent(fileManager: FileManager, notes: inout [String]) -> Bool? {
+        let paths = profileInstallDbCandidates.filter(fileManager.fileExists(atPath:))
+        if paths.isEmpty {
+            notes.append("ConfigurationProfiles store not observed at catalog paths")
+            return false
+        }
+        for path in paths {
+            notes.append("profile_store present: \(path) (not dumping contents)")
+        }
+        return true
+    }
+
+    private static func capped(_ paths: [String], named name: String, notes: inout [String]) -> [String] {
+        let maxPaths = 50
+        guard paths.count > maxPaths else { return paths }
+        notes.append("\(name) truncated \(paths.count)→\(maxPaths)")
+        return Array(paths.prefix(maxPaths))
     }
 }

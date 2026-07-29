@@ -44,27 +44,21 @@ public struct ContinuityAirDropCollector: Collector {
         ]
 
         var airdrop: [String] = []
-        for path in Self.airdropPrefPaths {
-            if fm.fileExists(atPath: path) {
+        for path in Self.airdropPrefPaths where fm.fileExists(atPath: path) {
                 airdrop.append(path)
                 notes.append("airdrop_or_share_pref: \(path)")
-            }
         }
 
         var continuity: [String] = []
-        for path in Self.continuityFrameworkPaths {
-            if fm.fileExists(atPath: path) {
+        for path in Self.continuityFrameworkPaths where fm.fileExists(atPath: path) {
                 continuity.append(path)
                 notes.append("continuity_component: \(path)")
-            }
         }
 
         var nearby: [String] = []
-        for path in Self.nearbyShareHints {
-            if fm.fileExists(atPath: path) {
+        for path in Self.nearbyShareHints where fm.fileExists(atPath: path) {
                 nearby.append(path)
                 notes.append("nearby_share_hint: \(path)")
-            }
         }
 
         airdrop = Array(Set(airdrop)).sorted()

@@ -18,7 +18,7 @@ public struct ShortcutsAppIntentsCollector: Collector {
             "Shortcuts / App Intents surface: path presence only - never runs shortcuts or forges App Intents",
         ]
 
-        let shortcutsPaths = [
+        let shortcuts = existingPaths([
             "/System/Applications/Shortcuts.app",
             "/Applications/Shortcuts.app",
             home + "/Library/Shortcuts",
@@ -26,46 +26,22 @@ public struct ShortcutsAppIntentsCollector: Collector {
             home + "/Library/Containers/com.apple.shortcuts",
             home + "/Library/Group Containers/group.is.workflow.my.app",
             home + "/Library/Group Containers/group.is.workflow.shortcuts",
-        ]
-        var shortcuts: [String] = []
-        for path in shortcutsPaths where fm.fileExists(atPath: path) {
-            shortcuts.append(path)
-            notes.append("shortcuts: \(path)")
-        }
+        ], fm: fm, notePrefix: "shortcuts", notes: &notes)
 
-        let intentsPaths = [
+        let intents = intentPaths([
             "/System/Library/Frameworks/AppIntents.framework",
             "/System/Library/Frameworks/AppIntents.framework/AppIntents",
             "/System/Library/PrivateFrameworks/WorkflowKit.framework",
             "/System/Library/PrivateFrameworks/VoiceShortcutClient.framework",
             home + "/Library/Developer/Xcode/DerivedData",
-        ]
-        var intents: [String] = []
-        for path in intentsPaths where fm.fileExists(atPath: path) {
-            // Skip DerivedData alone as surface signal (too common on dev hosts)
-            if path.contains("DerivedData") {
-                notes.append("developer_derived_data_present: \(path) (not counted as surface alone)")
-                continue
-            }
-            intents.append(path)
-            notes.append("app_intents: \(path)")
-        }
+        ], fm: fm, notes: &notes)
 
-        let autoPrefs = [
+        let prefs = existingPaths([
             home + "/Library/Preferences/com.apple.shortcuts.plist",
             home + "/Library/Preferences/com.apple.siriactionsd.plist",
             home + "/Library/Preferences/com.apple.voicebankingd.plist",
             "/Library/Preferences/com.apple.shortcuts.plist",
-        ]
-        var prefs: [String] = []
-        for path in autoPrefs where fm.fileExists(atPath: path) {
-            prefs.append(path)
-            notes.append("automation_pref: \(path)")
-        }
-
-        shortcuts = Array(Set(shortcuts)).sorted()
-        intents = Array(Set(intents)).sorted()
-        prefs = Array(Set(prefs)).sorted()
+        ], fm: fm, notePrefix: "automation_pref", notes: &notes)
 
         let surface = shortcuts.count >= 1 || intents.count >= 1
 
@@ -81,4 +57,7 @@ public struct ShortcutsAppIntentsCollector: Collector {
             "shortcuts=\(shortcuts.count) intents=\(intents.count) prefs=\(prefs.count) surface=\(surface)"
         return state
     }
+
+    private func existingPaths(_ paths: [String], fm: FileManager, notePrefix: String, notes: inout [String]) -> [String] { let found = paths.filter { fm.fileExists(atPath: $0) }; found.forEach { notes.append("\(notePrefix): \($0)") }; return Array(Set(found)).sorted() }
+    private func intentPaths(_ paths: [String], fm: FileManager, notes: inout [String]) -> [String] { let found = paths.filter { fm.fileExists(atPath: $0) }; let intents = found.filter { !$0.contains("DerivedData") }; found.filter { $0.contains("DerivedData") }.forEach { notes.append("developer_derived_data_present: \($0) (not counted as surface alone)") }; intents.forEach { notes.append("app_intents: \($0)") }; return Array(Set(intents)).sorted() }
 }

@@ -38,6 +38,11 @@ public struct TCCESFVisibilityDepthCollector: Collector {
         "/private/etc/asl.conf",
     ]
 
+    private struct TCCEvidence {
+        let paths: [String]
+        let readableCount: Int
+    }
+
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
@@ -46,50 +51,15 @@ public struct TCCESFVisibilityDepthCollector: Collector {
             "TCC/ESF visibility depth: path/listability only - never dumps TCC.db rows, never live-subscribes ESF without ROE",
         ]
 
-        var tccHits: [String] = []
-        var readableTCC = 0
-        for path in Self.tccDbCandidates where fm.fileExists(atPath: path) {
-            tccHits.append(path)
-            let readable = fm.isReadableFile(atPath: path)
-            if readable { readableTCC += 1 }
-            notes.append("tcc_path: \(path) readable=\(readable)")
-        }
-
-        var tools: [String] = []
-        for path in Self.visibilityTools {
-            // Skip fake "log stream" path component only if not a real file.
-            if path.contains(" ") { continue }
-            if fm.fileExists(atPath: path) {
-                tools.append(path)
-                notes.append("visibility_tool: \(path)")
-            }
-        }
-
-        var prefs: [String] = []
-        for path in Self.privacyPrefs where fm.fileExists(atPath: path) {
-            prefs.append(path)
-            notes.append("privacy_pref: \(path)")
-        }
-
-        tccHits = Array(Set(tccHits)).sorted()
-        tools = Array(Set(tools)).sorted()
-        prefs = Array(Set(prefs)).sorted()
-
-        // Depth heuristic: strong = readable TCC path + tools; partial = paths only; thin = few signals.
-        let depth: String
-        if readableTCC > 0 && tools.count >= 2 {
-            depth = "strong"
-        } else if !tccHits.isEmpty || tools.count >= 2 {
-            depth = "partial"
-        } else {
-            depth = "thin"
-        }
-
-        let surface = !tccHits.isEmpty || !tools.isEmpty || !prefs.isEmpty
+        let tcc = tccEvidence(fm, notes: &notes)
+        let tools = visibilityToolPaths(fm, notes: &notes)
+        let prefs = privacyPreferencePaths(fm, notes: &notes)
+        let depth = visibilityDepth(tcc: tcc, tools: tools)
+        let surface = hasVisibilitySurface(tcc: tcc.paths, tools: tools, prefs: prefs)
 
         var state = CollectedState()
         state.tccEsfVisibilityDepth = TCCESFVisibilityDepthState(
-            tccDbPathHits: tccHits,
+            tccDbPathHits: tcc.paths,
             visibilityToolPaths: tools,
             privacyPrefPaths: prefs,
             visibilityDepth: depth,
@@ -97,8 +67,59 @@ public struct TCCESFVisibilityDepthCollector: Collector {
             notes: notes
         )
         state.collectorNotes[Self.id] =
-            "tcc=\(tccHits.count) readableTCC=\(readableTCC) tools=\(tools.count) "
+            "tcc=\(tcc.paths.count) readableTCC=\(tcc.readableCount) tools=\(tools.count) "
             + "prefs=\(prefs.count) depth=\(depth) surface=\(surface)"
         return state
+    }
+
+    private func tccEvidence(_ fm: FileManager, notes: inout [String]) -> TCCEvidence {
+        var paths: [String] = []
+        var readableCount = 0
+
+        for path in Self.tccDbCandidates where fm.fileExists(atPath: path) {
+            paths.append(path)
+            let readable = fm.isReadableFile(atPath: path)
+            if readable { readableCount += 1 }
+            notes.append("tcc_path: \(path) readable=\(readable)")
+        }
+
+        return TCCEvidence(paths: uniqueSorted(paths), readableCount: readableCount)
+    }
+
+    private func visibilityToolPaths(_ fm: FileManager, notes: inout [String]) -> [String] {
+        let candidates = Self.visibilityTools.filter { !$0.contains(" ") }
+        return existingPaths(candidates, fm: fm, prefix: "visibility_tool", notes: &notes)
+    }
+
+    private func privacyPreferencePaths(_ fm: FileManager, notes: inout [String]) -> [String] {
+        existingPaths(Self.privacyPrefs, fm: fm, prefix: "privacy_pref", notes: &notes)
+    }
+
+    private func existingPaths(
+        _ candidates: [String],
+        fm: FileManager,
+        prefix: String,
+        notes: inout [String]
+    ) -> [String] {
+        var paths: [String] = []
+        for path in candidates where fm.fileExists(atPath: path) {
+            paths.append(path)
+            notes.append("\(prefix): \(path)")
+        }
+        return uniqueSorted(paths)
+    }
+
+    private func visibilityDepth(tcc: TCCEvidence, tools: [String]) -> String {
+        if tcc.readableCount > 0 && tools.count >= 2 { return "strong" }
+        if !tcc.paths.isEmpty || tools.count >= 2 { return "partial" }
+        return "thin"
+    }
+
+    private func hasVisibilitySurface(tcc: [String], tools: [String], prefs: [String]) -> Bool {
+        !tcc.isEmpty || !tools.isEmpty || !prefs.isEmpty
+    }
+
+    private func uniqueSorted(_ paths: [String]) -> [String] {
+        Array(Set(paths)).sorted()
     }
 }

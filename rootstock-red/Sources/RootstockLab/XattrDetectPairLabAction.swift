@@ -39,45 +39,20 @@ public struct XattrDetectPairLabAction: LabAction {
           "harmless": true
         }
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run xattr detect-pair plan: would write purple stub for \(technique) expecting \
-            [\(events)] (xattr/quarantine monitoring) at \(markerURL.path).
-            """,
-            planSteps: [
-                "Technique tag: \(technique)",
-                "Expected ESF-style events for xattr/quarantine monitoring: \(events)",
-                "Write purple detection-pair JSON: \(markerURL.path)",
-                "No xattr mutations; pair with local ESF/osquery rules offline",
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Disable temporary detection rules if they keyed only on this lab path",
-            ],
-            applyDryRunMessage: "Dry-run: would write xattr detect-pair stub at \(markerURL.path)",
-            applySuccessMessage: "Wrote xattr detect-pair stub at \(markerURL.path) (technique=\(technique))",
-            applySteps: [
-            "Create purple-xattr directory",
-            "Write xattr/quarantine detection-pair JSON for \(technique)",
-        ],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Xattr detect-pair stub present",
-            absentMessage: "Xattr detect-pair stub absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete xattr detect-pair stub (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed xattr detect-pair stub (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No host ESF consumer modified"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, technique: technique, events: events)
+            )
         )
+    }
+
+    private static func copy(markerURL: URL, technique: String, events: String) -> FileMarkerCopy {
+        FileMarkerCopy(plan: FileMarkerPlanCopy(message: "Dry-run xattr detect-pair plan: would write purple stub for \(technique) expecting [\(events)] (xattr/quarantine monitoring) at \(markerURL.path).", steps: ["Technique tag: \(technique)", "Expected ESF-style events for xattr/quarantine monitoring: \(events)", "Write purple detection-pair JSON: \(markerURL.path)", "No xattr mutations; pair with local ESF/osquery rules offline"], cleanup: ["Delete \(markerURL.path)", "Disable temporary detection rules if they keyed only on this lab path"]), apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write xattr detect-pair stub at \(markerURL.path)", successMessage: "Wrote xattr detect-pair stub at \(markerURL.path) (technique=\(technique))", steps: ["Create purple-xattr directory", "Write xattr/quarantine detection-pair JSON for \(technique)"], cleanup: ["Delete \(markerURL.path)"]), status: FileMarkerStatusCopy(presentMessage: "Xattr detect-pair stub present", absentMessage: "Xattr detect-pair stub absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]), remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete xattr detect-pair stub (exists=\(exists))" }, successMessage: { exists in "Removed xattr detect-pair stub (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No host ESF consumer modified"]))
     }
 
     public static func resolveLabRoot(params: [String: String]) -> URL {

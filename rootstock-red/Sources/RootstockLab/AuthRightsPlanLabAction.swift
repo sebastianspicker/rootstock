@@ -34,41 +34,24 @@ public struct AuthRightsPlanLabAction: LabAction {
         - purple: expect OPEN of auth artifacts if read under separate ROE
         ROOTSTOCK_RED_LAB_AUTH_RIGHTS=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run authorized-rights plan for rights [\(rights)]: would write plan at \
-            \(markerURL.path). Never edits /var/db/auth.db.
-            """,
-            planSteps: [
-                "Document review procedure for rights: \(rights)",
-                "Prefer offline / export-based inventory over live authdb mutation",
-                "Write markdown plan under lab root only",
-                "Never edit /var/db/auth.db or security authorizationdb write",
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Confirm auth.db was never modified",
-            ],
-            applyDryRunMessage: "Dry-run: would write auth rights plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote auth rights plan at \(markerURL.path)",
-            applySteps: ["Write auth rights plan"],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Auth rights plan present",
-            absentMessage: "Auth rights plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete auth rights plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed auth rights plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["/var/db/auth.db was never edited by this action"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, rights: rights)
+            )
+        )
+    }
+
+    private static func copy(markerURL: URL, rights: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run authorized-rights plan for rights [\(rights)]: would write plan at \(markerURL.path). Never edits /var/db/auth.db.", steps: ["Document review procedure for rights: \(rights)", "Prefer offline / export-based inventory over live authdb mutation", "Write markdown plan under lab root only", "Never edit /var/db/auth.db or security authorizationdb write"], cleanup: ["Delete \(markerURL.path)", "Confirm auth.db was never modified"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write auth rights plan at \(markerURL.path)", successMessage: "Wrote auth rights plan at \(markerURL.path)", steps: ["Write auth rights plan"], cleanup: ["Delete \(markerURL.path)"]),
+            status: FileMarkerStatusCopy(presentMessage: "Auth rights plan present", absentMessage: "Auth rights plan absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete auth rights plan (exists=\(exists))" }, successMessage: { exists in "Removed auth rights plan (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["/var/db/auth.db was never edited by this action"])
         )
     }
 

@@ -35,44 +35,24 @@ public struct DeveloperToolchainPlanLabAction: LabAction {
           "esfExpected": ["EXEC", "OPEN"]
         }
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run developer toolchain plan for tools [\(tools)]: would write plan at \
-            \(markerURL.path). No codesign of malware; no payload builds.
-            """,
-            planSteps: [
-                "Document dual-use validation steps for: \(tools)",
-                "Map expected purple signals (EXEC of toolchain binaries) if exercised under separate ROE",
-                "Write toolchain plan JSON under lab root only",
-                "Never codesign malware, ad-hoc sign implants, or build weaponized payloads",
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Confirm no codesign/xcodebuild payload operations occurred",
-            ],
-            applyDryRunMessage: "Dry-run: would write developer toolchain plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote developer toolchain plan at \(markerURL.path)",
-            applySteps: [
-            "Create developer-toolchain-plan directory",
-            "Write toolchain validation plan JSON for \(tools)",
-        ],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Developer toolchain plan present",
-            absentMessage: "Developer toolchain plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete developer toolchain plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed developer toolchain plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No codesign of malware was performed"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, tools: tools)
+            )
+        )
+    }
+
+    private static func copy(markerURL: URL, tools: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run developer toolchain plan for tools [\(tools)]: would write plan at \(markerURL.path). No codesign of malware; no payload builds.", steps: ["Document dual-use validation steps for: \(tools)", "Map expected purple signals (EXEC of toolchain binaries) if exercised under separate ROE", "Write toolchain plan JSON under lab root only", "Never codesign malware, ad-hoc sign implants, or build weaponized payloads"], cleanup: ["Delete \(markerURL.path)", "Confirm no codesign/xcodebuild payload operations occurred"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write developer toolchain plan at \(markerURL.path)", successMessage: "Wrote developer toolchain plan at \(markerURL.path)", steps: ["Create developer-toolchain-plan directory", "Write toolchain validation plan JSON for \(tools)"], cleanup: ["Delete \(markerURL.path)"]),
+            status: FileMarkerStatusCopy(presentMessage: "Developer toolchain plan present", absentMessage: "Developer toolchain plan absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete developer toolchain plan (exists=\(exists))" }, successMessage: { exists in "Removed developer toolchain plan (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No codesign of malware was performed"])
         )
     }
 

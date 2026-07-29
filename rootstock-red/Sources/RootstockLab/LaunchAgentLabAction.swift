@@ -1,6 +1,15 @@
 import Foundation
 import RootstockCore
 
+private struct LaunchAgentInstallRequest {
+    let plistURL: URL
+    let label: String
+    let program: String
+    let markerArg: String
+    let directory: URL
+    let dryRun: Bool
+}
+
 /// Lab LaunchAgent lifecycle: install / status / remove of a harmless marker plist.
 ///
 /// Writes only under a configurable directory (default `~/Library/LaunchAgents`).
@@ -42,12 +51,14 @@ public struct LaunchAgentLabAction: LabAction {
         switch request.operation {
         case .plan, .install:
             return try installOrPlan(
-                plistURL: plistURL,
-                label: label,
-                program: program,
-                markerArg: markerArg,
-                directory: directory,
-                dryRun: context.dryRun || request.operation == .plan
+                request: LaunchAgentInstallRequest(
+                    plistURL: plistURL,
+                    label: label,
+                    program: program,
+                    markerArg: markerArg,
+                    directory: directory,
+                    dryRun: context.dryRun || request.operation == .plan
+                )
             )
         case .status:
             return status(plistURL: plistURL, label: label)
@@ -62,66 +73,75 @@ public struct LaunchAgentLabAction: LabAction {
 
     // MARK: - Operations
 
-    private func installOrPlan(
-        plistURL: URL,
-        label: String,
-        program: String,
-        markerArg: String,
-        directory: URL,
-        dryRun: Bool
-    ) throws -> ActionResult {
+    private func installOrPlan(request: LaunchAgentInstallRequest) throws -> ActionResult {
         let steps = [
-            "Ensure directory exists: \(directory.path)",
-            "Write LaunchAgent plist: \(plistURL.path)",
-            "Label=\(label) ProgramArguments=[\(program), \(markerArg)] (harmless; no C2/keylog)",
+            "Ensure directory exists: \(request.directory.path)",
+            "Write LaunchAgent plist: \(request.plistURL.path)",
+            "Label=\(request.label) ProgramArguments=[\(request.program), \(request.markerArg)] (harmless; no C2/keylog)",
             "Do NOT call launchctl bootstrap/load (FileManager-only; avoids shell)",
             "BTM may register this Label if the user or system loads it later - user-visible risk",
         ]
         let cleanup = [
-            "Delete \(plistURL.path) via remove operation or FileManager",
+            "Delete \(request.plistURL.path) via remove operation or FileManager",
             Self.btmCleanupNote,
             "Verify no residual com.rootstock.red.lab.* under LaunchAgents",
         ]
-        let artifacts = [plistURL.path]
-
-        if dryRun {
-            return ActionResult(
-                actionId: Self.id,
-                success: true,
-                message: """
-                Dry-run: would install harmless LaunchAgent \(label) at \(plistURL.path). \
-                BTM user-visible risk: if loaded, macOS may show a background item for this Label; \
-                removal of the plist may leave residual BTM UI until cleared.
-                """,
-                dryRun: true,
-                plannedSteps: steps,
-                cleanupNotes: cleanup,
-                artifacts: artifacts
-            )
+        if request.dryRun {
+            return dryRunInstallResult(request: request, steps: steps, cleanup: cleanup)
         }
 
-        let fm = FileManager.default
-        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        let plistData = try Self.plistXML(
-            label: label,
-            program: program,
-            markerArg: markerArg
-        )
-        try plistData.write(to: plistURL, options: .atomic)
+        try writePlist(for: request)
+        return installedResult(request: request, steps: steps, cleanup: cleanup)
+    }
 
+    private func dryRunInstallResult(
+        request: LaunchAgentInstallRequest,
+        steps: [String],
+        cleanup: [String]
+    ) -> ActionResult {
         return ActionResult(
             actionId: Self.id,
             success: true,
             message: """
-            Installed lab LaunchAgent \(label) at \(plistURL.path) \
-            (Program=\(program); harmless marker only). \
+            Dry-run: would install harmless LaunchAgent \(request.label) at \(request.plistURL.path). \
+            BTM user-visible risk: if loaded, macOS may show a background item for this Label; \
+            removal of the plist may leave residual BTM UI until cleared.
+            """,
+            dryRun: true,
+            plannedSteps: steps,
+            cleanupNotes: cleanup,
+            artifacts: [request.plistURL.path]
+        )
+    }
+
+    private func writePlist(for request: LaunchAgentInstallRequest) throws {
+        try FileManager.default.createDirectory(at: request.directory, withIntermediateDirectories: true)
+        let plistData = try Self.plistXML(
+            label: request.label,
+            program: request.program,
+            markerArg: request.markerArg
+        )
+        try plistData.write(to: request.plistURL, options: .atomic)
+    }
+
+    private func installedResult(
+        request: LaunchAgentInstallRequest,
+        steps: [String],
+        cleanup: [String]
+    ) -> ActionResult {
+        ActionResult(
+            actionId: Self.id,
+            success: true,
+            message: """
+            Installed lab LaunchAgent \(request.label) at \(request.plistURL.path) \
+            (Program=\(request.program); harmless marker only). \
             BTM user-visible risk: if this agent is loaded, System Settings may list it; \
             delete the plist to reverse file-level persistence - BTM residual may remain.
             """,
             dryRun: false,
             plannedSteps: steps,
             cleanupNotes: cleanup,
-            artifacts: artifacts
+            artifacts: [request.plistURL.path]
         )
     }
 
@@ -224,28 +244,42 @@ public struct LaunchAgentLabAction: LabAction {
         guard !trimmed.isEmpty else {
             throw RootstockError.invalidArgument("label must not be empty")
         }
-        // Explicit path-traversal rejection (skeptic: --label '../../.ssh/orchard_pwn').
-        if trimmed.contains("/") || trimmed.contains("\\") || trimmed.contains("..") {
+        try rejectPathSyntax(in: trimmed)
+        try validateLabelCharacters(in: trimmed)
+        try validateLabelDots(in: trimmed)
+        try validateReverseDNSForm(in: trimmed)
+        return trimmed
+    }
+
+    private static func rejectPathSyntax(in label: String) throws {
+        guard !label.contains("/"), !label.contains("\\"), !label.contains("..") else {
             throw RootstockError.invalidArgument(
                 "label must be reverse-DNS only (no path separators or '..')"
             )
         }
+    }
+
+    private static func validateLabelCharacters(in label: String) throws {
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: ".-"))
-        guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
+        guard label.unicodeScalars.allSatisfy({ allowed.contains($0) }) else {
             throw RootstockError.invalidArgument(
                 "label may only contain letters, digits, '.', and '-'"
             )
         }
-        guard !trimmed.hasPrefix(".") && !trimmed.hasSuffix(".") && !trimmed.contains("..") else {
+    }
+
+    private static func validateLabelDots(in label: String) throws {
+        guard !label.hasPrefix("."), !label.hasSuffix(".") else {
             throw RootstockError.invalidArgument("label has invalid leading/trailing or double dots")
         }
-        // Prefer multi-segment reverse-DNS (at least one dot).
-        guard trimmed.contains(".") else {
+    }
+
+    private static func validateReverseDNSForm(in label: String) throws {
+        guard label.contains(".") else {
             throw RootstockError.invalidArgument(
                 "label must be reverse-DNS form (e.g. com.rootstock.red.lab.test)"
             )
         }
-        return trimmed
     }
 
     private static func sanitizeLabelComponent(_ raw: String) throws -> String {

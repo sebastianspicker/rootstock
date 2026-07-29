@@ -37,48 +37,20 @@ public struct QuarantinePlanLabAction: LabAction {
         HARMLESS=1
         NEVER_STRIP_THIRD_PARTY_QUARANTINE=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run quarantine plan: document com.apple.quarantine assessment steps; optional \
-            marker at \(markerURL.path). Never strip quarantine from third-party apps.
-            """,
-            planSteps: [
-                "Document com.apple.quarantine xattr assessment technique (T1553.001)",
-                "Do not run xattr -d com.apple.quarantine on system or third-party paths",
-                "Optional lab marker only: \(markerURL.path)",
-                Self.techniqueNote,
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path) if planted",
-                "Confirm no third-party app quarantine xattrs were modified",
-            ],
-            applyDryRunMessage: "Dry-run: would write quarantine plan marker at \(markerURL.path)",
-            applySuccessMessage: "Wrote quarantine plan marker at \(markerURL.path) (no xattr mutations)",
-            applySteps: [
-            "Write quarantine technique marker under lab root only",
-            "Refuse all xattr strip / quarantine clear outside lab root",
-        ],
-            applyCleanup: [
-            "Delete \(markerURL.path)",
-            "No system quarantine revert required (never stripped)",
-        ],
-            presentMessage: "Quarantine plan marker present",
-            absentMessage: "Quarantine plan marker absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete quarantine plan marker (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed quarantine plan marker (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No third-party quarantine xattrs were modified by this action"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL)
+            )
         )
+    }
+
+    private static func copy(markerURL: URL) -> FileMarkerCopy {
+        FileMarkerCopy(plan: FileMarkerPlanCopy(message: "Dry-run quarantine plan: document com.apple.quarantine assessment steps; optional marker at \(markerURL.path). Never strip quarantine from third-party apps.", steps: ["Document com.apple.quarantine xattr assessment technique (T1553.001)", "Do not run xattr -d com.apple.quarantine on system or third-party paths", "Optional lab marker only: \(markerURL.path)", Self.techniqueNote], cleanup: ["Delete \(markerURL.path) if planted", "Confirm no third-party app quarantine xattrs were modified"]), apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write quarantine plan marker at \(markerURL.path)", successMessage: "Wrote quarantine plan marker at \(markerURL.path) (no xattr mutations)", steps: ["Write quarantine technique marker under lab root only", "Refuse all xattr strip / quarantine clear outside lab root"], cleanup: ["Delete \(markerURL.path)", "No system quarantine revert required (never stripped)"]), status: FileMarkerStatusCopy(presentMessage: "Quarantine plan marker present", absentMessage: "Quarantine plan marker absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]), remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete quarantine plan marker (exists=\(exists))" }, successMessage: { exists in "Removed quarantine plan marker (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No third-party quarantine xattrs were modified by this action"]))
     }
 
     public static func resolveLabRoot(params: [String: String]) -> URL {

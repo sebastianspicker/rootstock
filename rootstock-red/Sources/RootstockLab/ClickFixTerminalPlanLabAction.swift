@@ -31,38 +31,24 @@ public struct ClickFixTerminalPlanLabAction: LabAction {
         - purple: expect OPEN/EXEC of shell/curl if paste-run observed under ROE
         ROOTSTOCK_RED_LAB_CLICKFIX_TERMINAL=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run ClickFix Terminal plan for focus [\(focus)]: would write plan at \
-            \(markerURL.path). Never builds lures or paste-run payloads.
-            """,
-            planSteps: [
-                "Document paste-run delivery review for: \(focus)",
-                "Note Terminal/Script Editor/loader path presence without lure construction",
-                "Write markdown plan under lab root only",
-                "Purple: expect EXEC of shell/curl if users paste-run under ROE",
-            ],
-            planCleanup: ["Delete \(markerURL.path)"],
-            applyDryRunMessage: "Dry-run: would write ClickFix Terminal plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote ClickFix Terminal plan at \(markerURL.path)",
-            applySteps: ["Write ClickFix Terminal plan"],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "ClickFix Terminal plan present",
-            absentMessage: "ClickFix Terminal plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete ClickFix Terminal plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed ClickFix Terminal plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No paste-run payloads were delivered"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, focus: focus)
+            )
+        )
+    }
+
+    private static func copy(markerURL: URL, focus: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run ClickFix Terminal plan for focus [\(focus)]: would write plan at \(markerURL.path). Never builds lures or paste-run payloads.", steps: ["Document paste-run delivery review for: \(focus)", "Note Terminal/Script Editor/loader path presence without lure construction", "Write markdown plan under lab root only", "Purple: expect EXEC of shell/curl if users paste-run under ROE"], cleanup: ["Delete \(markerURL.path)"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write ClickFix Terminal plan at \(markerURL.path)", successMessage: "Wrote ClickFix Terminal plan at \(markerURL.path)", steps: ["Write ClickFix Terminal plan"], cleanup: ["Delete \(markerURL.path)"]),
+            status: FileMarkerStatusCopy(presentMessage: "ClickFix Terminal plan present", absentMessage: "ClickFix Terminal plan absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete ClickFix Terminal plan (exists=\(exists))" }, successMessage: { exists in "Removed ClickFix Terminal plan (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No paste-run payloads were delivered"])
         )
     }
 

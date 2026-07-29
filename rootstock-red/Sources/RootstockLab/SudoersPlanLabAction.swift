@@ -34,45 +34,20 @@ public struct SudoersPlanLabAction: LabAction {
         # NOT a sudoers fragment - do not copy to /etc/sudoers.d
         ROOTSTOCK_RED_LAB_SUDOERS_PLAN=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run sudoers surface plan: document readable sudoers paths and NOPASSWD audit \
-            steps; optional marker at \(markerURL.path). Never rewrite system sudoers.
-            """,
-            planSteps: [
-                "Inventory /etc/sudoers and /etc/sudoers.d readability (assess vector)",
-                "Do not execute sudo CVE PoCs or visudo writes",
-                "Optional lab marker: \(markerURL.path)",
-                Self.techniqueNote,
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path) if planted",
-                "Confirm /etc/sudoers* unchanged by this action",
-            ],
-            applyDryRunMessage: "Dry-run: would write sudoers plan marker at \(markerURL.path)",
-            applySuccessMessage: "Wrote sudoers plan marker at \(markerURL.path) (not a system sudoers file)",
-            applySteps: [
-            "Write assessment marker under lab root only",
-            "Refuse all writes under /etc/sudoers*",
-        ],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Sudoers plan marker present",
-            absentMessage: "Sudoers plan marker absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete sudoers plan marker (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed sudoers plan marker (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["/etc/sudoers* never modified"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL)
+            )
         )
+    }
+
+    private static func copy(markerURL: URL) -> FileMarkerCopy {
+        FileMarkerCopy(plan: FileMarkerPlanCopy(message: "Dry-run sudoers surface plan: document readable sudoers paths and NOPASSWD audit steps; optional marker at \(markerURL.path). Never rewrite system sudoers.", steps: ["Inventory /etc/sudoers and /etc/sudoers.d readability (assess vector)", "Do not execute sudo CVE PoCs or visudo writes", "Optional lab marker: \(markerURL.path)", Self.techniqueNote], cleanup: ["Delete \(markerURL.path) if planted", "Confirm /etc/sudoers* unchanged by this action"]), apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write sudoers plan marker at \(markerURL.path)", successMessage: "Wrote sudoers plan marker at \(markerURL.path) (not a system sudoers file)", steps: ["Write assessment marker under lab root only", "Refuse all writes under /etc/sudoers*"], cleanup: ["Delete \(markerURL.path)"]), status: FileMarkerStatusCopy(presentMessage: "Sudoers plan marker present", absentMessage: "Sudoers plan marker absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]), remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete sudoers plan marker (exists=\(exists))" }, successMessage: { exists in "Removed sudoers plan marker (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["/etc/sudoers* never modified"]))
     }
 
     public static func resolveLabRoot(params: [String: String]) -> URL {

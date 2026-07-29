@@ -37,52 +37,20 @@ public struct XPCHelperPlanLabAction: LabAction {
         # NOT a privileged helper binary; not loaded by launchd
         ROOTSTOCK_RED_LAB_XPC_MARKER=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run XPC helper surface plan for helper=\(helper): would plant marker at \
-            \(markerURL.path). No system PrivilegedHelperTools writes.
-            """,
-            planSteps: [
-            "Document XPC/helper surface for slug: \(helper)",
-            "Real abuse path would target /Library/PrivilegedHelperTools - OUT OF SCOPE for writes",
-            "Lab marker only: \(markerURL.path)",
-            Self.techniqueNote,
-            "SIP and root ownership normally block user helper installs",
-        ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Confirm /Library/PrivilegedHelperTools was never modified by this action",
-            ],
-            applyDryRunMessage: "Dry-run: would write XPC helper marker for \(helper) at \(markerURL.path)",
-            applySuccessMessage: """
-            Wrote XPC helper surface marker for helper=\(helper) at \(markerURL.path) \
-            (lab marker only; no system helper installed).
-            """,
-            applySteps: [
-            "Write empty technique marker under lab root: \(markerURL.path)",
-            "Do not copy binaries into /Library/PrivilegedHelperTools",
-            "Do not bootstrap launchd jobs for fake helpers",
-        ],
-            applyCleanup: [
-            "Delete \(markerURL.path)",
-            "No system helper reverse-install required",
-        ],
-            presentMessage: "XPC helper marker present for \(helper) at \(markerURL.path)",
-            absentMessage: "XPC helper marker absent for \(helper) at \(markerURL.path)",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No marker artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete XPC marker for \(helper) (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed XPC helper marker for \(helper) (wasPresent=\(exists))" },
-            removeCleanup: ["Confirm /Library/PrivilegedHelperTools untouched"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, helper: helper)
+            )
         )
+    }
+
+    private static func copy(markerURL: URL, helper: String) -> FileMarkerCopy {
+        FileMarkerCopy(plan: FileMarkerPlanCopy(message: "Dry-run XPC helper surface plan for helper=\(helper): would plant marker at \(markerURL.path). No system PrivilegedHelperTools writes.", steps: ["Document XPC/helper surface for slug: \(helper)", "Real abuse path would target /Library/PrivilegedHelperTools - OUT OF SCOPE for writes", "Lab marker only: \(markerURL.path)", Self.techniqueNote, "SIP and root ownership normally block user helper installs"], cleanup: ["Delete \(markerURL.path)", "Confirm /Library/PrivilegedHelperTools was never modified by this action"]), apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write XPC helper marker for \(helper) at \(markerURL.path)", successMessage: "Wrote XPC helper surface marker for helper=\(helper) at \(markerURL.path) (lab marker only; no system helper installed).", steps: ["Write empty technique marker under lab root: \(markerURL.path)", "Do not copy binaries into /Library/PrivilegedHelperTools", "Do not bootstrap launchd jobs for fake helpers"], cleanup: ["Delete \(markerURL.path)", "No system helper reverse-install required"]), status: FileMarkerStatusCopy(presentMessage: "XPC helper marker present for \(helper) at \(markerURL.path)", absentMessage: "XPC helper marker absent for \(helper) at \(markerURL.path)", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No marker artifact"]), remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete XPC marker for \(helper) (exists=\(exists))" }, successMessage: { exists in "Removed XPC helper marker for \(helper) (wasPresent=\(exists))" }, cleanup: ["Confirm /Library/PrivilegedHelperTools untouched"]))
     }
 
     public static func resolveLabRoot(params: [String: String]) -> URL {

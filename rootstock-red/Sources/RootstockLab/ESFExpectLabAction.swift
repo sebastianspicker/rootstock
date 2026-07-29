@@ -36,44 +36,24 @@ public struct ESFExpectLabAction: LabAction {
           "harmless": true
         }
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run ESF expect plan: would write detection-pair stub for \(technique) \
-            expecting [\(events)] at \(markerURL.path).
-            """,
-            planSteps: [
-                "Technique tag: \(technique)",
-                "Expected ESF-style events: \(events)",
-                "Write purple stub JSON: \(markerURL.path)",
-                "No process spawn; pair with local ESF/osquery rules offline",
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Disable temporary detection rules if they keyed only on this lab path",
-            ],
-            applyDryRunMessage: "Dry-run: would write ESF expect stub at \(markerURL.path)",
-            applySuccessMessage: "Wrote ESF expectation stub at \(markerURL.path) (technique=\(technique))",
-            applySteps: [
-            "Create purple-esf directory",
-            "Write ESF expectation JSON for \(technique)",
-        ],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "ESF expect stub present",
-            absentMessage: "ESF expect stub absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete ESF expect stub (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed ESF expect stub (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No host ESF consumer modified"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, technique: technique, events: events)
+            )
+        )
+    }
+
+    private static func copy(markerURL: URL, technique: String, events: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run ESF expect plan: would write detection-pair stub for \(technique) expecting [\(events)] at \(markerURL.path).", steps: ["Technique tag: \(technique)", "Expected ESF-style events: \(events)", "Write purple stub JSON: \(markerURL.path)", "No process spawn; pair with local ESF/osquery rules offline"], cleanup: ["Delete \(markerURL.path)", "Disable temporary detection rules if they keyed only on this lab path"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write ESF expect stub at \(markerURL.path)", successMessage: "Wrote ESF expectation stub at \(markerURL.path) (technique=\(technique))", steps: ["Create purple-esf directory", "Write ESF expectation JSON for \(technique)"], cleanup: ["Delete \(markerURL.path)"]),
+            status: FileMarkerStatusCopy(presentMessage: "ESF expect stub present", absentMessage: "ESF expect stub absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete ESF expect stub (exists=\(exists))" }, successMessage: { exists in "Removed ESF expect stub (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No host ESF consumer modified"])
         )
     }
 

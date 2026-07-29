@@ -23,7 +23,20 @@ public struct AppSandboxPlanLabAction: LabAction {
         let markerURL = labRoot
             .appendingPathComponent("app-sandbox-plan", isDirectory: true)
             .appendingPathComponent("sandbox-plan.md")
-        let body = """
+        return try LabMarkerLifecycle.runFileMarker(
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: Self.markerBody(focus: focus),
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, focus: focus)
+            )
+        )
+    }
+
+    private static func markerBody(focus: String) -> String {
+        """
         # rootstock-red-lab app-sandbox plan
         focus: \(focus)
         purpose: thick-client entitlement/sandbox posture documentation
@@ -34,41 +47,14 @@ public struct AppSandboxPlanLabAction: LabAction {
         - purple: expect OPEN of sampled .app bundles if codesign used under separate ROE
         ROOTSTOCK_RED_LAB_APP_SANDBOX=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run app-sandbox plan for focus [\(focus)]: would write plan at \
-            \(markerURL.path). Never strips entitlements or injects processes.
-            """,
-            planSteps: [
-                "Document entitlement/sandbox review for: \(focus)",
-                "Note thick-client samples without mutating entitlements",
-                "Write markdown plan under lab root only",
-                "Purple: expect OPEN of app bundle paths if codesign inspected under ROE",
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Confirm no entitlement or codesign mutations",
-            ],
-            applyDryRunMessage: "Dry-run: would write app-sandbox plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote app-sandbox plan at \(markerURL.path)",
-            applySteps: ["Write app-sandbox plan"],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "App-sandbox plan present",
-            absentMessage: "App-sandbox plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete app-sandbox plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed app-sandbox plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No entitlements were modified"]
-        )
-        return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+    }
+
+    private static func copy(markerURL: URL, focus: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run app-sandbox plan for focus [\(focus)]: would write plan at \(markerURL.path). Never strips entitlements or injects processes.", steps: ["Document entitlement/sandbox review for: \(focus)", "Note thick-client samples without mutating entitlements", "Write markdown plan under lab root only", "Purple: expect OPEN of app bundle paths if codesign inspected under ROE"], cleanup: ["Delete \(markerURL.path)", "Confirm no entitlement or codesign mutations"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write app-sandbox plan at \(markerURL.path)", successMessage: "Wrote app-sandbox plan at \(markerURL.path)", steps: ["Write app-sandbox plan"], cleanup: ["Delete \(markerURL.path)"]),
+            status: FileMarkerStatusCopy(presentMessage: "App-sandbox plan present", absentMessage: "App-sandbox plan absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete app-sandbox plan (exists=\(exists))" }, successMessage: { exists in "Removed app-sandbox plan (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No entitlements were modified"])
         )
     }
 

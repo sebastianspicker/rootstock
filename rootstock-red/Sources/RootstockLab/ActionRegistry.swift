@@ -16,7 +16,11 @@ public struct ActionRegistry: Sendable {
 
     /// Complete lab registry with consent checks and dry-run defaults.
     public static func production() -> ActionRegistry {
-        ActionRegistry(actions: [
+        ActionRegistry(actions: foundationalActions + waveFiveToNineActions + waveElevenToSixteenActions)
+    }
+
+    private static var foundationalActions: [any Action] {
+        [
             NoopLabAction(),
             LaunchAgentLabAction(),
             DylibSurfaceLabAction(),
@@ -38,6 +42,11 @@ public struct ActionRegistry: Sendable {
             PatchDebtPlanLabAction(),
             LaunchConstraintPlanLabAction(),
             LOLMultistagePlanLabAction(),
+        ]
+    }
+
+    private static var waveFiveToNineActions: [any Action] {
+        [
             // Wave-6 2026 coverage lab surface
             NetworkExtensionPlanLabAction(),
             AuthRightsPlanLabAction(),
@@ -50,6 +59,11 @@ public struct ActionRegistry: Sendable {
             VirtualizationPlanLabAction(),
             ContinuityAirDropPlanLabAction(),
             FileVaultEscrowPlanLabAction(),
+        ]
+    }
+
+    private static var waveElevenToSixteenActions: [any Action] {
+        [
             // Wave-8 2026 coverage lab surface
             ClickFixTerminalPlanLabAction(),
             RemoteAppleEventsPlanLabAction(),
@@ -129,7 +143,7 @@ public struct ActionRegistry: Sendable {
             ShortcutsIcloudSyncPlanLabAction(),
             DevicemanagementProfilePlanLabAction(),
             SoftwareupdateCatalogPlanLabAction(),
-        ])
+        ]
     }
 
     public func action(id: String) -> (any Action)? {

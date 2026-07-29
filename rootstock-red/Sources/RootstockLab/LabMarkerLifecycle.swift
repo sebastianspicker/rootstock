@@ -56,53 +56,39 @@ public enum LabMarkerLifecycle: Sendable {
 
     /// Install / apply a file marker, honoring dry-run.
     public static func apply(
-        actionId: String,
-        markerURL: URL,
-        body: String,
-        dryRun: Bool,
-        dryRunMessage: String,
-        successMessage: String,
-        plannedSteps: [String],
-        cleanupNotes: [String]
+        input: FileMarkerApplyInput,
+        copy: FileMarkerApplyCopy
     ) throws -> ActionResult {
-        if dryRun {
+        if input.dryRun {
             return ActionResult(
-                actionId: actionId,
+                actionId: input.actionId,
                 success: true,
-                message: dryRunMessage,
+                message: copy.dryRunMessage,
                 dryRun: true,
-                plannedSteps: plannedSteps,
-                cleanupNotes: cleanupNotes,
-                artifacts: [markerURL.path]
+                plannedSteps: copy.steps, cleanupNotes: copy.cleanup,
+                artifacts: [input.markerURL.path]
             )
         }
-        try writeMarker(at: markerURL, body: body)
+        try writeMarker(at: input.markerURL, body: input.body)
         return ActionResult(
-            actionId: actionId,
+            actionId: input.actionId,
             success: true,
-            message: successMessage,
+            message: copy.successMessage,
             dryRun: false,
-            plannedSteps: plannedSteps,
-            cleanupNotes: cleanupNotes,
-            artifacts: [markerURL.path]
+            plannedSteps: copy.steps, cleanupNotes: copy.cleanup,
+            artifacts: [input.markerURL.path]
         )
     }
 
     /// Status check for a single marker file.
     public static func status(
-        actionId: String,
-        markerURL: URL,
-        presentMessage: String,
-        absentMessage: String,
-        plannedSteps: [String]? = nil,
-        presentCleanup: [String]? = nil,
-        absentCleanup: [String]? = nil
+        actionId: String, markerURL: URL, presentMessage: String, absentMessage: String,
+        plannedSteps: [String]? = nil, presentCleanup: [String]? = nil, absentCleanup: [String]? = nil
     ) -> ActionResult {
         let exists = markerExists(at: markerURL)
         let steps = plannedSteps ?? ["exists=\(exists)"]
         let cleanup = exists
-            ? (presentCleanup ?? ["Delete \(markerURL.path)"])
-            : (absentCleanup ?? ["No artifact"])
+            ? (presentCleanup ?? ["Delete \(markerURL.path)"]) : (absentCleanup ?? ["No artifact"])
         return ActionResult(
             actionId: actionId,
             success: true,
@@ -116,148 +102,189 @@ public enum LabMarkerLifecycle: Sendable {
 
     /// Remove a marker file, honoring dry-run.
     public static func remove(
-        actionId: String,
-        markerURL: URL,
-        dryRun: Bool,
-        dryRunMessage: String,
-        successMessage: String,
-        plannedSteps: [String]? = nil,
-        cleanupNotes: [String]
+        input: FileMarkerRemoveInput,
+        copy: FileMarkerRemoveCopy
     ) throws -> ActionResult {
-        let exists = markerExists(at: markerURL)
-        let steps = plannedSteps ?? ["Delete \(markerURL.path)"]
-        if dryRun {
+        let exists = markerExists(at: input.markerURL)
+        let steps = copy.steps ?? ["Delete \(input.markerURL.path)"]
+        if input.dryRun {
             return ActionResult(
-                actionId: actionId,
+                actionId: input.actionId,
                 success: true,
-                message: dryRunMessage,
+                message: copy.dryRunMessage(exists),
                 dryRun: true,
                 plannedSteps: steps,
-                cleanupNotes: cleanupNotes,
-                artifacts: exists ? [markerURL.path] : []
+                cleanupNotes: copy.cleanup,
+                artifacts: exists ? [input.markerURL.path] : []
             )
         }
         if exists {
-            try FileManager.default.removeItem(at: markerURL)
+            try FileManager.default.removeItem(at: input.markerURL)
         }
         return ActionResult(
-            actionId: actionId,
+            actionId: input.actionId,
             success: true,
-            message: successMessage,
+            message: copy.successMessage(exists),
             dryRun: false,
             plannedSteps: steps,
-            cleanupNotes: cleanupNotes,
-            artifacts: exists ? [markerURL.path] : []
+            cleanupNotes: copy.cleanup,
+            artifacts: exists ? [input.markerURL.path] : []
         )
     }
 
     /// Dispatch a full plan/install/status/remove lifecycle for a single file marker.
     public static func runFileMarker(
-        actionId: String,
-        operation: LabOperation,
-        markerURL: URL,
-        body: String,
-        contextDryRun: Bool,
-        copy: FileMarkerCopy
+        _ request: FileMarkerLifecycleRequest
     ) throws -> ActionResult {
-        switch operation {
+        switch request.operation {
         case .plan:
-            return plan(
-                actionId: actionId,
-                markerURL: markerURL,
-                message: copy.planMessage,
-                plannedSteps: copy.planSteps,
-                cleanupNotes: copy.planCleanup,
-                dryRun: true
-            )
+            return runFileMarkerPlan(actionId: request.actionId, markerURL: request.markerURL, copy: request.copy.plan)
         case .install:
-            return try apply(
-                actionId: actionId,
-                markerURL: markerURL,
-                body: body,
-                dryRun: contextDryRun,
-                dryRunMessage: copy.applyDryRunMessage,
-                successMessage: copy.applySuccessMessage,
-                plannedSteps: copy.applySteps,
-                cleanupNotes: copy.applyCleanup
-            )
+            return try runFileMarkerApply(actionId: request.actionId, markerURL: request.markerURL, body: request.body, contextDryRun: request.contextDryRun, copy: request.copy.apply)
         case .status:
-            return status(
-                actionId: actionId,
-                markerURL: markerURL,
-                presentMessage: copy.presentMessage,
-                absentMessage: copy.absentMessage,
-                plannedSteps: copy.statusSteps,
-                presentCleanup: copy.statusPresentCleanup,
-                absentCleanup: copy.statusAbsentCleanup
-            )
+            return runFileMarkerStatus(actionId: request.actionId, markerURL: request.markerURL, copy: request.copy.status)
         case .remove:
-            let exists = markerExists(at: markerURL)
-            return try remove(
-                actionId: actionId,
-                markerURL: markerURL,
-                dryRun: contextDryRun,
-                dryRunMessage: copy.removeDryRunMessage(exists),
-                successMessage: copy.removeSuccessMessage(exists),
-                plannedSteps: copy.removeSteps,
-                cleanupNotes: copy.removeCleanup
-            )
+            return try runFileMarkerRemove(actionId: request.actionId, markerURL: request.markerURL, contextDryRun: request.contextDryRun, copy: request.copy.remove)
         }
+    }
+
+    private static func runFileMarkerPlan(actionId: String, markerURL: URL, copy: FileMarkerPlanCopy) -> ActionResult {
+        plan(actionId: actionId, markerURL: markerURL, message: copy.message, plannedSteps: copy.steps, cleanupNotes: copy.cleanup, dryRun: true)
+    }
+
+    private static func runFileMarkerApply(actionId: String, markerURL: URL, body: String, contextDryRun: Bool, copy: FileMarkerApplyCopy) throws -> ActionResult {
+        try apply(input: FileMarkerApplyInput(actionId: actionId, markerURL: markerURL, body: body, dryRun: contextDryRun), copy: copy)
+    }
+
+    private static func runFileMarkerStatus(actionId: String, markerURL: URL, copy: FileMarkerStatusCopy) -> ActionResult {
+        status(actionId: actionId, markerURL: markerURL, presentMessage: copy.presentMessage, absentMessage: copy.absentMessage, plannedSteps: copy.steps, presentCleanup: copy.presentCleanup, absentCleanup: copy.absentCleanup)
+    }
+
+    private static func runFileMarkerRemove(actionId: String, markerURL: URL, contextDryRun: Bool, copy: FileMarkerRemoveCopy) throws -> ActionResult {
+        try remove(input: FileMarkerRemoveInput(actionId: actionId, markerURL: markerURL, dryRun: contextDryRun), copy: copy)
     }
 }
 
+/// Fixed-contract documentation plan used by simple reversible lab marker actions.
+public struct DocumentationPlanSpec: Sendable {
+    public let focusDefault: String
+    public let directory: String
+    public let filename: String
+    public let title: String
+    public let purpose: String
+    public let rules: [String]
+    public let markerFlag: String
+    public let reviewNoun: String
+    public let prohibition: String
+
+}
+
+public enum DocumentationPlanExecutor {
+    public static func run(actionId: String, consent: ConsentPolicy, spec: DocumentationPlanSpec, request: LabActionRequest, context: EvaluationContext) throws -> ActionResult {
+        try SafetyRails.ensureLabConsent(context: context, policy: consent)
+        let labRoot = LabPaths.resolveLabRoot(params: request.parameters)
+        let focus = request.parameters["focus"] ?? spec.focusDefault
+        let markerURL = labRoot.appendingPathComponent(spec.directory, isDirectory: true).appendingPathComponent(spec.filename)
+        let body = (["# rootstock-red-lab \(spec.title)", "focus: \(focus)", "purpose: \(spec.purpose)", "rules:"] + spec.rules.map { "- \($0)" } + [spec.markerFlag]).joined(separator: "\n")
+        let copy = FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run \(spec.title) for focus [\(focus)]: would write plan at \(markerURL.path). \(spec.prohibition)", steps: ["Document \(spec.reviewNoun) review for: \(focus)", "Note path/meta inventory without host mutation beyond lab root", "Write markdown plan under lab root only", "Purple: validate expected telemetry under ROE only"], cleanup: ["Delete \(markerURL.path)"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write \(spec.title) at \(markerURL.path)", successMessage: "Wrote \(spec.title) at \(markerURL.path)", steps: ["Write \(spec.title)"], cleanup: ["Delete \(markerURL.path)"]),
+            status: FileMarkerStatusCopy(presentMessage: "\(spec.title) present", absentMessage: "\(spec.title) absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete \(spec.title) (exists=\(exists))" }, successMessage: { exists in "Removed \(spec.title) (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No system mutations expected"])
+        )
+        return try LabMarkerLifecycle.runFileMarker(
+            FileMarkerLifecycleRequest(
+                actionId: actionId,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: copy
+            )
+        )
+    }
+}
+
+
 /// Technique-specific strings for a single file-marker lab action.
 public struct FileMarkerCopy: Sendable {
-    public var planMessage: String
-    public var planSteps: [String]
-    public var planCleanup: [String]
-    public var applyDryRunMessage: String
-    public var applySuccessMessage: String
-    public var applySteps: [String]
-    public var applyCleanup: [String]
-    public var presentMessage: String
-    public var absentMessage: String
-    public var statusSteps: [String]?
-    public var statusPresentCleanup: [String]?
-    public var statusAbsentCleanup: [String]?
-    public var removeDryRunMessage: @Sendable (Bool) -> String
-    public var removeSuccessMessage: @Sendable (Bool) -> String
-    public var removeSteps: [String]?
-    public var removeCleanup: [String]
+    public let plan: FileMarkerPlanCopy
+    public let apply: FileMarkerApplyCopy
+    public let status: FileMarkerStatusCopy
+    public let remove: FileMarkerRemoveCopy
 
     public init(
-        planMessage: String,
-        planSteps: [String],
-        planCleanup: [String],
-        applyDryRunMessage: String,
-        applySuccessMessage: String,
-        applySteps: [String],
-        applyCleanup: [String],
-        presentMessage: String,
-        absentMessage: String,
-        statusSteps: [String]? = nil,
-        statusPresentCleanup: [String]? = nil,
-        statusAbsentCleanup: [String]? = nil,
-        removeDryRunMessage: @escaping @Sendable (Bool) -> String,
-        removeSuccessMessage: @escaping @Sendable (Bool) -> String,
-        removeSteps: [String]? = nil,
-        removeCleanup: [String]
+        plan: FileMarkerPlanCopy,
+        apply: FileMarkerApplyCopy,
+        status: FileMarkerStatusCopy,
+        remove: FileMarkerRemoveCopy
     ) {
-        self.planMessage = planMessage
-        self.planSteps = planSteps
-        self.planCleanup = planCleanup
-        self.applyDryRunMessage = applyDryRunMessage
-        self.applySuccessMessage = applySuccessMessage
-        self.applySteps = applySteps
-        self.applyCleanup = applyCleanup
-        self.presentMessage = presentMessage
-        self.absentMessage = absentMessage
-        self.statusSteps = statusSteps
-        self.statusPresentCleanup = statusPresentCleanup
-        self.statusAbsentCleanup = statusAbsentCleanup
-        self.removeDryRunMessage = removeDryRunMessage
-        self.removeSuccessMessage = removeSuccessMessage
-        self.removeSteps = removeSteps
-        self.removeCleanup = removeCleanup
+        self.plan = plan
+        self.apply = apply
+        self.status = status
+        self.remove = remove
+    }
+
+}
+
+public struct FileMarkerApplyInput: Sendable {
+    public let actionId: String
+    public let markerURL: URL
+    public let body: String
+    public let dryRun: Bool
+}
+
+public struct FileMarkerRemoveInput: Sendable {
+    public let actionId: String
+    public let markerURL: URL
+    public let dryRun: Bool
+}
+
+public struct FileMarkerLifecycleRequest: Sendable {
+    public let actionId: String
+    public let operation: LabOperation
+    public let markerURL: URL
+    public let body: String
+    public let contextDryRun: Bool
+    public let copy: FileMarkerCopy
+}
+
+public struct FileMarkerPlanCopy: Sendable {
+    public let message: String
+    public let steps: [String]
+    public let cleanup: [String]
+    public init(message: String, steps: [String], cleanup: [String]) {
+        self.message = message; self.steps = steps; self.cleanup = cleanup
+    }
+}
+
+public struct FileMarkerApplyCopy: Sendable {
+    public let dryRunMessage: String
+    public let successMessage: String
+    public let steps: [String]
+    public let cleanup: [String]
+    public init(dryRunMessage: String, successMessage: String, steps: [String], cleanup: [String]) {
+        self.dryRunMessage = dryRunMessage; self.successMessage = successMessage; self.steps = steps; self.cleanup = cleanup
+    }
+}
+
+public struct FileMarkerStatusCopy: Sendable {
+    public let presentMessage: String
+    public let absentMessage: String
+    public let steps: [String]?
+    public let presentCleanup: [String]?
+    public let absentCleanup: [String]?
+    public init(presentMessage: String, absentMessage: String, steps: [String]? = nil, presentCleanup: [String]? = nil, absentCleanup: [String]? = nil) {
+        self.presentMessage = presentMessage; self.absentMessage = absentMessage; self.steps = steps; self.presentCleanup = presentCleanup; self.absentCleanup = absentCleanup
+    }
+}
+
+public struct FileMarkerRemoveCopy: Sendable {
+    public let dryRunMessage: @Sendable (Bool) -> String
+    public let successMessage: @Sendable (Bool) -> String
+    public let steps: [String]?
+    public let cleanup: [String]
+    public init(dryRunMessage: @escaping @Sendable (Bool) -> String, successMessage: @escaping @Sendable (Bool) -> String, steps: [String]? = nil, cleanup: [String]) {
+        self.dryRunMessage = dryRunMessage; self.successMessage = successMessage; self.steps = steps; self.cleanup = cleanup
     }
 }

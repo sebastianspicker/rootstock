@@ -128,17 +128,20 @@ public struct CronMarkerLabAction: LabAction {
     }
 
     private func remove(markerURL: URL, dryRun: Bool) throws -> ActionResult {
-        let exists = LabMarkerLifecycle.markerExists(at: markerURL)
         return try LabMarkerLifecycle.remove(
-            actionId: Self.id,
-            markerURL: markerURL,
-            dryRun: dryRun,
-            dryRunMessage: "Dry-run: would delete cron marker at \(markerURL.path) (exists=\(exists))",
-            successMessage: "Removed cron technique marker at \(markerURL.path) (wasPresent=\(exists))",
-            plannedSteps: ["Delete marker if present: \(markerURL.path)"],
-            cleanupNotes: dryRun
-                ? ["Confirm no leftover markers under lab root"]
-                : ["Confirm crontab -l unchanged by this lab action"]
+            input: FileMarkerRemoveInput(
+                actionId: Self.id,
+                markerURL: markerURL,
+                dryRun: dryRun
+            ),
+            copy: FileMarkerRemoveCopy(
+                dryRunMessage: { exists in "Dry-run: would delete cron marker at \(markerURL.path) (exists=\(exists))" },
+                successMessage: { exists in "Removed cron technique marker at \(markerURL.path) (wasPresent=\(exists))" },
+                steps: ["Delete marker if present: \(markerURL.path)"],
+                cleanup: dryRun
+                    ? ["Confirm no leftover markers under lab root"]
+                    : ["Confirm crontab -l unchanged by this lab action"]
+            )
         )
     }
 

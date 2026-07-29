@@ -23,12 +23,18 @@ public struct KeychainPathPlanLabAction: LabAction {
         request: LabActionRequest,
         context: EvaluationContext
     ) async throws -> ActionResult {
-
         try SafetyRails.ensureLabConsent(context: context, policy: Self.consent)
-        let labRoot = LabPaths.resolveLabRoot(params: request.parameters)
-        let markerURL = labRoot
+        let markerURL = LabPaths.resolveLabRoot(params: request.parameters)
             .appendingPathComponent("keychain-path-plan", isDirectory: true)
             .appendingPathComponent("assessment.marker")
+        return try execute(request: request, context: context, markerURL: markerURL)
+    }
+
+    private func execute(
+        request: LabActionRequest,
+        context: EvaluationContext,
+        markerURL: URL
+    ) throws -> ActionResult {
         let body = """
         # rootstock-red-lab keychain path plan marker
         # PATH ASSESSMENT ONLY - not a dump-keychain artifact
@@ -36,44 +42,57 @@ public struct KeychainPathPlanLabAction: LabAction {
         NEVER_DUMP_KEYCHAIN=1
         HARMLESS=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
+        return try LabMarkerLifecycle.runFileMarker(
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: markerCopy(markerURL: markerURL)
+            )
+        )
+    }
+
+    private func markerCopy(markerURL: URL) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(
+                message: """
             Dry-run keychain path plan: document path-existence assessment only; optional marker \
             at \(markerURL.path). Never dump-keychain or export items.
             """,
-            planSteps: [
+                steps: [
                 "Inventory common keychain paths (existence / metadata only)",
                 "Do not run security dump-keychain, find-generic-password, or item export",
                 "Optional lab marker: \(markerURL.path)",
                 Self.techniqueNote,
             ],
-            planCleanup: [
+                cleanup: [
                 "Delete \(markerURL.path) if planted",
                 "Confirm no keychain DB files were read for secrets",
-            ],
-            applyDryRunMessage: "Dry-run: would write keychain path plan marker at \(markerURL.path)",
-            applySuccessMessage: "Wrote keychain path plan marker at \(markerURL.path) (no keychain dump)",
-            applySteps: [
+            ]
+            ),
+            apply: FileMarkerApplyCopy(
+                dryRunMessage: "Dry-run: would write keychain path plan marker at \(markerURL.path)",
+                successMessage: "Wrote keychain path plan marker at \(markerURL.path) (no keychain dump)",
+                steps: [
             "Write keychain path-assessment marker under lab root only",
             "Refuse dump-keychain / secret extraction",
         ],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Keychain path plan marker present",
-            absentMessage: "Keychain path plan marker absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete keychain path plan marker (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed keychain path plan marker (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["Keychain DBs never dumped by this action"]
-        )
-        return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+                cleanup: ["Delete \(markerURL.path)"]
+            ),
+            status: FileMarkerStatusCopy(
+                presentMessage: "Keychain path plan marker present",
+                absentMessage: "Keychain path plan marker absent",
+                presentCleanup: ["Delete \(markerURL.path)"],
+                absentCleanup: ["No artifact"]
+            ),
+            remove: FileMarkerRemoveCopy(
+                dryRunMessage: { exists in "Dry-run: would delete keychain path plan marker (exists=\(exists))" },
+                successMessage: { exists in "Removed keychain path plan marker (wasPresent=\(exists))" },
+                steps: ["Delete \(markerURL.path)"],
+                cleanup: ["Keychain DBs never dumped by this action"]
+            )
         )
     }
 

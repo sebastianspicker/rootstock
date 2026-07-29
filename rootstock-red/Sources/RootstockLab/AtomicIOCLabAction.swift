@@ -41,47 +41,24 @@ public struct AtomicIOCLabAction: LabAction {
           "createdBy": "rootstock-red-lab"
         }
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run atomic IOC plan: would plant detection marker at \(markerURL.path) \
-            tagged \(technique).
-            """,
-            planSteps: [
-            "Purple IOC path: \(markerURL.path)",
-            "Document ATT&CK technique tag: \(technique)",
-            Self.esfExpectNote,
-            "Write JSON marker only - no process spawn, no network",
-        ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Confirm SOC/test rules cleaned if they keyed on this path",
-            ],
-            applyDryRunMessage: "Dry-run: would write atomic IOC at \(markerURL.path)",
-            applySuccessMessage: "Planted purple-team atomic IOC at \(markerURL.path) (technique=\(technique))",
-            applySteps: [
-            "Create purple-ioc directory",
-            "Write intentional IOC JSON for technique \(technique)",
-            "Do not execute payloads or open sockets",
-        ],
-            applyCleanup: [
-            "Delete \(markerURL.path)",
-            Self.esfExpectNote,
-        ],
-            presentMessage: "Atomic IOC present at \(markerURL.path)",
-            absentMessage: "Atomic IOC absent at \(markerURL.path)",
-            statusPresentCleanup: ["Delete \(markerURL.path) after detection validation"],
-            statusAbsentCleanup: ["No IOC artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete atomic IOC (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed atomic IOC (wasPresent=\(exists))" },
-            removeCleanup: ["Confirm detection rules not left in noisy state"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, technique: technique)
+            )
+        )
+    }
+
+    private static func copy(markerURL: URL, technique: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run atomic IOC plan: would plant detection marker at \(markerURL.path) tagged \(technique).", steps: ["Purple IOC path: \(markerURL.path)", "Document ATT&CK technique tag: \(technique)", Self.esfExpectNote, "Write JSON marker only - no process spawn, no network"], cleanup: ["Delete \(markerURL.path)", "Confirm SOC/test rules cleaned if they keyed on this path"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write atomic IOC at \(markerURL.path)", successMessage: "Planted purple-team atomic IOC at \(markerURL.path) (technique=\(technique))", steps: ["Create purple-ioc directory", "Write intentional IOC JSON for technique \(technique)", "Do not execute payloads or open sockets"], cleanup: ["Delete \(markerURL.path)", Self.esfExpectNote]),
+            status: FileMarkerStatusCopy(presentMessage: "Atomic IOC present at \(markerURL.path)", absentMessage: "Atomic IOC absent at \(markerURL.path)", presentCleanup: ["Delete \(markerURL.path) after detection validation"], absentCleanup: ["No IOC artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete atomic IOC (exists=\(exists))" }, successMessage: { exists in "Removed atomic IOC (wasPresent=\(exists))" }, cleanup: ["Confirm detection rules not left in noisy state"])
         )
     }
 

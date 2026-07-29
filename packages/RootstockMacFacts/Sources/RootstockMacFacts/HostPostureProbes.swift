@@ -73,22 +73,24 @@ public enum HostPostureProbes: Sendable {
     /// Parse `fdesetup status` output (incl. deferred enablement).
     public static func parseFileVaultOutput(_ output: String) -> Bool? {
         let lower = output.lowercased()
-        if lower.contains("filevault is on") || lower.hasPrefix("filevault is on") {
+        let enabledMarkers = [
+            "filevault is on",
+            "deferred enablement appears to be active"
+        ]
+        if enabledMarkers.contains(where: lower.contains) {
             return true
         }
-        if lower.contains("deferred enablement appears to be active") {
-            return true
-        }
-        if lower.contains("filevault is off") || lower.contains("filevault is disabled") {
+        let disabledMarkers = ["filevault is off", "filevault is disabled"]
+        if disabledMarkers.contains(where: lower.contains) {
             return false
         }
-        // Looser fallback used by some IR paths
-        if lower.contains("filevault") && lower.contains(" on") {
-            return true
-        }
-        if lower.contains("filevault") && lower.contains(" off") {
-            return false
-        }
+        return parseFileVaultState(lower)
+    }
+
+    private static func parseFileVaultState(_ output: String) -> Bool? {
+        guard output.contains("filevault") else { return nil }
+        if output.contains(" on") { return true }
+        if output.contains(" off") { return false }
         return nil
     }
 

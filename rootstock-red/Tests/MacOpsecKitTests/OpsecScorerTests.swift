@@ -55,67 +55,37 @@ final class OpsecScorerTests: XCTestCase {
     }
 
     func testAnnotateFillsESFFromCategoryAndAlwaysScores() {
-        var host = Finding(
-            id: "h",
-            title: "host",
-            severity: .info,
-            category: .host
-        )
+        var host = Finding(id: "h", title: "host", severity: .info, category: .host)
         host = OpsecScorer().annotate(host)
         XCTAssertEqual(host.esfExpected, [])
         XCTAssertNotNil(host.opsecScore)
         XCTAssertEqual(host.opsecScore, 0)
         XCTAssertTrue(host.evidence.contains { $0.type == "opsec" })
 
-        var persist = Finding(
-            id: "p",
-            title: "persist",
-            severity: .medium,
-            category: .persist,
-            evidence: [Evidence(type: "path", path: "/Users/a/Library/LaunchAgents/x.plist", detail: "x")]
-        )
+        var persist = Finding(id: "p", title: "persist", severity: .medium, category: .persist, resolution: .init(evidence: [Evidence(type: "path", path: "/Users/a/Library/LaunchAgents/x.plist", detail: "x")]))
         persist = OpsecScorer().annotate(persist)
         XCTAssertEqual(persist.esfExpected, ["OPEN", "WRITE"])
         XCTAssertNotNil(persist.opsecScore)
         XCTAssertGreaterThan(persist.opsecScore ?? 0, host.opsecScore ?? 0)
 
-        var tcc = Finding(
-            id: "t",
-            title: "tcc",
-            severity: .info,
-            category: .tcc,
-            evidence: [
+        var tcc = Finding(id: "t", title: "tcc", severity: .info, category: .tcc, resolution: .init(evidence: [
                 Evidence(
                     type: "path",
                     path: "/Library/Application Support/com.apple.TCC/TCC.db",
                     detail: "tcc"
                 ),
-            ],
-            tccDomains: ["FullDiskAccess"]
-        )
+            ]), runtime: .init(tccDomains: ["FullDiskAccess"]))
         tcc = OpsecScorer().annotate(tcc)
         XCTAssertEqual(tcc.esfExpected, ["OPEN"])
         XCTAssertGreaterThan(tcc.opsecScore ?? 0, 0)
 
-        var auth = Finding(
-            id: "a",
-            title: "auth",
-            severity: .low,
-            category: .auth
-        )
+        var auth = Finding(id: "a", title: "auth", severity: .low, category: .auth)
         auth = OpsecScorer().annotate(auth)
         XCTAssertEqual(auth.esfExpected, ["OPEN"])
     }
 
     func testAnnotatePreservesExplicitESF() {
-        var finding = Finding(
-            id: "t",
-            title: "t",
-            severity: .info,
-            category: .tcc,
-            tccDomains: ["Accessibility"],
-            esfExpected: ["USER_PROMPT"]
-        )
+        var finding = Finding(id: "t", title: "t", severity: .info, category: .tcc, runtime: .init(tccDomains: ["Accessibility"], esfExpected: ["USER_PROMPT"]))
         finding = OpsecScorer().annotate(finding)
         XCTAssertEqual(finding.esfExpected, ["USER_PROMPT"])
         XCTAssertNotNil(finding.opsecScore)

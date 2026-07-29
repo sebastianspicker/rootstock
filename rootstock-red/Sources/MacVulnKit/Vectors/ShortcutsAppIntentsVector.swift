@@ -12,18 +12,30 @@ public struct ShortcutsAppIntentsVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard hasSurface(state), hasInventory(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
+        let sa = state.shortcutsAppIntents
+        let shortcuts = sa?.shortcutsAppPaths.count ?? 0
+        let intents = sa?.appIntentsPaths.count ?? 0
+        let surface = sa?.automationSurfacePresent == true || shortcuts + intents >= 1
+        let note = state.collectorNotes["collect.shortcuts_app_intents"] != nil
+        return surface || note
+    }
+
+    private func hasInventory(_ state: CollectedState) -> Bool {
+        let sa = state.shortcutsAppIntents
+        return (sa?.shortcutsAppPaths.count ?? 0) >= 1 || (sa?.appIntentsPaths.count ?? 0) >= 1
+    }
+
+    private func evidence(for state: CollectedState) -> [Evidence] {
         let sa = state.shortcutsAppIntents
         let shortcuts = sa?.shortcutsAppPaths.count ?? 0
         let intents = sa?.appIntentsPaths.count ?? 0
         let prefs = sa?.automationPrefPaths.count ?? 0
-        let surface = sa?.automationSurfacePresent == true || shortcuts + intents >= 1
-        let note = state.collectorNotes["collect.shortcuts_app_intents"] != nil
-        guard surface || note else { return [] }
-        guard shortcuts >= 1 || intents >= 1 else { return [] }
-
-        let remote =
-            state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
         let rae = state.remoteAppleEvents?.remoteAutomationSurfacePresent == true
         let fda = state.tcc?.fullDiskAccessLikely == true
 
@@ -51,6 +63,14 @@ public struct ShortcutsAppIntentsVector: Check {
             )
         )
 
+        return evidence
+    }
+
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let shortcuts = state.shortcutsAppIntents?.shortcutsAppPaths.count ?? 0
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let rae = state.remoteAppleEvents?.remoteAutomationSurfacePresent == true
+        let fda = state.tcc?.fullDiskAccessLikely == true
         let severity: Severity
         if remote && (rae || fda) && shortcuts >= 2 {
             severity = .high
@@ -60,29 +80,13 @@ public struct ShortcutsAppIntentsVector: Check {
             severity = .low
         }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: remote
+        return Finding(id: Self.id, title: remote
                     ? "Shortcuts / App Intents automation surface with remote amplifier"
-                    : "Shortcuts / App Intents automation lateral surface",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1059", "T1546", "T1559"],
-                remediation: [
+                    : "Shortcuts / App Intents automation lateral surface", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1059", "T1546", "T1559"], remediation: [
                     "Review personal automations and shared Shortcuts for untrusted actions",
                     "Restrict Shortcuts network/scripting actions via MDM where available",
                     "Correlate Shortcuts database changes with phishing delivery timelines",
                     "OPSEC: Rootstock Red does not execute Shortcuts or forge App Intents",
-                ],
-                falsePositiveNotes:
-                    "Shortcuts.app ships on modern macOS. Elevate when automation co-presents with remote access or RAE.",
-                dryRunSafe: true,
-                opsecScore: 25,
-                esfExpected: ["OPEN", "EXEC"]
-            ),
-        ]
+                ], falsePositiveNotes: "Shortcuts.app ships on modern macOS. Elevate when automation co-presents with remote access or RAE."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "EXEC"]))
     }
 }

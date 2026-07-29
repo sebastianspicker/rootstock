@@ -20,7 +20,11 @@ public struct ArchiveQuarantinePlanLabAction: LabAction {
         let markerURL = labRoot
             .appendingPathComponent("archive-quarantine-plan", isDirectory: true)
             .appendingPathComponent("archive-quarantine-plan.md")
-        let body = """
+        return try LabMarkerLifecycle.runFileMarker(FileMarkerLifecycleRequest(actionId: Self.id, operation: request.operation, markerURL: markerURL, body: Self.markerBody(focus: focus), contextDryRun: context.dryRun, copy: Self.copy(markerURL: markerURL, focus: focus)))
+    }
+
+    private static func markerBody(focus: String) -> String {
+        """
         # rootstock-red-lab Archive/quarantine extractor plan
         focus: \(focus)
         purpose: Archive/quarantine extractor posture documentation
@@ -31,38 +35,41 @@ public struct ArchiveQuarantinePlanLabAction: LabAction {
         - purple: expect OPEN/WRITE of Downloads archives if unpack observed under ROE
         ROOTSTOCK_RED_LAB_ARCHIVE_QUARANTINE=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
+    }
+
+    private static func copy(markerURL: URL, focus: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(
+                message: """
             Dry-run Archive/quarantine extractor plan for focus [\(focus)]: would write plan at \
             \(markerURL.path). Never strips quarantine or crafts bypass archives.
             """,
-            planSteps: [
+                steps: [
                 "Document Archive/quarantine extractor review for: \(focus)",
                 "Note path/meta inventory without host mutation beyond lab root",
                 "Write markdown plan under lab root only",
                 "Purple: validate expected telemetry under ROE only",
             ],
-            planCleanup: ["Delete \(markerURL.path)"],
-            applyDryRunMessage: "Dry-run: would write Archive/quarantine extractor plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote Archive/quarantine extractor plan at \(markerURL.path)",
-            applySteps: ["Write Archive/quarantine extractor plan"],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Archive/quarantine extractor plan present",
-            absentMessage: "Archive/quarantine extractor plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete Archive/quarantine extractor plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed Archive/quarantine extractor plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No xattr mutation expected"]
-        )
-        return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+                cleanup: ["Delete \(markerURL.path)"]
+            ),
+            apply: FileMarkerApplyCopy(
+                dryRunMessage: "Dry-run: would write Archive/quarantine extractor plan at \(markerURL.path)",
+                successMessage: "Wrote Archive/quarantine extractor plan at \(markerURL.path)",
+                steps: ["Write Archive/quarantine extractor plan"],
+                cleanup: ["Delete \(markerURL.path)"]
+            ),
+            status: FileMarkerStatusCopy(
+                presentMessage: "Archive/quarantine extractor plan present",
+                absentMessage: "Archive/quarantine extractor plan absent",
+                presentCleanup: ["Delete \(markerURL.path)"],
+                absentCleanup: ["No artifact"]
+            ),
+            remove: FileMarkerRemoveCopy(
+                dryRunMessage: { exists in "Dry-run: would delete Archive/quarantine extractor plan (exists=\(exists))" },
+                successMessage: { exists in "Removed Archive/quarantine extractor plan (wasPresent=\(exists))" },
+                steps: ["Delete \(markerURL.path)"],
+                cleanup: ["No xattr mutation expected"]
+            )
         )
     }
 

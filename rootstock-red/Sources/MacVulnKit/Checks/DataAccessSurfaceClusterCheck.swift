@@ -30,13 +30,7 @@ public struct DataAccessSurfaceClusterCheck: Check {
         let fda = state.tcc?.fullDiskAccessLikely == true
         guard surface && fda else { return nil }
 
-        return Finding(
-            id: "\(id).tm_with_fda",
-            title: "Data-access cluster: Time Machine / snapshot surface with FDA-likely posture",
-            severity: .medium,
-            confidence: .low,
-            category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).tm_with_fda", title: "Data-access cluster: Time Machine / snapshot surface with FDA-likely posture", severity: .medium, category: .misconfig, resolution: .init(evidence: [
                 Evidence(
                     type: "tm",
                     detail:
@@ -45,17 +39,10 @@ public struct DataAccessSurfaceClusterCheck: Check {
                         + "snapshots=\(tm?.localSnapshotHints.count ?? 0)"
                 ),
                 Evidence(type: "tcc", detail: "fullDiskAccessLikely=true"),
-            ],
-            attackTechniques: ["T1005", "T1530"],
-            remediation: [
+            ], attackTechniques: ["T1005", "T1530"], remediation: [
                 "Encrypt TM destinations; minimize FDA grants on backup-capable hosts",
                 "Audit local snapshot retention policy",
-            ],
-            dryRunSafe: true,
-            opsecScore: 20,
-            tccDomains: ["FullDiskAccess"],
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 20, tccDomains: ["FullDiskAccess"], esfExpected: ["OPEN"]))
     }
 
     private static func mobileconfigUnmanaged(state: CollectedState) -> Finding? {
@@ -72,13 +59,7 @@ public struct DataAccessSurfaceClusterCheck: Check {
             || (cfg?.profileInstallDbPresent == true && unmanaged)
         else { return nil }
 
-        return Finding(
-            id: "\(id).mobileconfig_unmanaged",
-            title: "Data-access cluster: mobileconfig / profile sideload surface on unmanaged host",
-            severity: profiles > 0 ? .medium : .low,
-            confidence: .low,
-            category: .mdm,
-            evidence: [
+        return Finding(id: "\(id).mobileconfig_unmanaged", title: "Data-access cluster: mobileconfig / profile sideload surface on unmanaged host", severity: profiles > 0 ? .medium : .low, category: .mdm, resolution: .init(evidence: [
                 Evidence(
                     type: "profile",
                     detail:
@@ -87,16 +68,10 @@ public struct DataAccessSurfaceClusterCheck: Check {
                         + "installDb=\((cfg?.profileInstallDbPresent).rootstockDescribe)"
                 ),
                 Evidence(type: "mdm", detail: "enrolled=\((state.mdm?.enrolled).rootstockDescribe)"),
-            ],
-            attackTechniques: ["T1566.001", "T1556"],
-            remediation: [
+            ], attackTechniques: ["T1566.001", "T1556"], remediation: [
                 "Enroll hosts; quarantine unexpected .mobileconfig files",
                 "User training against unsolicited profile installs",
-            ],
-            dryRunSafe: true,
-            opsecScore: 15,
-            esfExpected: ["OPEN", "WRITE"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 15, esfExpected: ["OPEN", "WRITE"]))
     }
 
     private static func snapshotWithCredPaths(state: CollectedState) -> Finding? {
@@ -106,29 +81,17 @@ public struct DataAccessSurfaceClusterCheck: Check {
         let creds = state.credPaths.filter(\.exists).count
         guard snaps > 0 && creds > 0 else { return nil }
 
-        return Finding(
-            id: "\(id).snapshot_with_cred_paths",
-            title: "Data-access cluster: snapshot/backup paths compound with credential path inventory",
-            severity: .low,
-            confidence: .low,
-            category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).snapshot_with_cred_paths", title: "Data-access cluster: snapshot/backup paths compound with credential path inventory", severity: .low, category: .misconfig, resolution: .init(evidence: [
                 Evidence(type: "snapshot", detail: "snapshotOrBackupHints=\(snaps)"),
                 Evidence(type: "cred_paths", detail: "existingCredPaths=\(creds) (paths only)"),
                 Evidence(
                     type: "honesty",
                     detail: "Never reads secret material from backups or credential files"
                 ),
-            ],
-            attackTechniques: ["T1005", "T1552.001"],
-            remediation: [
+            ], attackTechniques: ["T1005", "T1552.001"], remediation: [
                 "Ensure backups inherit encryption and access controls of primary volume",
                 "Rotate credentials if unauthorized snapshot access is suspected",
-            ],
-            dryRunSafe: true,
-            opsecScore: 18,
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN"]))
     }
 
 }

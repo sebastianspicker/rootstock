@@ -15,32 +15,21 @@ public struct ScreenCapturePrivacyDualUseVector: Check {
         let note = state.collectorNotes["collect.screencapture_privacy_dualuse"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "screencapture_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "screencapture_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.screencaptureToolPaths + s.screenCaptureKitPaths + s.screenshotDropHints).prefix(12) {
-                evidence.append(Evidence(type: "screencapture_path", path: path, detail: "ScreenCapture privacy dual-use path"))
-            }
-            for n in s.notes.prefix(6) { evidence.append(Evidence(type: "screencapture_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.screencaptureToolPaths + s.screenCaptureKitPaths + s.screenshotDropHints, type: "screencapture_path", detail: "ScreenCapture privacy dual-use path", limit: 12)
+            evidence += VectorEvidence.notes(s.notes, type: "screencapture_note", limit: 6)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never captures screens or dumps Screen Recording TCC rows."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "ScreenCapture privacy dual-use with remote access amplifier" : "ScreenCapture / screenshot privacy dual-use depth",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1113", "T1125", "T1005"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "ScreenCapture privacy dual-use with remote access amplifier" : "ScreenCapture / screenshot privacy dual-use depth", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1113", "T1125", "T1005"], remediation: [
                 "Inventory and baseline ScreenCapture privacy dual-use paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never captures screens or dumps Screen Recording TCC rows",
-            ],
-            falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

@@ -14,11 +14,23 @@ public struct OfficeMRUParser: ArtifactParser {
 
     public init() {}
 
+    private struct MRUDetails {
+        let app: String
+        let path: String
+        let title: String
+        let channel: String
+        let user: String
+        let eventTime: Date
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
+        return knownMRUEvents(root, seen: &seen) + discoveredMRUEvents(root, seen: &seen)
+    }
 
+    private func knownMRUEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for rel in [
             "Library/Preferences/office_mru.json",
             "Library/Preferences/collab_mru.json",
@@ -31,21 +43,17 @@ public struct OfficeMRUParser: ArtifactParser {
                 }
             }
         }
-
-        for url in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            return name == "office_mru.json"
-                || name == "collab_mru.json"
-                || name == "msoffice_recent.json"
-                || name == "office_mru.jsonl"
-                || name == "File MRU.json"
-        }) {
-            if seen.insert(url) {
-                events.append(contentsOf: parseFile(at: url))
-            }
-        }
-
         return events
+    }
+
+    private func discoveredMRUEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        root.enumerate(matching: isMRUFile).flatMap { url in
+            seen.insert(url) ? parseFile(at: url) : []
+        }
+    }
+
+    private func isMRUFile(_ url: URL) -> Bool {
+        ["office_mru.json", "collab_mru.json", "msoffice_recent.json", "office_mru.jsonl", "File MRU.json"].contains(url.lastPathComponent)
     }
 
     private func parseFile(at url: URL) -> [EventEnvelope] {
@@ -65,80 +73,77 @@ public struct OfficeMRUParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let app = stringish(item["app"])
-            ?? stringish(item["application"])
-            ?? stringish(item["bundle_id"])
-            ?? "office"
-        let path = stringish(item["path"])
-            ?? stringish(item["url"])
-            ?? stringish(item["file_path"])
-            ?? ""
-        let title = stringish(item["title"])
-            ?? stringish(item["name"])
-            ?? stringish(item["document"])
-            ?? ""
-        let channel = stringish(item["channel"])
-            ?? stringish(item["workspace"])
-            ?? ""
+        guard let details = mruDetails(item, sourceURL: sourceURL) else { return nil }
+        let risks = mruRisks(item, details: details)
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "mru.office",
+                label: "OFFICEMRU"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: details.eventTime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: mruEntities(details),
+                properties: mruFields(item, details: details, risks: risks),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
+        )
+    }
 
+    private func mruDetails(_ item: [String: Any], sourceURL: URL) -> MRUDetails? {
+        let path = firstString(item, keys: ["path", "url", "file_path"])
+        let title = firstString(item, keys: ["title", "name", "document"])
+        let channel = firstString(item, keys: ["channel", "workspace"])
         guard !path.isEmpty || !title.isEmpty || !channel.isEmpty else { return nil }
+        return MRUDetails(
+            app: firstString(item, keys: ["app", "application", "bundle_id"], fallback: "office"), path: path, title: title, channel: channel,
+            user: stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? "",
+            eventTime: parseDate(item["last_accessed"] ?? item["timestamp"] ?? item["modified"]) ?? Date(timeIntervalSince1970: 0)
+        )
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        let lowerPath = path.lowercased()
-        let lowerTitle = title.lowercased()
-        if lowerPath.contains("/tmp/") || lowerPath.contains("/var/folders/") {
-            if !risk.contains("tmp_path") { risk.append("tmp_path") }
-        }
-        if lowerPath.contains("evil") || lowerTitle.contains("evil")
-            || lowerPath.contains("payload") || lowerPath.contains("implant") {
-            if !risk.contains("suspicious_path") { risk.append("suspicious_path") }
-        }
-        if lowerPath.contains("password") || lowerTitle.contains("password")
-            || lowerPath.contains("secret") || lowerTitle.contains("credential")
-            || lowerPath.contains(".ssh/") || lowerPath.hasSuffix(".pem") {
-            if !risk.contains("sensitive_document") { risk.append("sensitive_document") }
-        }
-        if lowerPath.contains("sharepoint") || lowerPath.contains("onedrive")
-            || path.lowercased().hasPrefix("https://") {
-            if !risk.contains("cloud_document") { risk.append("cloud_document") }
-        }
+    private func firstString(_ item: [String: Any], keys: [String], fallback: String = "") -> String { keys.lazy.compactMap { stringish(item[$0]) }.first ?? fallback }
 
-        let user = stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
+    private func mruRisks(_ item: [String: Any], details: MRUDetails) -> [String] {
+        var risks = stringish(item["risk_tags"])?.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+        let path = details.path.lowercased()
+        let title = details.title.lowercased()
+        if temporaryPath(path) { appendUnique("tmp_path", to: &risks) }
+        if suspicious(path: path, title: title) { appendUnique("suspicious_path", to: &risks) }
+        if sensitive(path: path, title: title) { appendUnique("sensitive_document", to: &risks) }
+        if cloudPath(path) { appendUnique("cloud_document", to: &risks) }
+        return risks
+    }
 
+    private func suspicious(path: String, title: String) -> Bool { path.contains("evil") || title.contains("evil") || path.contains("payload") || path.contains("implant") }
+    private func sensitive(path: String, title: String) -> Bool { path.contains("password") || title.contains("password") || path.contains("secret") || title.contains("credential") || path.contains(".ssh/") || path.hasSuffix(".pem") }
+    private func temporaryPath(_ path: String) -> Bool { path.contains("/tmp/") || path.contains("/var/folders/") }
+    private func cloudPath(_ path: String) -> Bool { path.contains("sharepoint") || path.contains("onedrive") || path.hasPrefix("https://") }
+    private func appendUnique(_ value: String, to values: inout [String]) { if !values.contains(value) { values.append(value) } }
+
+    private func mruFields(_ item: [String: Any], details: MRUDetails, risks: [String]) -> [String: String] {
         var fields: [String: String] = [
-            "office.app": app,
-            "office.path": path,
-            "office.title": String(title.prefix(200)),
-            "office.channel": channel,
+            "office.app": details.app, "office.path": details.path, "office.title": String(details.title.prefix(200)), "office.channel": details.channel,
             FieldTaxonomy.eventType: "mru.office",
-            FieldTaxonomy.filePath: path,
-            FieldTaxonomy.userName: user,
+            FieldTaxonomy.filePath: details.path, FieldTaxonomy.userName: details.user,
         ]
         if let accessed = stringish(item["last_accessed"]) ?? stringish(item["timestamp"]) {
             fields["office.last_accessed"] = accessed
         }
-        if !risk.isEmpty {
-            fields["office.risk_tags"] = risk.joined(separator: ",")
+        if !risks.isEmpty {
+            fields["office.risk_tags"] = risks.joined(separator: ",")
         }
+        return fields
+    }
 
+    private func mruEntities(_ details: MRUDetails) -> [EntityID] {
         var refs: [EntityID] = []
-        if !path.isEmpty { refs.append(.file(path: path)) }
-        refs.append(EntityID(kind: .host, value: "office|\(app)"))
-
-        return EventEnvelope(
-            eventTime: parseDate(item["last_accessed"] ?? item["timestamp"] ?? item["modified"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "OFFICEMRU",
-            eventType: "mru.office",
-            entityRefs: refs,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
-        )
+        if !details.path.isEmpty { refs.append(.file(path: details.path)) }
+        refs.append(EntityID(kind: .host, value: "office|\(details.app)"))
+        return refs
     }
 }

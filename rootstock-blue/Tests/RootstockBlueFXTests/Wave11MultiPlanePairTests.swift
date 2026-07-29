@@ -109,62 +109,31 @@ final class Wave11MultiPlanePairTests: XCTestCase {
     }
 
     func testHardenAssessSyntheticEmitsFourWave11Controls() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "URLSCHEMEHANDLER",
-                eventType: "url_scheme.handler",
-                fields: [
-                    "url_scheme.handler_path": "/Users/alice/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist",
-                    "url_scheme.scheme": "rootstock-lab",
-                    "url_scheme.risk_tags": "handler_surface,custom_scheme",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "LAUNCHDOVERRIDEDEPTH",
-                eventType: "launchd.override_depth",
-                fields: [
-                    "launchd_depth.label": "com.google.santa",
-                    "launchd_depth.override_path": "/var/db/com.apple.xpc.launchd/disabled.plist",
-                    "launchd_depth.security_product_hint": "true",
-                    "launchd_depth.risk_tags": "override_depth,security_product_disabled",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "BROWSEREXTDUALUSE",
-                eventType: "browser.extension_dualuse",
-                fields: [
-                    "ext_dualuse.browser": "chrome",
-                    "ext_dualuse.path": "/Users/alice/Library/Application Support/Google/Chrome/Default/Extensions/abc",
-                    "ext_dualuse.extension_id": "abc",
-                    "ext_dualuse.risk_tags": "dual_use_surface,broad_permissions",
-                    "ext_dualuse.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "SHORTCUTSAPPINTENTS",
-                eventType: "shortcuts.automation",
-                fields: [
-                    "shortcuts.path": "/Users/alice/Library/Shortcuts",
-                    "shortcuts.name": "Lab Automation",
-                    "shortcuts.risk_tags": "automation_surface,scripting_action",
-                ]
-            ),
+        let synthetic = [
+            HardeningTestFixtures.event("URLSCHEMEHANDLER", "url_scheme.handler", [
+                "url_scheme.handler_path": "/Users/alice/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist", "url_scheme.scheme": "rootstock-lab", "url_scheme.risk_tags": "handler_surface,custom_scheme",
+            ]),
+            HardeningTestFixtures.event("LAUNCHDOVERRIDEDEPTH", "launchd.override_depth", [
+                "launchd_depth.label": "com.google.santa", "launchd_depth.override_path": "/var/db/com.apple.xpc.launchd/disabled.plist", "launchd_depth.security_product_hint": "true", "launchd_depth.risk_tags": "override_depth,security_product_disabled",
+            ]),
+            HardeningTestFixtures.event("BROWSEREXTDUALUSE", "browser.extension_dualuse", [
+                "ext_dualuse.browser": "chrome", "ext_dualuse.path": "/Users/alice/Library/Application Support/Google/Chrome/Default/Extensions/abc", "ext_dualuse.extension_id": "abc", "ext_dualuse.risk_tags": "dual_use_surface,broad_permissions", "ext_dualuse.secrets_exported": "false",
+            ]),
+            HardeningTestFixtures.event("SHORTCUTSAPPINTENTS", "shortcuts.automation", [
+                "shortcuts.path": "/Users/alice/Library/Shortcuts", "shortcuts.name": "Lab Automation", "shortcuts.risk_tags": "automation_surface,scripting_action",
+            ]),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)
         let controls = Set(findings.map(\.control))
-        for c in wave11HardenControls {
-            XCTAssertTrue(controls.contains(c), "missing harden control \(c); got \(controls.sorted())")
+        for control in wave11HardenControls {
+            XCTAssertTrue(controls.contains(control), "missing harden control \(control); got \(controls.sorted())")
         }
-        for f in findings where wave11HardenControls.contains(f.control) {
-            XCTAssertFalse(f.remediation.isEmpty, "\(f.control) remediation")
-            XCTAssertFalse(f.title.isEmpty)
-            let blob = (f.detail + f.remediation + f.evidence).lowercased()
-            XCTAssertFalse(blob.contains("password=secret"), "\(f.control) no secrets")
-            XCTAssertFalse(blob.contains("value_exported=true"), "\(f.control) no secret export")
+        for finding in findings where wave11HardenControls.contains(finding.control) {
+            XCTAssertFalse(finding.remediation.isEmpty, "\(finding.control) remediation")
+            XCTAssertFalse(finding.title.isEmpty)
+            let blob = (finding.detail + finding.remediation + finding.evidence).lowercased()
+            XCTAssertFalse(blob.contains("password=secret"), "\(finding.control) no secrets")
+            XCTAssertFalse(blob.contains("value_exported=true"), "\(finding.control) no secret export")
         }
     }
 

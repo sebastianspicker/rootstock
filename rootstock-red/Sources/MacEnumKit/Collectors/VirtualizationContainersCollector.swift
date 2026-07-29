@@ -58,27 +58,21 @@ public struct VirtualizationContainersCollector: Collector {
         ]
 
         var containers: [String] = []
-        for path in Self.containerToolPaths {
-            if fm.fileExists(atPath: path) {
+        for path in Self.containerToolPaths where fm.fileExists(atPath: path) {
                 containers.append(path)
                 notes.append("container_tool: \(path)")
-            }
         }
 
         var hypervisors: [String] = []
-        for path in Self.hypervisorAppPaths {
-            if fm.fileExists(atPath: path) {
+        for path in Self.hypervisorAppPaths where fm.fileExists(atPath: path) {
                 hypervisors.append(path)
                 notes.append("hypervisor: \(path)")
-            }
         }
 
         var frameworks: [String] = []
-        for path in Self.frameworkPaths {
-            if fm.fileExists(atPath: path) {
+        for path in Self.frameworkPaths where fm.fileExists(atPath: path) {
                 frameworks.append(path)
                 notes.append("virt_framework_or_helper: \(path)")
-            }
         }
 
         // User config dirs (presence only).
@@ -90,11 +84,9 @@ public struct VirtualizationContainersCollector: Collector {
             "\(home)/.orbstack",
             "\(home)/Library/Containers/com.docker.docker",
         ]
-        for path in userHints {
-            if fm.fileExists(atPath: path) {
+        for path in userHints where fm.fileExists(atPath: path) {
                 containers.append(path)
                 notes.append("user_virt_config: \(path)")
-            }
         }
 
         containers = Array(Set(containers)).sorted()

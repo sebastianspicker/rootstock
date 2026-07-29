@@ -123,10 +123,18 @@ NODE_TYPE_MAP: dict[str, dict] = {
         "color": "#3fb950",
     },
     "Host": {"kind": "rs_CveHost", "icon": "fa-server", "color": "#39c5cf"},
-    "Service": {"kind": "rs_CveService", "icon": "fa-network-wired", "color": "#f2cc60"},
+    "Service": {
+        "kind": "rs_CveService",
+        "icon": "fa-network-wired",
+        "color": "#f2cc60",
+    },
     "WebApp": {"kind": "rs_CveWebApp", "icon": "fa-globe", "color": "#3fb950"},
     "Package": {"kind": "rs_CvePackage", "icon": "fa-box-open", "color": "#d2a8ff"},
-    "Repository": {"kind": "rs_CveRepository", "icon": "fa-code-branch", "color": "#a371f7"},
+    "Repository": {
+        "kind": "rs_CveRepository",
+        "icon": "fa-code-branch",
+        "color": "#a371f7",
+    },
     "Manifest": {"kind": "rs_CveManifest", "icon": "fa-file-code", "color": "#bc8cff"},
     "Finding": {
         "kind": "rs_CveFinding",
@@ -143,7 +151,11 @@ NODE_TYPE_MAP: dict[str, dict] = {
         "icon": "fa-certificate",
         "color": "#76e3ea",
     },
-    "Remediation": {"kind": "rs_CveRemediation", "icon": "fa-screwdriver-wrench", "color": "#56d364"},
+    "Remediation": {
+        "kind": "rs_CveRemediation",
+        "icon": "fa-screwdriver-wrench",
+        "color": "#56d364",
+    },
     "CoverageGap": {
         "kind": "rs_CveCoverageGap",
         "icon": "fa-circle-question",
@@ -367,59 +379,9 @@ def family_export_to_opengraph(export) -> dict:
     Uses the same node/edge builders as Neo4j import so ``source`` and
     ``family_export`` survive into canvas kinds.
     """
-    from import_family_export import build_edge_records, build_node_records
+    from opengraph_family import family_export_to_opengraph as build_family_opengraph
 
-    node_groups = build_node_records(export)
-    id_to_record: dict[str, tuple[str, dict]] = {}
-    nodes: list[dict] = []
-    hostname = export.scope_name or export.source
-
-    for label, records in node_groups.items():
-        for record in records:
-            props = dict(record["props"])
-            node_id = str(record["id"])
-            id_to_record[node_id] = (label, props)
-            mapped = map_node_for_opengraph(hostname, label, props)
-            if mapped is not None:
-                nodes.append(mapped)
-
-    edges: list[dict] = []
-    for rel_type, records in build_edge_records(export).items():
-        for record in records:
-            src = id_to_record.get(record["source_id"])
-            tgt = id_to_record.get(record["target_id"])
-            if src is None or tgt is None:
-                continue
-            rel_props = {
-                "source": export.source,
-                "family_export": True,
-            }
-            mapped = map_edge_for_opengraph(
-                hostname,
-                src_label=src[0],
-                src_props=src[1],
-                tgt_label=tgt[0],
-                tgt_props=tgt[1],
-                rel_type=rel_type,
-                rel_props=rel_props,
-            )
-            if mapped is not None:
-                edges.append(mapped)
-
-    return {
-        "metadata": {
-            "source_kind": "RootstockFamily",
-            "family_source": export.source,
-            "scope_name": export.scope_name,
-            "hostname": hostname,
-            "node_count": len(nodes),
-            "edge_count": len(edges),
-        },
-        "graph": {
-            "nodes": nodes,
-            "edges": edges,
-        },
-    }
+    return build_family_opengraph(export)
 
 
 # ── Node ID generation ──────────────────────────────────────────────────────
@@ -456,30 +418,25 @@ def _node_key(label: str, props: dict) -> str:
 # ── Node properties ─────────────────────────────────────────────────────────
 
 
+_NODE_DISPLAY_FIELDS: dict[str, tuple[tuple[str, ...], str]] = {
+    "Application": (("name", "bundle_id"), "Unknown App"),
+    "TCC_Permission": (("display_name", "service"), "Unknown Permission"),
+    "Entitlement": (("name",), "Unknown Entitlement"),
+    "XPC_Service": (("label",), "Unknown XPC"),
+    "Keychain_Item": (("label",), "Unknown Keychain Item"),
+    "Finding": (("name", "finding_id", "id"), "Finding"),
+    "Host": (("hostname", "name", "id"), "Host"),
+    "Protection": (("name", "id"), "Protection"),
+}
+
+
 def _node_display_name(label: str, props: dict) -> str:
     """Human-readable display name for a node."""
-    if label == "Application":
-        return props.get("name", props.get("bundle_id", "Unknown App"))
-    if label == "TCC_Permission":
-        return props.get("display_name", props.get("service", "Unknown Permission"))
-    if label == "Entitlement":
-        return props.get("name", "Unknown Entitlement")
-    if label == "XPC_Service":
-        return props.get("label", "Unknown XPC")
-    if label == "Keychain_Item":
-        return props.get("label", "Unknown Keychain Item")
-    if label == "Finding":
-        return str(
-            props.get("name")
-            or props.get("finding_id")
-            or props.get("id")
-            or "Finding"
-        )
-    if label == "Host":
-        return str(props.get("hostname") or props.get("name") or props.get("id") or "Host")
-    if label == "Protection":
-        return str(props.get("name") or props.get("id") or "Protection")
-    return props.get("name", props.get("display_name", props.get("label", "Unknown")))
+    fields, fallback = _NODE_DISPLAY_FIELDS.get(
+        label,
+        (("name", "display_name", "label"), "Unknown"),
+    )
+    return str(next((props[field] for field in fields if props.get(field)), fallback))
 
 
 def _serialize_props(props: dict) -> dict:
@@ -588,50 +545,9 @@ def export_cross_domain(session, hostname: str) -> dict:
     BloodHound AZUser/User nodes by matching on username. The consuming
     BloodHound instance must already have the AD/Azure nodes loaded.
     """
-    nodes = []
-    edges = []
+    from opengraph_family import export_cross_domain as build_cross_domain_opengraph
 
-    result = session.run("MATCH (u:User) RETURN u")
-    for record in result:
-        props = dict(record["u"])
-        username = props.get("name", "unknown")
-        rs_id = make_node_id(hostname, "User", username)
-
-        nodes.append(_cross_domain_user_node(rs_id, username, props))
-        edges.append(_cross_domain_identity_edge(rs_id, username))
-
-    return {
-        "metadata": {
-            "type": "cross_domain",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "hostname": hostname,
-        },
-        "graph": {
-            "nodes": nodes,
-            "edges": edges,
-        },
-    }
-
-
-def _cross_domain_user_node(rs_id: str, username: str, props: dict) -> dict:
-    return {
-        "id": rs_id,
-        "kind": "rs_User",
-        "label": username,
-        "properties": _serialize_props(props),
-    }
-
-
-def _cross_domain_identity_edge(rs_id: str, username: str) -> dict:
-    return {
-        "source": rs_id,
-        "target": f"az-user-{_sanitize(username)}",
-        "kind": "rs_SameIdentity",
-        "properties": {
-            "match_key": username,
-            "_traversable": False,
-        },
-    }
+    return build_cross_domain_opengraph(session, hostname)
 
 
 def build_opengraph(

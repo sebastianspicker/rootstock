@@ -12,13 +12,21 @@ public struct BrowserExtensionDualUseCollector: Collector {
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
-        let fm = FileManager.default
         let home = NSHomeDirectory()
-        var notes: [String] = [
-            "Browser extension dual-use plane: path presence only - never dumps extension secrets or cookies",
-        ]
+        var notes = ["Browser extension dual-use plane: path presence only - never dumps extension secrets or cookies"]
+        let chromium = existingPaths(Self.chromiumRoots(home), notePrefix: "chromium_extensions", notes: &notes)
+        let safari = existingPaths(Self.safariRoots(home), notePrefix: "safari_extensions", notes: &notes)
+        let prefs = existingPaths(Self.preferencePaths(home), notePrefix: "extension_pref", notes: &notes)
+        let surface = chromium.count + safari.count >= 1 || prefs.count >= 2
+        var state = CollectedState()
+        state.browserExtensionDualUse = BrowserExtensionDualUseState(chromiumExtensionPaths: chromium, safariExtensionPaths: safari, preferencePaths: prefs, extensionSurfacePresent: surface, notes: notes)
+        state.collectorNotes[Self.id] = "chromium=\(chromium.count) safari=\(safari.count) prefs=\(prefs.count) surface=\(surface)"
+        return state
+    }
 
-        let chromiumRoots = [
+
+    private static func chromiumRoots(_ home: String) -> [String] {
+        [
             home + "/Library/Application Support/Google/Chrome/Default/Extensions",
             home + "/Library/Application Support/Google/Chrome/Profile 1/Extensions",
             home + "/Library/Application Support/Chromium/Default/Extensions",
@@ -26,52 +34,29 @@ public struct BrowserExtensionDualUseCollector: Collector {
             home + "/Library/Application Support/BraveSoftware/Brave-Browser/Default/Extensions",
             home + "/Library/Application Support/Arc/User Data/Default/Extensions",
         ]
-        var chromium: [String] = []
-        for path in chromiumRoots where fm.fileExists(atPath: path) {
-            chromium.append(path)
-            notes.append("chromium_extensions: \(path)")
-        }
+    }
 
-        let safariRoots = [
+    private static func safariRoots(_ home: String) -> [String] {
+        [
             home + "/Library/Safari/Extensions",
             home + "/Library/Containers/com.apple.Safari/Data/Library/Safari/AppExtensions",
             home + "/Library/Containers/com.apple.Safari/Data/Library/Safari/WebExtensions",
             "/Applications/Safari.app",
         ]
-        var safari: [String] = []
-        for path in safariRoots where fm.fileExists(atPath: path) {
-            safari.append(path)
-            notes.append("safari_extensions: \(path)")
-        }
+    }
 
-        let prefPaths = [
+    private static func preferencePaths(_ home: String) -> [String] {
+        [
             home + "/Library/Application Support/Google/Chrome/Default/Preferences",
             home + "/Library/Application Support/Google/Chrome/Default/Secure Preferences",
             home + "/Library/Preferences/com.apple.Safari.plist",
             home + "/Library/Preferences/com.apple.Safari.Extensions.plist",
         ]
-        var prefs: [String] = []
-        for path in prefPaths where fm.fileExists(atPath: path) {
-            prefs.append(path)
-            notes.append("extension_pref: \(path)")
-        }
+    }
 
-        chromium = Array(Set(chromium)).sorted()
-        safari = Array(Set(safari)).sorted()
-        prefs = Array(Set(prefs)).sorted()
-
-        let surface = chromium.count + safari.count >= 1 || prefs.count >= 2
-
-        var state = CollectedState()
-        state.browserExtensionDualUse = BrowserExtensionDualUseState(
-            chromiumExtensionPaths: chromium,
-            safariExtensionPaths: safari,
-            preferencePaths: prefs,
-            extensionSurfacePresent: surface,
-            notes: notes
-        )
-        state.collectorNotes[Self.id] =
-            "chromium=\(chromium.count) safari=\(safari.count) prefs=\(prefs.count) surface=\(surface)"
-        return state
+    private func existingPaths(_ paths: [String], notePrefix: String, notes: inout [String]) -> [String] {
+        let existing = paths.filter { FileManager.default.fileExists(atPath: $0) }
+        notes.append(contentsOf: existing.map { "\(notePrefix): \($0)" })
+        return Array(Set(existing)).sorted()
     }
 }

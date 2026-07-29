@@ -179,23 +179,35 @@ final class Wave3SOTA2026Tests: XCTestCase {
         // Pure unit path - no filesystem: drive assess(events:) with synthetic posture
         let degraded = [
             EventEnvelope(
-                source: .collect,
-                sourcePlugin: "IRPOSTURE",
-                eventType: "ir.posture.protection",
-                fields: [
+                identity: EventEnvelope.Identity(
+                    kind: "ir.posture.protection",
+                    label: "IRPOSTURE"
+                ),
+                capture: EventEnvelope.Capture(
+                    source: .collect
+                ),
+                payload: EventEnvelope.Payload(
+                    properties: [
                     "protection.name": "SIP",
                     "protection.enabled": "false",
                     "protection.raw": "disabled",
                 ]
+                )
             ),
             EventEnvelope(
-                source: .collect,
-                sourcePlugin: "IRPOSTURE",
-                eventType: "ir.posture.protection",
-                fields: [
+                identity: EventEnvelope.Identity(
+                    kind: "ir.posture.protection",
+                    label: "IRPOSTURE"
+                ),
+                capture: EventEnvelope.Capture(
+                    source: .collect
+                ),
+                payload: EventEnvelope.Payload(
+                    properties: [
                     "protection.name": "Firewall",
                     "protection.enabled": "false",
                 ]
+                )
             ),
         ]
         let findings = HardeningAssessment.assess(events: degraded)

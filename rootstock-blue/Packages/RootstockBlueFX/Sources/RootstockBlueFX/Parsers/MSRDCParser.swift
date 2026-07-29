@@ -14,11 +14,24 @@ public struct MSRDCParser: ArtifactParser {
 
     public init() {}
 
+    private struct ConnectionDetails {
+        let host: String
+        let rdpUser: String
+        let client: String
+        let lastConnected: String
+        let port: String
+        let localUser: String
+        let eventTime: Date
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
+        return knownConnectionEvents(root, seen: &seen) + discoveredConnectionEvents(root, seen: &seen)
+    }
 
+    private func knownConnectionEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for rel in [
             "Library/Preferences/msrdc_connections.json",
             "Library/Preferences/rdp_connections.json",
@@ -32,21 +45,19 @@ public struct MSRDCParser: ArtifactParser {
                 }
             }
         }
-
-        for url in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            return name == "msrdc_connections.json"
-                || name == "rdp_connections.json"
-                || name == "msrdc_connections.jsonl"
-                || name == "com.microsoft.rdc.macos.json"
-                || (name == "connections.json" && url.path.lowercased().contains("rdc"))
-        }) {
-            if seen.insert(url) {
-                events.append(contentsOf: parseFile(at: url))
-            }
-        }
-
         return events
+    }
+
+    private func discoveredConnectionEvents(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        root.enumerate(matching: isConnectionFile).flatMap { url in
+            seen.insert(url) ? parseFile(at: url) : []
+        }
+    }
+
+    private func isConnectionFile(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        return ["msrdc_connections.json", "rdp_connections.json", "msrdc_connections.jsonl", "com.microsoft.rdc.macos.json"].contains(name)
+            || (name == "connections.json" && url.path.lowercased().contains("rdc"))
     }
 
     private func parseFile(at url: URL) -> [EventEnvelope] {
@@ -66,75 +77,69 @@ public struct MSRDCParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let host = stringish(item["host"])
-            ?? stringish(item["hostname"])
-            ?? stringish(item["pc_name"])
-            ?? stringish(item["server"])
-            ?? ""
-        let rdpUser = stringish(item["user"])
-            ?? stringish(item["username"])
-            ?? stringish(item["friendly_name"])
-            ?? ""
-        let client = stringish(item["client"])
-            ?? stringish(item["app"])
-            ?? "msrdc"
-        let lastConnected = stringish(item["last_connected"])
-            ?? stringish(item["timestamp"])
-            ?? stringish(item["last_used"])
-            ?? ""
-        let port = stringish(item["port"]) ?? "3389"
+        guard let details = connectionDetails(item, sourceURL: sourceURL) else { return nil }
+        let risks = connectionRisks(item, host: details.host)
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "remote.rdp_connection",
+                label: "MSRDC"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: details.eventTime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .network, value: "rdp|\(details.host)")],
+                properties: connectionFields(item, details: details, risks: risks),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
+        )
+    }
 
+    private func connectionDetails(_ item: [String: Any], sourceURL: URL) -> ConnectionDetails? {
+        let host = firstString(item, keys: ["host", "hostname", "pc_name", "server"])
         guard !host.isEmpty else { return nil }
+        return ConnectionDetails(
+            host: host, rdpUser: firstString(item, keys: ["user", "username", "friendly_name"]),
+            client: firstString(item, keys: ["client", "app"], fallback: "msrdc"),
+            lastConnected: firstString(item, keys: ["last_connected", "timestamp", "last_used"]),
+            port: firstString(item, keys: ["port"], fallback: "3389"),
+            localUser: stringish(item["local_user"]) ?? inferUser(from: sourceURL.path) ?? "",
+            eventTime: parseDate(item["last_connected"] ?? item["timestamp"] ?? item["last_used"]) ?? Date(timeIntervalSince1970: 0)
+        )
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        // Any remote connection residue is operationally relevant
-        if !risk.contains("remote_connection") { risk.append("remote_connection") }
-        let lowerHost = host.lowercased()
-        if lowerHost.contains("evil") || lowerHost.contains("c2")
-            || lowerHost.contains("malware") || lowerHost.hasSuffix(".evil") {
-            if !risk.contains("suspicious_host") { risk.append("suspicious_host") }
-        }
-        if lowerHost.hasPrefix("10.") || lowerHost.hasPrefix("192.168.")
-            || lowerHost.hasPrefix("172.") {
-            if !risk.contains("internal_host") { risk.append("internal_host") }
-        } else if lowerHost.contains(".") && !lowerHost.hasSuffix(".local") {
-            if !risk.contains("external_host") { risk.append("external_host") }
-        }
+    private func firstString(_ item: [String: Any], keys: [String], fallback: String = "") -> String { keys.lazy.compactMap { stringish(item[$0]) }.first ?? fallback }
 
-        let localUser = stringish(item["local_user"]) ?? inferUser(from: sourceURL.path) ?? ""
+    private func connectionRisks(_ item: [String: Any], host: String) -> [String] {
+        var risks = stringish(item["risk_tags"])?.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+        appendUnique("remote_connection", to: &risks)
+        let lower = host.lowercased()
+        if suspiciousHost(lower) { appendUnique("suspicious_host", to: &risks) }
+        if internalHost(lower) { appendUnique("internal_host", to: &risks) }
+        else if lower.contains("."), !lower.hasSuffix(".local") { appendUnique("external_host", to: &risks) }
+        return risks
+    }
 
+    private func suspiciousHost(_ host: String) -> Bool { host.contains("evil") || host.contains("c2") || host.contains("malware") || host.hasSuffix(".evil") }
+    private func internalHost(_ host: String) -> Bool { host.hasPrefix("10.") || host.hasPrefix("192.168.") || host.hasPrefix("172.") }
+    private func appendUnique(_ value: String, to items: inout [String]) { if !items.contains(value) { items.append(value) } }
+
+    private func connectionFields(_ item: [String: Any], details: ConnectionDetails, risks: [String]) -> [String: String] {
         var fields: [String: String] = [
-            "rdp.host": host,
-            "rdp.user": rdpUser,
-            "rdp.client": client,
-            "rdp.port": port,
-            "rdp.last_connected": lastConnected,
+            "rdp.host": details.host, "rdp.user": details.rdpUser, "rdp.client": details.client,
+            "rdp.port": details.port, "rdp.last_connected": details.lastConnected,
             FieldTaxonomy.eventType: "remote.rdp_connection",
-            FieldTaxonomy.userName: localUser,
+            FieldTaxonomy.userName: details.localUser,
         ]
         if let gateway = stringish(item["gateway"]) {
             fields["rdp.gateway"] = gateway
         }
-        if !risk.isEmpty {
-            fields["rdp.risk_tags"] = risk.joined(separator: ",")
+        if !risks.isEmpty {
+            fields["rdp.risk_tags"] = risks.joined(separator: ",")
         }
-
-        return EventEnvelope(
-            eventTime: parseDate(item["last_connected"] ?? item["timestamp"] ?? item["last_used"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "MSRDC",
-            eventType: "remote.rdp_connection",
-            entityRefs: [
-                EntityID(kind: .network, value: "rdp|\(host)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
-        )
+        return fields
     }
 }

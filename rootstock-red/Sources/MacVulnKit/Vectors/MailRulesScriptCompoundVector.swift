@@ -46,26 +46,13 @@ public struct MailRulesScriptCompoundVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Mail rules automation × remote compound"
-                    : "Mail rules automation × impact compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1114", "T1059", "T1546"],
-                remediation: [
+                    : "Mail rules automation × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1114", "T1059", "T1546"], remediation: [
                     "Prioritize hosts co-locating Mail rules automation with remote/FDA amplifiers",
                     "Use Wave-12 lab plans under ROE for purple validation",
                     "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-                ],
-                falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first.",
-                dryRunSafe: true,
-                opsecScore: 27,
-                esfExpected: ["OPEN", "EXEC", "READ"]
-            ),
+                ], falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"])),
         ]
     }
 }

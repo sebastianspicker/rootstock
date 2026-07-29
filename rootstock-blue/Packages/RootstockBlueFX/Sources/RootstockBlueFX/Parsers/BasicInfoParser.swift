@@ -61,13 +61,18 @@ public struct BasicInfoParser: ArtifactParser {
         let hostKey = computer.isEmpty ? "os=\(product)|\(version)|\(build)" : "name=\(computer)"
 
         return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "BASICINFO",
-            eventType: "host.basic_info",
-            entityRefs: [EntityID(kind: .host, value: hostKey)],
-            fields: [
+            identity: EventEnvelope.Identity(
+                kind: "host.basic_info",
+                label: "BASICINFO"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: hostKey)],
+                properties: [
                 "host.product_name": product,
                 "host.os_version": version,
                 "host.os_build": build,
@@ -75,8 +80,9 @@ public struct BasicInfoParser: ArtifactParser {
                 "host.source_path": ArtifactRoot.pathKey(url),
                 FieldTaxonomy.eventType: "host.basic_info",
             ],
-            rawRef: ArtifactRoot.pathKey(url),
-            confidence: 0.99
+                provenance: ArtifactRoot.pathKey(url),
+                confidence: 0.99
+            )
         )
     }
 
@@ -91,21 +97,27 @@ public struct BasicInfoParser: ArtifactParser {
 
         let key = computer.isEmpty ? (hostName.isEmpty ? localHost : hostName) : computer
         return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "BASICINFO",
-            eventType: "host.identity",
-            entityRefs: [EntityID(kind: .host, value: "name=\(key)")],
-            fields: [
+            identity: EventEnvelope.Identity(
+                kind: "host.identity",
+                label: "BASICINFO"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .host, value: "name=\(key)")],
+                properties: [
                 "host.computer_name": computer,
                 "host.hostname": hostName,
                 "host.local_hostname": localHost,
                 "host.source_path": ArtifactRoot.pathKey(url),
                 FieldTaxonomy.eventType: "host.identity",
             ],
-            rawRef: ArtifactRoot.pathKey(url),
-            confidence: 0.97
+                provenance: ArtifactRoot.pathKey(url),
+                confidence: 0.97
+            )
         )
     }
 

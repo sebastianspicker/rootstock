@@ -182,13 +182,13 @@ function updateKindMeta(kindMeta: Map<string, KindMeta>, node: ViewerNode): void
   const existing = kindMeta.get(node.kind);
   if (existing) {
     existing.count += 1;
-    return;
+  } else {
+    kindMeta.set(node.kind, {
+      color: safeNodeColor(node.properties._color),
+      count: 1,
+      label: displayKind(node.kind),
+    });
   }
-  kindMeta.set(node.kind, {
-    color: safeNodeColor(node.properties._color),
-    count: 1,
-    label: displayKind(node.kind),
-  });
 }
 
 function buildEdgeIndexes(links: GraphEdge[]): Pick<GraphModel, "degreeById" | "edgeMeta" | "outgoing" | "incoming"> {

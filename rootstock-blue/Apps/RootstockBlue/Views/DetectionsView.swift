@@ -8,10 +8,10 @@ struct DetectionsView: View {
             summary: "Evaluate bundled YAML rules against normalized case events. Live stream filtering is not implemented."
         ) {
             MetricStrip(metrics: [
-                ("Critical", "0", .critical),
-                ("High", "0", .warning),
-                ("Medium", "0", .accent),
-                ("Rules run", "0", .neutral),
+                WorkspaceMetric(label: "Critical", value: "0", tone: .critical),
+                WorkspaceMetric(label: "High", value: "0", tone: .warning),
+                WorkspaceMetric(label: "Medium", value: "0", tone: .accent),
+                WorkspaceMetric(label: "Rules run", value: "0", tone: .neutral),
             ])
 
             InstrumentSection("Findings", detail: "No rules evaluated") {

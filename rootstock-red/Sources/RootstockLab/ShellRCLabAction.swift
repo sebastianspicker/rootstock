@@ -79,15 +79,7 @@ public struct ShellRCLabAction: LabAction {
         ]
 
         if dryRun {
-            return ActionResult(
-                actionId: Self.id,
-                success: true,
-                message: "Dry-run: would append shell RC marker to \(rcURL.path)",
-                dryRun: true,
-                plannedSteps: steps,
-                cleanupNotes: cleanup,
-                artifacts: [rcURL.path]
-            )
+            return installDryRunResult(rcURL: rcURL, steps: steps, cleanup: cleanup)
         }
 
         let fm = FileManager.default
@@ -99,15 +91,7 @@ public struct ShellRCLabAction: LabAction {
             body = try String(contentsOf: rcURL, encoding: .utf8)
         }
         if body.contains(Self.markerPrefix) {
-            return ActionResult(
-                actionId: Self.id,
-                success: true,
-                message: "Shell RC marker already present at \(rcURL.path)",
-                dryRun: false,
-                plannedSteps: steps + ["Skipped append - marker already present"],
-                cleanupNotes: cleanup,
-                artifacts: [rcURL.path]
-            )
+            return installAlreadyPresentResult(rcURL: rcURL, steps: steps, cleanup: cleanup)
         }
         if !body.isEmpty && !body.hasSuffix("\n") {
             body += "\n"
@@ -115,15 +99,19 @@ public struct ShellRCLabAction: LabAction {
         body += marker + "\n"
         try body.write(to: rcURL, atomically: true, encoding: .utf8)
 
-        return ActionResult(
-            actionId: Self.id,
-            success: true,
-            message: "Installed shell RC lab marker at \(rcURL.path) (comment line only)",
-            dryRun: false,
-            plannedSteps: steps,
-            cleanupNotes: cleanup,
-            artifacts: [rcURL.path]
-        )
+        return installSuccessResult(rcURL: rcURL, steps: steps, cleanup: cleanup)
+    }
+
+    private func installDryRunResult(rcURL: URL, steps: [String], cleanup: [String]) -> ActionResult {
+        ActionResult(actionId: Self.id, success: true, message: "Dry-run: would append shell RC marker to \(rcURL.path)", dryRun: true, plannedSteps: steps, cleanupNotes: cleanup, artifacts: [rcURL.path])
+    }
+
+    private func installAlreadyPresentResult(rcURL: URL, steps: [String], cleanup: [String]) -> ActionResult {
+        ActionResult(actionId: Self.id, success: true, message: "Shell RC marker already present at \(rcURL.path)", dryRun: false, plannedSteps: steps + ["Skipped append - marker already present"], cleanupNotes: cleanup, artifacts: [rcURL.path])
+    }
+
+    private func installSuccessResult(rcURL: URL, steps: [String], cleanup: [String]) -> ActionResult {
+        ActionResult(actionId: Self.id, success: true, message: "Installed shell RC lab marker at \(rcURL.path) (comment line only)", dryRun: false, plannedSteps: steps, cleanupNotes: cleanup, artifacts: [rcURL.path])
     }
 
     private func status(rcURL: URL, marker: String) throws -> ActionResult {

@@ -5,14 +5,7 @@ import RootstockCore
 final class ReportTests: XCTestCase {
     func testJSONAndSARIFAndMarkdown() throws {
         let findings = [
-            Finding(
-                id: "rootstock.check.host.identity",
-                title: "Host",
-                severity: .info,
-                category: .host,
-                evidence: [Evidence(type: "host", detail: "ok")],
-                dryRunSafe: true
-            ),
+            Finding(id: "rootstock.check.host.identity", title: "Host", severity: .info, category: .host, resolution: .init(evidence: [Evidence(type: "host", detail: "ok")]), runtime: .init(dryRunSafe: true)),
         ]
         let json = try ReportWriter.render(format: .json, findings: findings)
         XCTAssertFalse(json.isEmpty)

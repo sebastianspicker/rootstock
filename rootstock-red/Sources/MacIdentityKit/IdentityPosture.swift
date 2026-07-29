@@ -11,206 +11,251 @@ public struct IdentityPostureCollector: Collector {
 
     public init() {}
 
+    private struct OpenDirectorySignals {
+        let paths: [String]
+        let adBound: Bool?
+    }
+
+    private struct PlatformSSOSignals {
+        let paths: [String]
+        let present: Bool?
+    }
+
     public func collect(context: EvaluationContext) async throws -> CollectedState {
         let fm = FileManager.default
         var notes: [String] = [
             "Identity posture via filesystem heuristics (no dscl/osascript)",
         ]
-        var odConfigPaths: [String] = []
-        var ssoPaths: [String] = []
-
-        // MARK: - Open Directory / Active Directory bind
-
-        let adDirConfig = "/Library/Preferences/OpenDirectory/Configurations/Active Directory"
-        let odConfigsRoot = "/Library/Preferences/OpenDirectory/Configurations"
-        let adPlist = "/Library/Preferences/DirectoryService/ActiveDirectory.plist"
-        let dsADContact = "/Library/Preferences/DirectoryService/ActiveDirectoryContact.plist"
-        let dsConfigPlist = "/Library/Preferences/DirectoryService/DirectoryService.plist"
-        let dsSearchPlist = "/Library/Preferences/DirectoryService/SearchNodeConfig.plist"
-        let dsconfigadState = "/Library/Preferences/OpenDirectory/Configurations/Active Directory/Active Directory.plist"
-        let comAppleDirectoryService =
-            "/Library/Preferences/com.apple.DirectoryService.plist"
-
-        let adCandidates = [
-            adDirConfig,
-            adPlist,
-            dsADContact,
-            dsconfigadState,
-        ]
-        for path in adCandidates {
-            let exists = fm.fileExists(atPath: path)
-            let readable = fm.isReadableFile(atPath: path)
-            if exists {
-                odConfigPaths.append(path)
-                notes.append("AD candidate: \(path) exists=\(exists) readable=\(readable)")
-            } else {
-                notes.append("AD candidate: \(path) missing")
-            }
-        }
-
-        // List OD configuration nodes when readable (names only).
-        var odConfigEntries: [String] = []
-        if fm.fileExists(atPath: odConfigsRoot) {
-            odConfigPaths.append(odConfigsRoot)
-            if let entries = try? fm.contentsOfDirectory(atPath: odConfigsRoot) {
-                odConfigEntries = entries.sorted()
-                notes.append(
-                    "OD Configurations listable (\(odConfigEntries.count)): \(odConfigEntries.joined(separator: ", "))"
-                )
-                for name in odConfigEntries {
-                    let child = (odConfigsRoot as NSString).appendingPathComponent(name)
-                    if !odConfigPaths.contains(child) {
-                        odConfigPaths.append(child)
-                    }
-                }
-            } else {
-                notes.append("OD Configurations present but not listable (permissions)")
-            }
-        } else {
-            notes.append("OD Configurations root missing: \(odConfigsRoot)")
-        }
-
-        for path in [dsConfigPlist, dsSearchPlist, comAppleDirectoryService] {
-            let exists = fm.fileExists(atPath: path)
-            notes.append("DirectoryService prefs: \(path) exists=\(exists)")
-            if exists {
-                odConfigPaths.append(path)
-            }
-        }
-
-        let adPathHit = adCandidates.contains { fm.fileExists(atPath: $0) }
-        let adNameHit = odConfigEntries.contains {
-            $0.localizedCaseInsensitiveContains("Active Directory")
-                || $0.localizedCaseInsensitiveContains("ActiveDirectory")
-                || $0.caseInsensitiveCompare("AD") == .orderedSame
-        }
-        let adBound: Bool?
-        if adPathHit || adNameHit {
-            adBound = true
-            notes.append("AD bind signal: positive (path and/or OD node name)")
-        } else if fm.fileExists(atPath: odConfigsRoot),
-                  (try? fm.contentsOfDirectory(atPath: odConfigsRoot)) != nil
-        {
-            // Readable OD configs and no AD node → not bound (heuristic).
-            adBound = false
-            notes.append("AD bind signal: negative (OD configs readable, no AD node/path)")
-        } else {
-            adBound = nil
-            notes.append("AD bind signal: unknown (insufficient OD path visibility)")
-        }
-
-        // MARK: - Kerberos
-
-        let kerberosPrefs = "/Library/Preferences/edu.mit.Kerberos"
-        let kerberosConf = "/etc/krb5.conf"
-        let kerberosConfPrivate = "/private/etc/krb5.conf"
-        let kerberosHome = (NSHomeDirectory() as NSString)
-            .appendingPathComponent("Library/Preferences/edu.mit.Kerberos")
-        let kerberosHits = [kerberosPrefs, kerberosConf, kerberosConfPrivate, kerberosHome].filter {
-            fm.fileExists(atPath: $0)
-        }
-        for path in [kerberosPrefs, kerberosConf, kerberosConfPrivate, kerberosHome] {
-            notes.append("Kerberos: \(path) exists=\(fm.fileExists(atPath: path))")
-        }
-        let kerberosConfigPresent = !kerberosHits.isEmpty
-        if kerberosConfigPresent {
-            notes.append("Kerberos config present at: \(kerberosHits.joined(separator: ", "))")
-        }
-
-        // MARK: - Platform SSO / AppSSO
-
-        let home = NSHomeDirectory()
-        let platformSSOSystem = "/Library/Application Support/com.apple.PlatformSSO"
-        let platformSSOUser =
-            (home as NSString).appendingPathComponent(
-                "Library/Application Support/com.apple.PlatformSSO"
-            )
-        let platformSSOPrefs = [
-            "/Library/Preferences/com.apple.PlatformSSO.plist",
-            "/Library/Managed Preferences/com.apple.PlatformSSO.plist",
-            "/Library/Managed Preferences/com.apple.AppSSO.plist",
-            "/Library/Preferences/com.apple.AppSSO.plist",
-            "/Library/Managed Preferences/com.apple.AppSSOAgent.plist",
-        ]
-        let appSupport = "/Library/Application Support"
-
-        for path in [platformSSOSystem, platformSSOUser] {
-            let exists = fm.fileExists(atPath: path)
-            notes.append("PlatformSSO support dir: \(path) exists=\(exists)")
-            if exists {
-                ssoPaths.append(path)
-            }
-        }
-        for path in platformSSOPrefs {
-            let exists = fm.fileExists(atPath: path)
-            notes.append("SSO prefs: \(path) exists=\(exists)")
-            if exists {
-                ssoPaths.append(path)
-            }
-        }
-
-        // Scan Application Support for SSO-related containers (names only).
-        if let supportEntries = try? fm.contentsOfDirectory(atPath: appSupport) {
-            let ssoNamed = supportEntries.filter { name in
-                let lower = name.lowercased()
-                return lower.contains("platformsso")
-                    || lower.contains("appssso")
-                    || lower.contains("app.sso")
-                    || lower.contains("com.apple.appsso")
-                    || lower.contains("ssoextension")
-                    || lower.contains("sso-extension")
-            }
-            for name in ssoNamed.sorted() {
-                let path = (appSupport as NSString).appendingPathComponent(name)
-                if !ssoPaths.contains(path) {
-                    ssoPaths.append(path)
-                }
-                notes.append("SSO-related Application Support: \(path)")
-            }
-        }
-
-        // Managed Preferences: any domain suggesting Platform SSO / AppSSO.
-        let managedPrefs = "/Library/Managed Preferences"
-        if let managed = try? fm.contentsOfDirectory(atPath: managedPrefs) {
-            let ssoManaged = managed.filter { name in
-                let lower = name.lowercased()
-                return lower.contains("platformsso")
-                    || lower.contains("appssso")
-                    || lower.contains("appsso")
-                    || lower.contains("sso")
-            }
-            for name in ssoManaged.sorted() {
-                let path = (managedPrefs as NSString).appendingPathComponent(name)
-                if !ssoPaths.contains(path) {
-                    ssoPaths.append(path)
-                }
-                notes.append("SSO managed preference: \(path)")
-            }
-        }
-
-        let platformSSO: Bool? = !ssoPaths.isEmpty ? true : false
+        let openDirectory = Self.openDirectorySignals(fileManager: fm, notes: &notes)
+        let kerberosConfigPresent = Self.kerberosConfiguration(fileManager: fm, notes: &notes)
+        let platformSSO = Self.platformSSOSignals(fileManager: fm, notes: &notes)
+        let odConfigPaths = Array(Set(openDirectory.paths)).sorted()
+        let ssoPaths = Array(Set(platformSSO.paths)).sorted()
         notes.append(
-            "Platform SSO signal: \(platformSSO == true ? "positive" : "negative") "
+            "Platform SSO signal: \(platformSSO.present == true ? "positive" : "negative") "
                 + "(\(ssoPaths.count) path(s))"
         )
         notes.append(
-            "Summary: adBound=\(adBound.rootstockDescribe) platformSSO=\(platformSSO.rootstockDescribe) "
+            "Summary: adBound=\(openDirectory.adBound.rootstockDescribe) platformSSO=\(platformSSO.present.rootstockDescribe) "
                 + "kerberos=\(kerberosConfigPresent) odPaths=\(odConfigPaths.count) ssoPaths=\(ssoPaths.count)"
         )
 
         var state = CollectedState()
         state.identity = IdentityState(
-            adBound: adBound,
-            platformSSO: platformSSO,
+            adBound: openDirectory.adBound,
+            platformSSO: platformSSO.present,
             kerberosConfigPresent: kerberosConfigPresent,
             odConfigPaths: Array(Set(odConfigPaths)).sorted(),
             ssoPaths: Array(Set(ssoPaths)).sorted(),
             notes: notes
         )
         state.collectorNotes[Self.id] =
-            "identity fs probes adBound=\(adBound.rootstockDescribe) "
-            + "platformSSO=\(platformSSO.rootstockDescribe) kerberos=\(kerberosConfigPresent)"
+            "identity fs probes adBound=\(openDirectory.adBound.rootstockDescribe) "
+            + "platformSSO=\(platformSSO.present.rootstockDescribe) kerberos=\(kerberosConfigPresent)"
         return state
+    }
+
+    private static func openDirectorySignals(
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> OpenDirectorySignals {
+        let root = "/Library/Preferences/OpenDirectory/Configurations"
+        let candidates = [
+            "\(root)/Active Directory",
+            "/Library/Preferences/DirectoryService/ActiveDirectory.plist",
+            "/Library/Preferences/DirectoryService/ActiveDirectoryContact.plist",
+            "\(root)/Active Directory/Active Directory.plist",
+        ]
+        var paths = recordADCandidates(candidates, fileManager: fileManager, notes: &notes)
+        let entries = recordConfigurationRoot(root, paths: &paths, fileManager: fileManager, notes: &notes)
+        recordDirectoryServicePreferences(paths: &paths, fileManager: fileManager, notes: &notes)
+        let bound = adBinding(
+            candidates: candidates,
+            entries: entries,
+            root: root,
+            fileManager: fileManager,
+            notes: &notes
+        )
+        return OpenDirectorySignals(paths: paths, adBound: bound)
+    }
+
+    private static func recordADCandidates(
+        _ candidates: [String],
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> [String] {
+        var paths: [String] = []
+        for path in candidates {
+            let exists = fileManager.fileExists(atPath: path)
+            if exists {
+                paths.append(path)
+                notes.append("AD candidate: \(path) exists=\(exists) readable=\(fileManager.isReadableFile(atPath: path))")
+            } else {
+                notes.append("AD candidate: \(path) missing")
+            }
+        }
+        return paths
+    }
+
+    private static func recordConfigurationRoot(
+        _ root: String,
+        paths: inout [String],
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> [String] {
+        guard fileManager.fileExists(atPath: root) else {
+            notes.append("OD Configurations root missing: \(root)")
+            return []
+        }
+        paths.append(root)
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: root) else {
+            notes.append("OD Configurations present but not listable (permissions)")
+            return []
+        }
+        let sortedEntries = entries.sorted()
+        notes.append("OD Configurations listable (\(sortedEntries.count)): \(sortedEntries.joined(separator: ", "))")
+        for name in sortedEntries {
+            let path = (root as NSString).appendingPathComponent(name)
+            if !paths.contains(path) { paths.append(path) }
+        }
+        return sortedEntries
+    }
+
+    private static func recordDirectoryServicePreferences(
+        paths: inout [String],
+        fileManager: FileManager,
+        notes: inout [String]
+    ) {
+        let preferences = [
+            "/Library/Preferences/DirectoryService/DirectoryService.plist",
+            "/Library/Preferences/DirectoryService/SearchNodeConfig.plist",
+            "/Library/Preferences/com.apple.DirectoryService.plist",
+        ]
+        for path in preferences {
+            let exists = fileManager.fileExists(atPath: path)
+            notes.append("DirectoryService prefs: \(path) exists=\(exists)")
+            if exists { paths.append(path) }
+        }
+    }
+
+    private static func adBinding(
+        candidates: [String],
+        entries: [String],
+        root: String,
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> Bool? {
+        let pathHit = candidates.contains { fileManager.fileExists(atPath: $0) }
+        let nameHit = entries.contains {
+            $0.localizedCaseInsensitiveContains("Active Directory")
+                || $0.localizedCaseInsensitiveContains("ActiveDirectory")
+                || $0.caseInsensitiveCompare("AD") == .orderedSame
+        }
+        if pathHit || nameHit {
+            notes.append("AD bind signal: positive (path and/or OD node name)")
+            return true
+        }
+        if fileManager.fileExists(atPath: root), (try? fileManager.contentsOfDirectory(atPath: root)) != nil {
+            notes.append("AD bind signal: negative (OD configs readable, no AD node/path)")
+            return false
+        }
+        notes.append("AD bind signal: unknown (insufficient OD path visibility)")
+        return nil
+    }
+
+    private static func kerberosConfiguration(fileManager: FileManager, notes: inout [String]) -> Bool {
+        let paths = [
+            "/Library/Preferences/edu.mit.Kerberos", "/etc/krb5.conf", "/private/etc/krb5.conf",
+            (NSHomeDirectory() as NSString).appendingPathComponent("Library/Preferences/edu.mit.Kerberos"),
+        ]
+        let hits = paths.filter { fileManager.fileExists(atPath: $0) }
+        for path in paths {
+            notes.append("Kerberos: \(path) exists=\(fileManager.fileExists(atPath: path))")
+        }
+        if !hits.isEmpty {
+            notes.append("Kerberos config present at: \(hits.joined(separator: ", "))")
+        }
+        return !hits.isEmpty
+    }
+
+    private static func platformSSOSignals(
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> PlatformSSOSignals {
+        let home = NSHomeDirectory()
+        var paths = existingPaths(
+            [
+                "/Library/Application Support/com.apple.PlatformSSO",
+                (home as NSString).appendingPathComponent("Library/Application Support/com.apple.PlatformSSO"),
+            ],
+            prefix: "PlatformSSO support dir",
+            fileManager: fileManager,
+            notes: &notes
+        )
+        paths += existingPaths(
+            [
+                "/Library/Preferences/com.apple.PlatformSSO.plist",
+                "/Library/Managed Preferences/com.apple.PlatformSSO.plist",
+                "/Library/Managed Preferences/com.apple.AppSSO.plist",
+                "/Library/Preferences/com.apple.AppSSO.plist",
+                "/Library/Managed Preferences/com.apple.AppSSOAgent.plist",
+            ],
+            prefix: "SSO prefs",
+            fileManager: fileManager,
+            notes: &notes
+        )
+        paths += ssoDirectoryPaths(
+            directory: "/Library/Application Support",
+            prefix: "SSO-related Application Support",
+            fileManager: fileManager,
+            matches: applicationSupportSSOName,
+            notes: &notes
+        )
+        paths += ssoDirectoryPaths(
+            directory: "/Library/Managed Preferences",
+            prefix: "SSO managed preference",
+            fileManager: fileManager,
+            matches: managedPreferenceSSOName,
+            notes: &notes
+        )
+        return PlatformSSOSignals(paths: paths, present: paths.isEmpty ? false : true)
+    }
+
+    private static func existingPaths(
+        _ candidates: [String],
+        prefix: String,
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> [String] {
+        for path in candidates {
+            notes.append("\(prefix): \(path) exists=\(fileManager.fileExists(atPath: path))")
+        }
+        return candidates.filter { fileManager.fileExists(atPath: $0) }
+    }
+
+    private static func ssoDirectoryPaths(
+        directory: String,
+        prefix: String,
+        fileManager: FileManager,
+        matches: (String) -> Bool,
+        notes: inout [String]
+    ) -> [String] {
+        guard let entries = try? fileManager.contentsOfDirectory(atPath: directory) else { return [] }
+        let paths = entries.filter(matches).sorted().map { (directory as NSString).appendingPathComponent($0) }
+        for path in paths { notes.append("\(prefix): \(path)") }
+        return paths
+    }
+
+    private static func applicationSupportSSOName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return ["platformsso", "appssso", "app.sso", "com.apple.appsso", "ssoextension", "sso-extension"].contains {
+            lower.contains($0)
+        }
+    }
+
+    private static func managedPreferenceSSOName(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return ["platformsso", "appssso", "appsso", "sso"].contains { lower.contains($0) }
     }
 
 }

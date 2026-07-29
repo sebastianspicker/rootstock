@@ -54,26 +54,13 @@ public struct LaunchdSecurityDisableCompoundVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: security >= 1
+            Finding(id: Self.id, title: security >= 1
                     ? "Launchd override × security-product disable compound"
-                    : "Launchd override × sensor-gap compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1562.001", "T1489"],
-                remediation: [
+                    : "Launchd override × sensor-gap compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1562.001", "T1489"], remediation: [
                     "IR: verify EDR/Santa/osquery labels not present in disabled.plist",
                     "Correlate launchctl disable events with attacker timeline",
                     "OPSEC: assessment narrative only - not a disable toolkit",
-                ],
-                falsePositiveNotes: "Managed Macs may legitimately disable lab agents; verify change control.",
-                dryRunSafe: true,
-                opsecScore: 30,
-                esfExpected: ["OPEN", "WRITE"]
-            ),
+                ], falsePositiveNotes: "Managed Macs may legitimately disable lab agents; verify change control."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 30, esfExpected: ["OPEN", "WRITE"])),
         ]
     }
 }

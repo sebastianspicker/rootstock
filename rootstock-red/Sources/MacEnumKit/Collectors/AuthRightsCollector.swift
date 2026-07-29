@@ -51,55 +51,34 @@ public struct AuthRightsCollector: Collector {
             "Auth rights / PackageKit surface: path presence only - no auth.db dump, no right enumeration",
         ]
 
-        var authDbPresent: Bool?
-        var authDbPath: String?
-        for path in Self.authDbCandidates {
-            if fm.fileExists(atPath: path) {
-                authDbPresent = true
-                authDbPath = path
-                notes.append("auth.db present: \(path) (not reading rows)")
-                break
-            }
-        }
-        if authDbPresent == nil {
-            authDbPresent = false
-            notes.append("auth.db not observed at catalog paths (may be SIP/root restricted)")
-        }
+        let authDbPath = Self.authDbCandidates.first(where: fm.fileExists(atPath:))
+        let authDbPresent: Bool? = authDbPath != nil
+        notes.append(
+            authDbPath.map { "auth.db present: \($0) (not reading rows)" }
+                ?? "auth.db not observed at catalog paths (may be SIP/root restricted)"
+        )
 
-        var authorizationPlistPaths: [String] = []
-        for path in Self.authorizationPlistCandidates {
-            if fm.fileExists(atPath: path) {
-                authorizationPlistPaths.append(path)
-                notes.append("authorization.plist: \(path)")
-            }
-        }
-
-        var packageKitPaths: [String] = []
-        for path in Self.packageKitCandidates {
-            if fm.fileExists(atPath: path) {
-                packageKitPaths.append(path)
-                notes.append("packagekit: \(path)")
-            }
-        }
-
-        var rightsHintCount = 0
-        for path in Self.authdCandidates {
-            if fm.fileExists(atPath: path) {
-                rightsHintCount += 1
-                notes.append("authd: \(path)")
-            }
-        }
-        for path in Self.rightsHintCandidates {
-            if fm.fileExists(atPath: path) {
-                rightsHintCount += 1
-                notes.append("rights_hint: \(path)")
-            }
-        }
+        let authorizationPlistPaths = Self.existingPaths(
+            Self.authorizationPlistCandidates,
+            fileManager: fm,
+            notePrefix: "authorization.plist",
+            notes: &notes
+        )
+        let packageKitPaths = Self.existingPaths(
+            Self.packageKitCandidates,
+            fileManager: fm,
+            notePrefix: "packagekit",
+            notes: &notes
+        )
+        let authdPaths = Self.existingPaths(Self.authdCandidates, fileManager: fm, notePrefix: "authd", notes: &notes)
+        let rightsHintPaths = Self.existingPaths(
+            Self.rightsHintCandidates,
+            fileManager: fm,
+            notePrefix: "rights_hint",
+            notes: &notes
+        )
         // Count authorization plists as rights-surface hints too.
-        rightsHintCount += authorizationPlistPaths.count
-
-        authorizationPlistPaths = Array(Set(authorizationPlistPaths)).sorted()
-        packageKitPaths = Array(Set(packageKitPaths)).sorted()
+        let rightsHintCount = authdPaths.count + rightsHintPaths.count + authorizationPlistPaths.count
 
         var state = CollectedState()
         state.authRights = AuthRightsState(
@@ -116,5 +95,18 @@ public struct AuthRightsCollector: Collector {
             + "packageKit=\(packageKitPaths.count) "
             + "rightsHints=\(rightsHintCount)"
         return state
+    }
+
+    private static func existingPaths(
+        _ candidates: [String],
+        fileManager: FileManager,
+        notePrefix: String,
+        notes: inout [String]
+    ) -> [String] {
+        let paths = candidates.filter(fileManager.fileExists(atPath:))
+        for path in paths {
+            notes.append("\(notePrefix): \(path)")
+        }
+        return Array(Set(paths)).sorted()
     }
 }

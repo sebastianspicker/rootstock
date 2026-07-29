@@ -10,116 +10,106 @@ public struct NetworkCollector: Collector {
     public static let id = "collect.network"
     public static let cost: CollectorCost = .medium
 
+    private static let sshPlists = [
+        "/System/Library/LaunchDaemons/ssh.plist",
+        "/System/Library/LaunchDaemons/com.openssh.sshd.plist",
+    ]
+    private static let screenSharingPlists = [
+        "/System/Library/LaunchDaemons/com.apple.screensharing.plist",
+        "/System/Library/LaunchAgents/com.apple.screensharing.agent.plist",
+        "/System/Library/LaunchAgents/com.apple.screensharing.MessagesAgent.plist",
+    ]
+    private static let remoteManagementPreferences = [
+        "/Library/Preferences/com.apple.RemoteManagement.plist",
+        "/Library/Application Support/Apple/Remote Desktop/RemoteManagement.launchd",
+    ]
+    private static let fileSharingPlists = [
+        "/System/Library/LaunchDaemons/com.apple.smbd.plist",
+        "/System/Library/LaunchDaemons/com.apple.AppleFileServer.plist",
+        "/System/Library/LaunchDaemons/com.apple.smb.preferences.plist",
+    ]
+
+    private struct ProbeSummary {
+        let remoteLoginPlistPresent: Bool
+        let screenSharingPlistPresent: Bool
+        let fileSharingPlistPresent: Bool
+        let remoteManagementPrefsPresent: Bool
+        let sshdConfigPresent: Bool
+        var notes: [String]
+    }
+
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
         let fm = FileManager.default
-        var notes: [String] = [
-            "Path-heuristic network/sharing posture only",
-            "LaunchDaemon presence ≠ service enabled; listening ports not scanned (avoid root/shell storm)",
-        ]
-
-        // Remote Login (sshd) - system plists exist on stock macOS even when disabled.
-        let sshPlists = [
-            "/System/Library/LaunchDaemons/ssh.plist",
-            "/System/Library/LaunchDaemons/com.openssh.sshd.plist",
-        ]
-        let remoteLoginPlistPresent = sshPlists.contains { fm.fileExists(atPath: $0) }
-        for path in sshPlists {
-            notes.append("Remote Login: \(path) exists=\(fm.fileExists(atPath: path))")
-        }
-        let sshdConfig = "/etc/ssh/sshd_config"
-        let sshdConfigAlt = "/private/etc/ssh/sshd_config"
-        let sshdConfigPresent = fm.fileExists(atPath: sshdConfig) || fm.fileExists(atPath: sshdConfigAlt)
-        notes.append("Remote Login: sshd_config present=\(sshdConfigPresent)")
-
-        // Screen Sharing / ARD
-        let screenSharingPlists = [
-            "/System/Library/LaunchDaemons/com.apple.screensharing.plist",
-            "/System/Library/LaunchAgents/com.apple.screensharing.agent.plist",
-            "/System/Library/LaunchAgents/com.apple.screensharing.MessagesAgent.plist",
-        ]
-        let screenSharingPlistPresent = screenSharingPlists.contains { fm.fileExists(atPath: $0) }
-        for path in screenSharingPlists {
-            notes.append("Screen Sharing: \(path) exists=\(fm.fileExists(atPath: path))")
-        }
-
-        let remoteMgmtPrefs = [
-            "/Library/Preferences/com.apple.RemoteManagement.plist",
-            "/Library/Application Support/Apple/Remote Desktop/RemoteManagement.launchd",
-        ]
-        let remoteManagementPrefsPresent = remoteMgmtPrefs.contains { fm.fileExists(atPath: $0) }
-        for path in remoteMgmtPrefs {
-            notes.append("Remote Management: \(path) exists=\(fm.fileExists(atPath: path))")
-        }
-
-        // File Sharing (SMB / AFP)
-        let fileSharingPlists = [
-            "/System/Library/LaunchDaemons/com.apple.smbd.plist",
-            "/System/Library/LaunchDaemons/com.apple.AppleFileServer.plist",
-            "/System/Library/LaunchDaemons/com.apple.smb.preferences.plist",
-        ]
-        let fileSharingPlistPresent = fileSharingPlists.contains { fm.fileExists(atPath: $0) }
-        for path in fileSharingPlists {
-            notes.append("File Sharing: \(path) exists=\(fm.fileExists(atPath: path))")
-        }
-
-        // Extra sharing surfaces (notes only)
-        let extras = [
-            ("Printer Sharing", "/System/Library/LaunchDaemons/org.cups.cupsd.plist"),
-            ("Remote Apple Events", "/System/Library/LaunchDaemons/com.apple.AEServer.plist"),
-            ("AirPlay Receiver agent", "/System/Library/LaunchAgents/com.apple.AirPlayUIAgent.plist"),
-        ]
-        for (label, path) in extras {
-            notes.append("\(label): \(path) exists=\(fm.fileExists(atPath: path))")
-        }
-
-        // launchd disable overrides (often root-only) - inventory readability only.
-        let overridePaths = [
-            "/var/db/com.apple.xpc.launchd/disabled.plist",
-            "/var/db/launchd.db/com.apple.launchd/overrides.plist",
-        ]
-        for path in overridePaths {
-            let exists = fm.fileExists(atPath: path)
-            let readable = fm.isReadableFile(atPath: path)
-            notes.append("launchd overrides: \(path) exists=\(exists) readable=\(readable)")
-        }
-
-        notes.append(
-            "Summary: sshPlist=\(remoteLoginPlistPresent) screenSharingPlist=\(screenSharingPlistPresent) fileSharingPlist=\(fileSharingPlistPresent) remoteMgmtPrefs=\(remoteManagementPrefsPresent)"
-        )
-        if remoteManagementPrefsPresent {
-            notes.append(
-                "RemoteManagement prefs present - ARD/screen sharing was likely configured at some point (not definitive live state)"
-            )
-        }
+        var summary = Self.probe(fileManager: fm)
 
         // Likely-enabled (conservative): system plists alone are insufficient.
         // RemoteManagement prefs are a stronger ARD/screen-sharing configuration signal.
         // SSH/SMB enablement requires launchctl/systemsetup - leave nil without shell.
         let remoteLoginSSH: Bool? = nil
-        let screenSharingARD: Bool? = remoteManagementPrefsPresent ? true : nil
+        let screenSharingARD: Bool? = summary.remoteManagementPrefsPresent ? true : nil
         let fileSharingSMB: Bool? = nil
-        notes.append(
+        summary.notes.append(
             "Likely-enabled: ssh=\(remoteLoginSSH.map(String.init(describing:)) ?? "nil") "
                 + "screen=\(screenSharingARD.map(String.init(describing:)) ?? "nil") "
                 + "file=\(fileSharingSMB.map(String.init(describing:)) ?? "nil")"
         )
 
         var state = CollectedState()
-        state.network = NetworkState(
-            remoteLoginSSH: remoteLoginSSH,
-            screenSharingARD: screenSharingARD,
-            fileSharingSMB: fileSharingSMB,
-            remoteLoginPlistPresent: remoteLoginPlistPresent,
-            screenSharingPlistPresent: screenSharingPlistPresent,
-            fileSharingPlistPresent: fileSharingPlistPresent,
-            remoteManagementPrefsPresent: remoteManagementPrefsPresent,
-            sshdConfigPresent: sshdConfigPresent,
-            notes: notes
-        )
+        state.network = NetworkState(reachability: .init(remoteLoginSSH: remoteLoginSSH, screenSharingARD: screenSharingARD, fileSharingSMB: fileSharingSMB), artifacts: .init(remoteLoginPlistPresent: summary.remoteLoginPlistPresent, screenSharingPlistPresent: summary.screenSharingPlistPresent, fileSharingPlistPresent: summary.fileSharingPlistPresent, remoteManagementPrefsPresent: summary.remoteManagementPrefsPresent, sshdConfigPresent: summary.sshdConfigPresent), notes: summary.notes)
         state.collectorNotes[Self.id] =
-            "sharing path heuristics (sshPlist=\(remoteLoginPlistPresent), screenPlist=\(screenSharingPlistPresent), filePlist=\(fileSharingPlistPresent), ardPrefs=\(remoteManagementPrefsPresent))"
+            "sharing path heuristics (sshPlist=\(summary.remoteLoginPlistPresent), screenPlist=\(summary.screenSharingPlistPresent), filePlist=\(summary.fileSharingPlistPresent), ardPrefs=\(summary.remoteManagementPrefsPresent))"
         return state
+    }
+
+    private static func probe(fileManager: FileManager) -> ProbeSummary {
+        var notes = [
+            "Path-heuristic network/sharing posture only",
+            "LaunchDaemon presence ≠ service enabled; listening ports not scanned (avoid root/shell storm)",
+        ]
+        let ssh = record(paths: sshPlists, label: "Remote Login", fileManager: fileManager, notes: &notes)
+        let sshConfig = fileManager.fileExists(atPath: "/etc/ssh/sshd_config")
+            || fileManager.fileExists(atPath: "/private/etc/ssh/sshd_config")
+        notes.append("Remote Login: sshd_config present=\(sshConfig)")
+        let screen = record(paths: screenSharingPlists, label: "Screen Sharing", fileManager: fileManager, notes: &notes)
+        let management = record(paths: remoteManagementPreferences, label: "Remote Management", fileManager: fileManager, notes: &notes)
+        let fileSharing = record(paths: fileSharingPlists, label: "File Sharing", fileManager: fileManager, notes: &notes)
+        appendExtraSurfaces(fileManager: fileManager, notes: &notes)
+        appendLaunchdOverrides(fileManager: fileManager, notes: &notes)
+        notes.append("Summary: sshPlist=\(ssh) screenSharingPlist=\(screen) fileSharingPlist=\(fileSharing) remoteMgmtPrefs=\(management)")
+        if management {
+            notes.append("RemoteManagement prefs present - ARD/screen sharing was likely configured at some point (not definitive live state)")
+        }
+        return ProbeSummary(remoteLoginPlistPresent: ssh, screenSharingPlistPresent: screen, fileSharingPlistPresent: fileSharing, remoteManagementPrefsPresent: management, sshdConfigPresent: sshConfig, notes: notes)
+    }
+
+    private static func record(paths: [String], label: String, fileManager: FileManager, notes: inout [String]) -> Bool {
+        for path in paths {
+            notes.append("\(label): \(path) exists=\(fileManager.fileExists(atPath: path))")
+        }
+        return paths.contains { fileManager.fileExists(atPath: $0) }
+    }
+
+    private static func appendExtraSurfaces(fileManager: FileManager, notes: inout [String]) {
+        let surfaces = [
+            ("Printer Sharing", "/System/Library/LaunchDaemons/org.cups.cupsd.plist"),
+            ("Remote Apple Events", "/System/Library/LaunchDaemons/com.apple.AEServer.plist"),
+            ("AirPlay Receiver agent", "/System/Library/LaunchAgents/com.apple.AirPlayUIAgent.plist"),
+        ]
+        for (label, path) in surfaces {
+            notes.append("\(label): \(path) exists=\(fileManager.fileExists(atPath: path))")
+        }
+    }
+
+    private static func appendLaunchdOverrides(fileManager: FileManager, notes: inout [String]) {
+        for path in [
+            "/var/db/com.apple.xpc.launchd/disabled.plist",
+            "/var/db/launchd.db/com.apple.launchd/overrides.plist",
+        ] {
+            let exists = fileManager.fileExists(atPath: path)
+            let readable = fileManager.isReadableFile(atPath: path)
+            notes.append("launchd overrides: \(path) exists=\(exists) readable=\(readable)")
+        }
     }
 }

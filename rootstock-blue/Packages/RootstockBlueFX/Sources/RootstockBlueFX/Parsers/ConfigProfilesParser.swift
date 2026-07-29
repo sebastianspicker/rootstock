@@ -11,37 +11,53 @@ public struct ConfigProfilesParser: ArtifactParser {
 
     public init() {}
 
+    private struct ProfileDetails {
+        let displayName: String
+        let identifier: String
+        let type: String
+        let organization: String
+        let path: String
+        let sourceURL: URL
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
+        return collectKnownProfiles(root, seen: &seen)
+            + collectPayloadProfiles(root, seen: &seen)
+            + collectSettingsProfiles(root, seen: &seen)
+            + collectManagedPreferences(root, seen: &seen)
+    }
 
-        // Forensic export JSON.
+    private func collectKnownProfiles(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
         if let jsonURL = root.firstExisting([
             "Library/ConfigurationProfiles/profiles.json",
             "var/db/ConfigurationProfiles/profiles.json",
             "private/var/db/ConfigurationProfiles/profiles.json",
         ]) {
             if seen.insert(jsonURL) {
-                events.append(contentsOf: parseProfilesJSON(at: jsonURL))
+                return parseProfilesJSON(at: jsonURL)
             }
         }
+        return []
+    }
 
-        // Payload plists under ConfigurationProfiles/payloads/
-        for url in root.enumerate(matching: { url in
-            url.pathExtension == "plist"
-                && (url.path.contains("ConfigurationProfiles")
-                    || url.path.contains("/payloads/")
-                    || url.path.contains("Managed Preferences")
-                    || url.path.contains("ManagedPreferences"))
-        }) {
-            if !seen.insert(url) { continue }
-            if let e = parsePayloadPlist(at: url) {
-                events.append(e)
-            }
+    private func collectPayloadProfiles(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        root.enumerate(matching: isPayloadPlist).compactMap { url in
+            if !seen.insert(url) { return nil }
+            return parsePayloadPlist(at: url)
         }
+    }
 
-        // Settings directory under var/db/ConfigurationProfiles/Settings/
+    private func isPayloadPlist(_ url: URL) -> Bool {
+        guard url.pathExtension == "plist" else { return false }
+        let path = url.path
+        return path.contains("ConfigurationProfiles") || path.contains("/payloads/")
+            || path.contains("Managed Preferences") || path.contains("ManagedPreferences")
+    }
+
+    private func collectSettingsProfiles(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for dirRel in [
             "var/db/ConfigurationProfiles/Settings",
             "private/var/db/ConfigurationProfiles/Settings",
@@ -61,9 +77,11 @@ public struct ConfigProfilesParser: ArtifactParser {
                 }
             }
         }
+        return events
+    }
 
-        // Managed Preferences directory (enumerate plists already covered above;
-        // also catch non-payload preference names as host config).
+    private func collectManagedPreferences(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for dirRel in [
             "Library/Managed Preferences",
             "private/var/db/Managed Preferences",
@@ -82,7 +100,6 @@ public struct ConfigProfilesParser: ArtifactParser {
                 }
             }
         }
-
         return events
     }
 
@@ -107,103 +124,84 @@ public struct ConfigProfilesParser: ArtifactParser {
         }
 
         return entries.compactMap { entry in
-            makeEvent(
-                displayName: stringValue(entry["PayloadDisplayName"])
-                    ?? stringValue(entry["display_name"])
-                    ?? stringValue(entry["name"])
-                    ?? "",
-                identifier: stringValue(entry["PayloadIdentifier"])
-                    ?? stringValue(entry["identifier"])
-                    ?? "",
-                type: stringValue(entry["PayloadType"])
-                    ?? stringValue(entry["type"])
-                    ?? "",
-                organization: stringValue(entry["PayloadOrganization"])
-                    ?? stringValue(entry["organization"])
-                    ?? "",
-                path: ArtifactRoot.pathKey(url),
-                sourceURL: url
-            )
+            makeEvent(profileDetails(entry, sourceURL: url))
         }
     }
 
     private func parsePayloadPlist(at url: URL) -> EventEnvelope? {
         guard let dict = ArtifactIO.plistDict(contentsOf: url) else { return nil }
 
-        let displayName = stringValue(dict["PayloadDisplayName"]) ?? ""
-        let identifier = stringValue(dict["PayloadIdentifier"])
-            ?? url.deletingPathExtension().lastPathComponent
-        let type = stringValue(dict["PayloadType"]) ?? ""
-        let organization = stringValue(dict["PayloadOrganization"]) ?? ""
-
-        // Require at least one profile-like field so random plists are skipped.
-        let looksLikeProfile = dict["PayloadDisplayName"] != nil
-            || dict["PayloadIdentifier"] != nil
-            || dict["PayloadType"] != nil
-            || dict["PayloadUUID"] != nil
-            || dict["PayloadOrganization"] != nil
-        guard looksLikeProfile else { return nil }
-        guard !displayName.isEmpty || !identifier.isEmpty || !type.isEmpty else { return nil }
-
-        return makeEvent(
-            displayName: displayName,
-            identifier: identifier,
-            type: type,
-            organization: organization,
-            path: ArtifactRoot.pathKey(url),
-            sourceURL: url
+        guard hasProfileFields(dict) else { return nil }
+        let details = ProfileDetails(
+            displayName: stringValue(dict["PayloadDisplayName"]) ?? "",
+            identifier: stringValue(dict["PayloadIdentifier"]) ?? url.deletingPathExtension().lastPathComponent,
+            type: stringValue(dict["PayloadType"]) ?? "",
+            organization: stringValue(dict["PayloadOrganization"]) ?? "",
+            path: ArtifactRoot.pathKey(url), sourceURL: url
         )
+        guard !details.displayName.isEmpty || !details.identifier.isEmpty || !details.type.isEmpty else { return nil }
+        return makeEvent(details)
+    }
+
+    private func hasProfileFields(_ dict: [String: Any]) -> Bool {
+        ["PayloadDisplayName", "PayloadIdentifier", "PayloadType", "PayloadUUID", "PayloadOrganization"].contains { dict[$0] != nil }
     }
 
     private func parseManagedPreference(at url: URL) -> EventEnvelope? {
         // Fallback for managed preference domain plists without payload keys.
         let domain = url.deletingPathExtension().lastPathComponent
         guard !domain.isEmpty else { return nil }
-        return makeEvent(
-            displayName: domain,
-            identifier: domain,
-            type: "managed_preference",
-            organization: "",
-            path: ArtifactRoot.pathKey(url),
-            sourceURL: url
+        return makeEvent(ProfileDetails(displayName: domain, identifier: domain, type: "managed_preference", organization: "", path: ArtifactRoot.pathKey(url), sourceURL: url))
+    }
+
+    private func profileDetails(_ entry: [String: Any], sourceURL: URL) -> ProfileDetails {
+        ProfileDetails(
+            displayName: firstString(entry, keys: ["PayloadDisplayName", "display_name", "name"]),
+            identifier: firstString(entry, keys: ["PayloadIdentifier", "identifier"]),
+            type: firstString(entry, keys: ["PayloadType", "type"]),
+            organization: firstString(entry, keys: ["PayloadOrganization", "organization"]),
+            path: ArtifactRoot.pathKey(sourceURL), sourceURL: sourceURL
         )
     }
 
-    private func makeEvent(
-        displayName: String,
-        identifier: String,
-        type: String,
-        organization: String,
-        path: String,
-        sourceURL: URL
-    ) -> EventEnvelope? {
-        guard !displayName.isEmpty || !identifier.isEmpty else { return nil }
+    private func firstString(_ entry: [String: Any], keys: [String]) -> String {
+        keys.lazy.compactMap { stringValue(entry[$0]) }.first ?? ""
+    }
 
-        let attrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path)
+    private func makeEvent(_ details: ProfileDetails) -> EventEnvelope? {
+        guard !details.displayName.isEmpty || !details.identifier.isEmpty else { return nil }
+
+        let attrs = try? FileManager.default.attributesOfItem(atPath: details.sourceURL.path)
         let mtime = (attrs?[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
-        let idKey = identifier.isEmpty ? displayName : identifier
+        let idKey = details.identifier.isEmpty ? details.displayName : details.identifier
 
         return EventEnvelope(
-            eventTime: mtime,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "CONFIGPROFILES",
-            eventType: "host.config_profile",
-            entityRefs: [
+            identity: EventEnvelope.Identity(
+                kind: "host.config_profile",
+                label: "CONFIGPROFILES"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: mtime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [
                 EntityID(kind: .host, value: "profile=\(idKey)"),
-                .file(path: path),
+                .file(path: details.path),
             ],
-            fields: [
-                "profile.display_name": displayName,
-                "profile.identifier": identifier,
-                "profile.type": type,
-                "profile.organization": organization,
-                "profile.path": path,
-                FieldTaxonomy.filePath: path,
+                properties: [
+                "profile.display_name": details.displayName,
+                "profile.identifier": details.identifier,
+                "profile.type": details.type,
+                "profile.organization": details.organization,
+                "profile.path": details.path,
+                FieldTaxonomy.filePath: details.path,
                 FieldTaxonomy.eventType: "host.config_profile",
             ],
-            rawRef: path,
-            confidence: 0.94
+                provenance: details.path,
+                confidence: 0.94
+            )
         )
     }
 

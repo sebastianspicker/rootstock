@@ -29,64 +29,52 @@ public struct NotarizationStaplingCollector: Collector {
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         var notes: [String] = [
             "Notarization/stapling surface: tooling + path presence - no ticket forge, no GK bypass",
         ]
-
-        var tooling: [String] = []
-        for path in Self.toolingPaths {
-            if fm.fileExists(atPath: path) {
-                tooling.append(path)
-                notes.append("tooling: \(path)")
-            }
+        let tooling = Self.toolingPaths.filter(fileManager.fileExists(atPath:))
+        let caches = Self.ticketCacheHints.filter(fileManager.fileExists(atPath:))
+        for path in tooling {
+            notes.append("tooling: \(path)")
+        }
+        for path in caches {
+            notes.append("ticket_or_policy_hint: \(path)")
         }
 
-        var caches: [String] = []
-        for path in Self.ticketCacheHints {
-            if fm.fileExists(atPath: path) {
-                caches.append(path)
-                notes.append("ticket_or_policy_hint: \(path)")
-            }
-        }
-
-        // Ad-hoc / unsigned class hints from common download dirs (names only).
-        var unstapledOrAdHocHints: [String] = []
-        let downloadRoots = [
-            NSHomeDirectory() + "/Downloads",
-            NSHomeDirectory() + "/Desktop",
-        ]
-        for root in downloadRoots {
-            guard let names = try? fm.contentsOfDirectory(atPath: root) else { continue }
-            for name in names.prefix(20) {
-                let lower = name.lowercased()
-                if lower.hasSuffix(".dmg")
-                    || lower.hasSuffix(".pkg")
-                    || lower.hasSuffix(".app")
-                    || lower.hasSuffix(".zip")
-                {
-                    let full = (root as NSString).appendingPathComponent(name)
-                    unstapledOrAdHocHints.append(full)
-                    notes.append("delivery_artifact_hint: \(full)")
-                }
-            }
-        }
-        unstapledOrAdHocHints = Array(Set(unstapledOrAdHocHints)).sorted()
-
+        let deliveryHints = Self.deliveryArtifactHints(fileManager: fileManager, notes: &notes)
         let assessmentToolsPresent = tooling.contains { $0.hasSuffix("spctl") || $0.hasSuffix("stapler") }
 
         var state = CollectedState()
         state.notarizationStapling = NotarizationStaplingState(
             toolingPaths: tooling.sorted(),
             ticketCacheHints: caches.sorted(),
-            unstapledOrAdHocHints: unstapledOrAdHocHints,
+            unstapledOrAdHocHints: deliveryHints,
             assessmentToolsPresent: assessmentToolsPresent,
             notes: notes
         )
         state.collectorNotes[Self.id] =
             "tools=\(tooling.count) caches=\(caches.count) "
-            + "deliveryHints=\(unstapledOrAdHocHints.count) "
-            + "assessment=\(assessmentToolsPresent)"
+            + "deliveryHints=\(deliveryHints.count) assessment=\(assessmentToolsPresent)"
         return state
+    }
+
+    private static func deliveryArtifactHints(
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> [String] {
+        let roots = [NSHomeDirectory() + "/Downloads", NSHomeDirectory() + "/Desktop"]
+        let extensions = [".dmg", ".pkg", ".app", ".zip"]
+        var hints: [String] = []
+
+        for root in roots {
+            guard let names = try? fileManager.contentsOfDirectory(atPath: root) else { continue }
+            for name in names.prefix(20) where extensions.contains(where: name.hasSuffix) {
+                let path = (root as NSString).appendingPathComponent(name)
+                hints.append(path)
+                notes.append("delivery_artifact_hint: \(path)")
+            }
+        }
+        return Array(Set(hints)).sorted()
     }
 }

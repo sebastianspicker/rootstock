@@ -31,66 +31,80 @@ public struct AutostartParser: ArtifactParser {
         return events
     }
 
-    private func parsePlist(at url: URL) -> EventEnvelope? {
-        guard let dict = ArtifactIO.plistDict(contentsOf: url) else { return nil }
-
-        // Shared Program / ProgramArguments / RunAtLoad / KeepAlive extraction
-        let summary = LaunchdPlistFacts.summarize(path: url.path, dict: dict)
-        let label = summary.label ?? url.deletingPathExtension().lastPathComponent
-        let program = summary.program
-        let args = summary.programArguments
-        let runAtLoad = summary.runAtLoad
-        let keepAlive = summary.keepAlive
-
+    private struct PlistDetails {
         let kind: String
-        if url.path.contains("LaunchDaemons") {
-            kind = "launch_daemon"
-        } else if url.path.contains("LaunchAgents") {
-            kind = "launch_agent"
-        } else {
-            kind = "launch_item"
-        }
+        let label: String
+        let url: URL
+        let program: String
+        let arguments: [String]
+        let runAtLoad: Bool
+        let keepAlive: Bool
+    }
 
-        let programPath = program ?? args.first ?? ""
+    private func persistenceKind(for url: URL) -> String {
+        if url.path.contains("LaunchDaemons") { return "launch_daemon" }
+        if url.path.contains("LaunchAgents") { return "launch_agent" }
+        return "launch_item"
+    }
+
+    private func persistenceFields(_ details: PlistDetails) -> [String: String] {
         var fields: [String: String] = [
-            "persistence.kind": kind,
-            "persistence.label": label,
-            "persistence.path": url.path,
-            "persistence.program": programPath,
-            "persistence.program_arguments": args.joined(separator: " "),
-            "persistence.run_at_load": runAtLoad ? "true" : "false",
-            "persistence.keep_alive": keepAlive ? "true" : "false",
+            "persistence.kind": details.kind,
+            "persistence.label": details.label,
+            "persistence.path": details.url.path,
+            "persistence.program": details.program,
+            "persistence.program_arguments": details.arguments.joined(separator: " "),
+            "persistence.run_at_load": details.runAtLoad ? "true" : "false",
+            "persistence.keep_alive": details.keepAlive ? "true" : "false",
             "persistence.parser": "LaunchdPlistFacts",
-            FieldTaxonomy.filePath: url.path,
-            FieldTaxonomy.btmItemPath: url.path,
-            FieldTaxonomy.btmItemType: kind,
+            FieldTaxonomy.filePath: details.url.path,
+            FieldTaxonomy.btmItemPath: details.url.path,
+            FieldTaxonomy.btmItemType: details.kind,
             FieldTaxonomy.eventType: "persistence.item",
         ]
-        if !programPath.isEmpty {
-            fields[FieldTaxonomy.processPath] = programPath
-        }
+        if !details.program.isEmpty { fields[FieldTaxonomy.processPath] = details.program }
+        return fields
+    }
 
+    private func persistenceEntities(kind: String, label: String, url: URL, program: String) -> [EntityID] {
         var entities: [EntityID] = [
             EntityID(kind: .persistence, value: "\(kind)|\(label)"),
             .file(path: url.path),
         ]
-        if !programPath.isEmpty {
-            entities.append(.file(path: programPath))
-        }
+        if !program.isEmpty { entities.append(.file(path: program)) }
+        return entities
+    }
 
+    private func parsePlist(at url: URL) -> EventEnvelope? {
+        guard let dict = ArtifactIO.plistDict(contentsOf: url) else { return nil }
+        let summary = LaunchdPlistFacts.summarize(path: url.path, dict: dict)
+        let details = PlistDetails(
+            kind: persistenceKind(for: url),
+            label: summary.label ?? url.deletingPathExtension().lastPathComponent,
+            url: url,
+            program: summary.program ?? summary.programArguments.first ?? "",
+            arguments: summary.programArguments,
+            runAtLoad: summary.runAtLoad,
+            keepAlive: summary.keepAlive
+        )
         let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
         let mtime = (attrs?[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
-
         return EventEnvelope(
-            eventTime: mtime,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "AUTOSTART",
-            eventType: "persistence.item",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: url.path,
-            confidence: 0.98
+            identity: EventEnvelope.Identity(
+                kind: "persistence.item",
+                label: "AUTOSTART"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: mtime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: persistenceEntities(kind: details.kind, label: details.label, url: url, program: details.program),
+                properties: persistenceFields(details),
+                provenance: url.path,
+                confidence: 0.98
+            )
         )
     }
 }

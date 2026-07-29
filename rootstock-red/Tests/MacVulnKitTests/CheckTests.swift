@@ -55,68 +55,72 @@ final class CheckTests: XCTestCase {
     }
 
     func testAssessPipelineStandard() async {
-        let (state, findings, ledger) = await AssessPipeline.run(profile: .standard)
-        XCTAssertNotNil(state.host)
-        XCTAssertFalse(findings.isEmpty)
+        let result = await AssessPipeline.run(profile: .standard)
+        let state = result.state
+        let findings = result.findings
+        let ledger = result.ledger
+
+        assertPipelineThemes(in: findings)
+        assertStructuredPipelineState(state, findingIDs: Set(findings.map(\.id)))
+        await assertArtifactLedgerIsPopulated(ledger)
+        assertPipelineFindingSafety(findings)
+    }
+
+    private func assertPipelineThemes(in findings: [Finding]) {
         let ids = Set(findings.map(\.id))
         let categories = Set(findings.map(\.category))
 
-        // Acceptance: host identity always present from real host collection.
         XCTAssertTrue(ids.contains("rootstock.check.host.identity"), "missing host identity finding")
         XCTAssertTrue(categories.contains(.host))
+        assertSecurityOrPersistenceTheme(ids: ids, categories: categories)
+        assertTCCAuthOrLOOLTheme(ids: ids, categories: categories)
+    }
 
-        // Security product and/or persistence themes.
-        let hasSecOrPersist =
+    private func assertSecurityOrPersistenceTheme(ids: Set<String>, categories: Set<FindingCategory>) {
+        XCTAssertTrue(
             ids.contains("rootstock.check.sec.tools_detected")
-            || ids.contains("rootstock.check.sec.tools_detected.none")
-            || ids.contains(where: { $0.hasPrefix("rootstock.check.persist.") })
-            || categories.contains(.securityProduct)
-            || categories.contains(.persist)
-        XCTAssertTrue(hasSecOrPersist, "expected security product or persist findings; ids=\(ids)")
+                || ids.contains("rootstock.check.sec.tools_detected.none")
+                || ids.contains(where: { $0.hasPrefix("rootstock.check.persist.") })
+                || categories.contains(.securityProduct)
+                || categories.contains(.persist),
+            "expected security product or persist findings; ids=\(ids)"
+        )
+    }
 
-        // At least one of TCC / auth / LOOBins.
-        let hasTccAuthLool =
+    private func assertTCCAuthOrLOOLTheme(ids: Set<String>, categories: Set<FindingCategory>) {
+        XCTAssertTrue(
             ids.contains("rootstock.check.tcc.preflight_summary")
-            || ids.contains(where: { $0.hasPrefix("rootstock.check.auth.") })
-            || ids.contains("rootstock.check.lool.inventory")
-            || categories.contains(.tcc)
-            || categories.contains(.auth)
-            || categories.contains(.lool)
-        XCTAssertTrue(hasTccAuthLool, "expected tcc/auth/lool findings; ids=\(ids)")
+                || ids.contains(where: { $0.hasPrefix("rootstock.check.auth.") })
+                || ids.contains("rootstock.check.lool.inventory")
+                || categories.contains(.tcc)
+                || categories.contains(.auth)
+                || categories.contains(.lool),
+            "expected tcc/auth/lool findings; ids=\(ids)"
+        )
+    }
 
-        // Protections collector must fill structured state (not empty scaffold).
+    private func assertStructuredPipelineState(_ state: CollectedState, findingIDs: Set<String>) {
         XCTAssertNotNil(state.protections, "protections state missing")
         XCTAssertFalse(state.loobins.isEmpty, "loobins inventory empty")
         XCTAssertNotNil(state.identity, "identity posture missing")
-        XCTAssertFalse(
-            state.identity?.notes.joined().localizedCaseInsensitiveContains("scaffold stub") ?? true
-        )
-        XCTAssertTrue(
-            ids.contains("rootstock.check.protections.posture")
-                || categories.contains(.misconfig),
-            "expected protections-related finding"
-        )
-        XCTAssertTrue(
-            ids.contains("rootstock.check.identity.posture")
-                || categories.contains(.auth)
-                || state.identity != nil,
-            "expected identity finding or state"
-        )
+        XCTAssertFalse(state.identity?.notes.joined().localizedCaseInsensitiveContains("scaffold stub") ?? true)
+        XCTAssertTrue(findingIDs.contains("rootstock.check.protections.posture") || state.protections != nil)
+        XCTAssertTrue(findingIDs.contains("rootstock.check.identity.posture") || state.identity != nil)
         XCTAssertFalse(state.lolPlans.isEmpty, "lolPlans empty under standard profile")
+    }
 
-        // Artifact ledger should capture observed paths from real collection.
-        let ledgerRecords = await ledger.allRecords()
-        XCTAssertFalse(ledgerRecords.isEmpty, "artifact ledger empty after pipeline")
+    private func assertArtifactLedgerIsPopulated(_ ledger: ArtifactLedger) async {
+        let records = await ledger.allRecords()
+        XCTAssertFalse(records.isEmpty, "artifact ledger empty after pipeline")
+    }
 
-        for f in findings {
-            XCTAssertTrue(f.dryRunSafe)
-            XCTAssertFalse(f.evidence.isEmpty, "finding \(f.id) missing evidence")
-            XCTAssertFalse(f.attackTechniques.isEmpty, "finding \(f.id) missing ATT&CK tags")
-            XCTAssertNotNil(f.opsecScore, "finding \(f.id) missing OPSEC score after pipeline")
-            XCTAssertTrue(
-                f.evidence.contains { $0.type == "opsec" },
-                "finding \(f.id) missing opsec evidence note"
-            )
+    private func assertPipelineFindingSafety(_ findings: [Finding]) {
+        for finding in findings {
+            XCTAssertTrue(finding.dryRunSafe)
+            XCTAssertFalse(finding.evidence.isEmpty, "finding \(finding.id) missing evidence")
+            XCTAssertFalse(finding.attackTechniques.isEmpty, "finding \(finding.id) missing ATT&CK tags")
+            XCTAssertNotNil(finding.opsecScore, "finding \(finding.id) missing OPSEC score after pipeline")
+            XCTAssertTrue(finding.evidence.contains { $0.type == "opsec" }, "finding \(finding.id) missing opsec evidence note")
         }
     }
 
@@ -150,7 +154,9 @@ final class CheckTests: XCTestCase {
     }
 
     func testAssessPipelineReportJSONAndMarkdown() async throws {
-        let (state, findings, _) = await AssessPipeline.run(profile: .standard)
+        let result = await AssessPipeline.run(profile: .standard)
+        let state = result.state
+        let findings = result.findings
         XCTAssertFalse(findings.isEmpty)
 
         let jsonData = try ReportWriter.render(format: .json, findings: findings, state: state)

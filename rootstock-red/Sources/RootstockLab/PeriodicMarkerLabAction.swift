@@ -32,41 +32,20 @@ public struct PeriodicMarkerLabAction: LabAction {
         let body = """
         {"id":"com.rootstock.red.lab.periodic","technique":"T1053.003","harmless":true}
         """
-        let copy = FileMarkerCopy(
-            planMessage: "Dry-run periodic plan: would plant marker at \(markerURL.path). No /etc/periodic writes.",
-            planSteps: [
-                "Lab marker: \(markerURL.path)",
-                "Do not write /etc/periodic or /usr/local/etc/periodic",
-                Self.techniqueNote,
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Confirm system periodic directories untouched",
-            ],
-            applyDryRunMessage: "Dry-run: would write periodic marker at \(markerURL.path)",
-            applySuccessMessage: "Planted periodic technique marker at \(markerURL.path)",
-            applySteps: [
-            "Create lab periodic dir",
-            "Write JSON technique marker (not a root script)",
-        ],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Periodic marker present",
-            absentMessage: "Periodic marker absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete periodic marker (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed periodic marker (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["System periodic dirs never modified"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL)
+            )
         )
+    }
+
+    private static func copy(markerURL: URL) -> FileMarkerCopy {
+        FileMarkerCopy(plan: FileMarkerPlanCopy(message: "Dry-run periodic plan: would plant marker at \(markerURL.path). No /etc/periodic writes.", steps: ["Lab marker: \(markerURL.path)", "Do not write /etc/periodic or /usr/local/etc/periodic", Self.techniqueNote], cleanup: ["Delete \(markerURL.path)", "Confirm system periodic directories untouched"]), apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write periodic marker at \(markerURL.path)", successMessage: "Planted periodic technique marker at \(markerURL.path)", steps: ["Create lab periodic dir", "Write JSON technique marker (not a root script)"], cleanup: ["Delete \(markerURL.path)"]), status: FileMarkerStatusCopy(presentMessage: "Periodic marker present", absentMessage: "Periodic marker absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]), remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete periodic marker (exists=\(exists))" }, successMessage: { exists in "Removed periodic marker (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["System periodic dirs never modified"]))
     }
 
     public static func resolveLabRoot(params: [String: String]) -> URL {

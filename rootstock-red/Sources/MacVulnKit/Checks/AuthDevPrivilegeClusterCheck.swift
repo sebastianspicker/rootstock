@@ -28,13 +28,7 @@ public struct AuthDevPrivilegeClusterCheck: Check {
             || state.collectorNotes["collect.auth_rights"] != nil
         guard surface else { return nil }
 
-        return Finding(
-            id: "\(id).authdb_packagekit_surface",
-            title: "Auth/dev cluster: authorization / PackageKit privilege surface observed",
-            severity: state.protections?.sipEnabled == false ? .medium : .low,
-            confidence: .low,
-            category: .auth,
-            evidence: [
+        return Finding(id: "\(id).authdb_packagekit_surface", title: "Auth/dev cluster: authorization / PackageKit privilege surface observed", severity: state.protections?.sipEnabled == false ? .medium : .low, category: .auth, resolution: .init(evidence: [
                 Evidence(
                     type: "auth",
                     detail:
@@ -46,16 +40,10 @@ public struct AuthDevPrivilegeClusterCheck: Check {
                     type: "honesty",
                     detail: "Stock macOS includes auth.db and PackageKit - surface ≠ exploit"
                 ),
-            ],
-            attackTechniques: ["T1548", "T1068"],
-            remediation: [
+            ], attackTechniques: ["T1548", "T1068"], remediation: [
                 "Monitor installer/authd activity on high-value hosts",
                 "Keep SIP enabled; control custom authorization rights centrally",
-            ],
-            dryRunSafe: true,
-            opsecScore: 16,
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 16, esfExpected: ["OPEN"]))
     }
 
     private static func toolchainHighValue(state: CollectedState) -> Finding? {
@@ -72,13 +60,7 @@ public struct AuthDevPrivilegeClusterCheck: Check {
             || state.credPaths.contains(where: \.exists)
         guard present && highValue else { return nil }
 
-        return Finding(
-            id: "\(id).toolchain_on_high_value_host",
-            title: "Auth/dev cluster: developer toolchain on high-value / identity-joined host",
-            severity: .low,
-            confidence: .low,
-            category: .codesign,
-            evidence: [
+        return Finding(id: "\(id).toolchain_on_high_value_host", title: "Auth/dev cluster: developer toolchain on high-value / identity-joined host", severity: .low, category: .codesign, resolution: .init(evidence: [
                 Evidence(
                     type: "toolchain",
                     detail:
@@ -92,16 +74,10 @@ public struct AuthDevPrivilegeClusterCheck: Check {
                         + "platformSSO=\((state.identity?.platformSSO).rootstockDescribe) "
                         + "credPaths=\(state.credPaths.filter(\.exists).count)"
                 ),
-            ],
-            attackTechniques: ["T1127", "T1059", "T1588.002"],
-            remediation: [
+            ], attackTechniques: ["T1127", "T1059", "T1588.002"], remediation: [
                 "Scope Xcode/CLT to approved developer roles",
                 "Increase process telemetry for codesign/clang/lldb on SSO-joined endpoints",
-            ],
-            dryRunSafe: true,
-            opsecScore: 18,
-            esfExpected: ["EXEC"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 18, esfExpected: ["EXEC"]))
     }
 
     private static func dualUseWithInject(state: CollectedState) -> Finding? {
@@ -115,28 +91,16 @@ public struct AuthDevPrivilegeClusterCheck: Check {
         }
         guard toolPresent && inject else { return nil }
 
-        return Finding(
-            id: "\(id).dual_use_with_inject",
-            title: "Auth/dev cluster: dual-use toolchain compounds with injectability signals",
-            severity: .medium,
-            confidence: .low,
-            category: .codesign,
-            evidence: [
+        return Finding(id: "\(id).dual_use_with_inject", title: "Auth/dev cluster: dual-use toolchain compounds with injectability signals", severity: .medium, category: .codesign, resolution: .init(evidence: [
                 Evidence(type: "dual_use", detail: "dualUseBinaries=\(dual)"),
                 Evidence(
                     type: "inject",
                     detail: "injectabilityHits=\(state.injectabilityHits.count)"
                 ),
-            ],
-            attackTechniques: ["T1055", "T1127", "T1553.002"],
-            remediation: [
+            ], attackTechniques: ["T1055", "T1127", "T1553.002"], remediation: [
                 "Remove get-task-allow from non-debug production builds",
                 "Constrain who can run local debug toolchains against privileged apps",
-            ],
-            dryRunSafe: true,
-            opsecScore: 24,
-            esfExpected: ["EXEC", "OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 24, esfExpected: ["EXEC", "OPEN"]))
     }
 
 }

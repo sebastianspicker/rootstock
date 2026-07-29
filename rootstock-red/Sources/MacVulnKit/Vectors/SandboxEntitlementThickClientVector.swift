@@ -12,23 +12,33 @@ public struct SandboxEntitlementThickClientVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard hasSurface(state), hasImpact(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
+        let sb = state.appSandboxEntitlements
+        let apps = sb?.appSamples.count ?? 0
+        let riskPaths = sb?.unsandboxedRiskPaths.count ?? 0
+        let note = state.collectorNotes["collect.app_sandbox_entitlements"] != nil
+        return apps > 0 || riskPaths > 0 || note
+    }
+
+    private func hasImpact(_ state: CollectedState) -> Bool {
         let sb = state.appSandboxEntitlements
         let apps = sb?.appSamples.count ?? 0
         let riskPaths = sb?.unsandboxedRiskPaths.count ?? 0
         let dangerous = sb?.dangerousEntitlementHints.count ?? 0
-        let note = state.collectorNotes["collect.app_sandbox_entitlements"] != nil
+        let injectRisk = Self.hasInjectRisk(state)
+        return riskPaths > 0 || injectRisk || dangerous > 0 || apps >= 3
+    }
 
-        let injectRisk = state.injectabilityHits.contains { !$0.riskFlags.isEmpty }
-            || state.codesignSamples.contains {
-                $0.getTaskAllow == true
-                    || $0.disableLibraryValidation == true
-                    || $0.hardenedRuntime == false
-            }
-        let surface = apps > 0 || riskPaths > 0 || note
-        guard surface else { return [] }
-        // Path-to-impact: thick clients + (inject/codesign risk OR dangerous tools OR scale)
-        guard riskPaths > 0 || injectRisk || dangerous > 0 || apps >= 3 else { return [] }
-
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let sb = state.appSandboxEntitlements
+        let apps = sb?.appSamples.count ?? 0
+        let riskPaths = sb?.unsandboxedRiskPaths.count ?? 0
+        let dangerous = sb?.dangerousEntitlementHints.count ?? 0
+        let injectRisk = Self.hasInjectRisk(state)
         var evidence: [Evidence] = [
             Evidence(
                 type: "sandbox_summary",
@@ -63,33 +73,37 @@ public struct SandboxEntitlementThickClientVector: Check {
             )
         )
 
-        let severity: Severity =
-            (riskPaths >= 2 && injectRisk) ? .medium : .low
+        return evidence
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: injectRisk
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let sb = state.appSandboxEntitlements
+        let riskPaths = sb?.unsandboxedRiskPaths.count ?? 0
+        let injectRisk = hasInjectRisk(state)
+            || state.codesignSamples.contains {
+                $0.getTaskAllow == true
+                    || $0.disableLibraryValidation == true
+                    || $0.hardenedRuntime == false
+            }
+        let severity: Severity = (riskPaths >= 2 && injectRisk) ? .medium : .low
+
+        return Finding(id: Self.id, title: injectRisk
                     ? "Thick-client sandbox/entitlement surface with inject/codesign risk compound"
-                    : "Thick-client app sandbox / entitlement surface",
-                severity: severity,
-                confidence: .low,
-                category: .sandbox,
-                evidence: evidence,
-                attackTechniques: ["T1553", "T1055", "T1548"],
-                remediation: [
+                    : "Thick-client app sandbox / entitlement surface", severity: severity, category: .sandbox, resolution: .init(evidence: evidence, attackTechniques: ["T1553", "T1055", "T1548"], remediation: [
                     "Prefer sandboxed distribution for high-value clients; strip get-task-allow from production builds",
                     "Enable Hardened Runtime and library validation on shipping binaries",
                     "Inventory Electron/thick clients for unexpected debug entitlements",
                     "OPSEC: Rootstock Red does not provide inject or entitlement-strip tooling",
-                ],
-                falsePositiveNotes:
-                    "Engineering workstations often run unsandboxed IDEs. Prioritize production-shaped hosts "
-                    + "and inject compounds.",
-                dryRunSafe: true,
-                opsecScore: 18,
-                esfExpected: ["OPEN"]
-            ),
-        ]
+                ], falsePositiveNotes: "Engineering workstations often run unsandboxed IDEs. Prioritize production-shaped hosts "
+                    + "and inject compounds."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN"]))
+    }
+
+    private static func hasInjectRisk(_ state: CollectedState) -> Bool {
+        state.injectabilityHits.contains { !$0.riskFlags.isEmpty }
+            || state.codesignSamples.contains {
+                $0.getTaskAllow == true
+                    || $0.disableLibraryValidation == true
+                    || $0.hardenedRuntime == false
+            }
     }
 }

@@ -6,6 +6,14 @@ import RootstockBlueCore
 /// Paths: `Library/Preferences/com.apple.security.gk.json` or
 /// `Library/Logs/Gatekeeper/assessments.jsonl`.
 public struct GatekeeperHistoryParser: ArtifactParser {
+    private struct AssessmentDetails {
+        let path: String
+        let result: String
+        let policy: String
+        let overrideFlag: Bool
+        let sourceURL: URL
+    }
+
     public let manifest = PluginManifest(
         id: "GATEKEEPER",
         tier: .tier2,
@@ -19,40 +27,35 @@ public struct GatekeeperHistoryParser: ArtifactParser {
         var urls: [URL] = []
         var seen = PathDeduper()
 
-        for found in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            let path = url.path
-            if name == "com.apple.security.gk.json" { return true }
-            if name == "assessments.jsonl" || name == "assessments.json" {
-                return path.contains("Gatekeeper") || path.contains("gatekeeper") || path.contains("security")
-            }
-            if name == "gk.json" || name == "gatekeeper.json" { return true }
-            return false
-        }) {
-            if !seen.insert(found) { continue }
-            ArtifactRoot.appendUnique(&urls, found)
-        }
+        appendURLs(root.enumerate(matching: { Self.isHistoryFile($0) }), to: &urls, seen: &seen)
+        appendURLs(standardURLs(in: root), to: &urls, seen: &seen)
+        return urls.flatMap(parseFile)
+    }
 
-        for rel in [
+    private func standardURLs(in root: ArtifactRoot) -> [URL] {
+        [
             "Library/Preferences/com.apple.security.gk.json",
             "Library/Logs/Gatekeeper/assessments.jsonl",
-        ] {
-            if let u = root.firstExisting([rel]) {
-                if seen.insert(u) {
-                    ArtifactRoot.appendUnique(&urls, u)
-                }
-            }
-        }
+        ].compactMap { root.firstExisting([$0]) }
+    }
 
-        var events: [EventEnvelope] = []
-        for url in urls {
-            if url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl") {
-                events.append(contentsOf: parseJSONL(at: url))
-            } else {
-                events.append(contentsOf: parseJSON(at: url))
-            }
+    private static func isHistoryFile(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        if ["com.apple.security.gk.json", "gk.json", "gatekeeper.json"].contains(name) { return true }
+        guard name == "assessments.jsonl" || name == "assessments.json" else { return false }
+        return ["Gatekeeper", "gatekeeper", "security"].contains { url.path.contains($0) }
+    }
+
+    private func appendURLs(_ candidates: [URL], to urls: inout [URL], seen: inout PathDeduper) {
+        for url in candidates where seen.insert(url) {
+            ArtifactRoot.appendUnique(&urls, url)
         }
-        return events
+    }
+
+    private func parseFile(_ url: URL) -> [EventEnvelope] {
+        url.pathExtension == "jsonl" || url.lastPathComponent.hasSuffix(".jsonl")
+            ? parseJSONL(at: url)
+            : parseJSON(at: url)
     }
 
     private func parseJSONL(at url: URL) -> [EventEnvelope] {
@@ -70,88 +73,81 @@ public struct GatekeeperHistoryParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let path = stringValue(item["path"])
-            ?? stringValue(item["file"])
-            ?? stringValue(item["file_path"])
-            ?? stringValue(item["url"])
-            ?? ""
-        let result = stringValue(item["result"])
-            ?? stringValue(item["assessment"])
-            ?? stringValue(item["status"])
-            ?? ""
-        let policy = stringValue(item["policy"])
-            ?? stringValue(item["gatekeeper_policy"])
-            ?? stringValue(item["rule"])
-            ?? ""
+        let path = assessmentValue(item, keys: ["path", "file", "file_path", "url"])
+        let result = assessmentValue(item, keys: ["result", "assessment", "status"])
+        let policy = assessmentValue(item, keys: ["policy", "gatekeeper_policy", "rule"])
 
         guard !path.isEmpty || !result.isEmpty else { return nil }
 
-        // Override = operator/user bypass of Gatekeeper only - NOT a normal deny/unsigned fail.
-        let overrideFlag: Bool = {
-            if let b = item["override"] as? Bool { return b }
-            if let n = item["override"] as? NSNumber { return n.boolValue }
-            if let s = item["override"] as? String {
-                return ["true", "1", "yes"].contains(s.lowercased())
-            }
-            let r = result.lowercased()
-            let p = policy.lowercased()
-            // Explicit override language only (not denied / unsigned / fail)
-            return r.contains("override")
-                || r.contains("user-approved")
-                || r.contains("user_override")
-                || r.contains("user approved")
-                || p.contains("user_override")
-                || p.contains("user-override")
-        }()
-
-        let lowerResult = result.lowercased()
-        let deniedOrUnsigned = lowerResult.contains("denied")
-            || lowerResult.contains("unsigned")
-            || lowerResult.contains("fail")
-            || lowerResult.contains("reject")
-
-        var fields: [String: String] = [
-            FieldTaxonomy.filePath: path.isEmpty ? ArtifactRoot.pathKey(sourceURL) : path,
-            "gatekeeper.result": result,
-            "gatekeeper.policy": policy,
-            "gatekeeper.override": overrideFlag ? "true" : "false",
-            FieldTaxonomy.eventType: "gatekeeper.assessment",
-        ]
-        // Suspicious covers denials and overrides; override stays a distinct signal.
-        if overrideFlag || deniedOrUnsigned {
-            fields["gatekeeper.suspicious"] = "true"
-        }
-        if !path.isEmpty {
-            fields["gatekeeper.path"] = path
-        }
-        if let signer = stringValue(item["signer"]) ?? stringValue(item["signing_id"]) {
-            fields["gatekeeper.signer"] = signer
-        }
-        if let team = stringValue(item["team_id"]) ?? stringValue(item["teamId"]) {
-            fields["gatekeeper.team_id"] = team
-        }
-
-        var entities: [EntityID] = [
-            EntityID(kind: .host, value: "gatekeeper|\(result)|\(path)"),
-        ]
-        if !path.isEmpty {
-            entities.append(.file(path: path))
-        }
+        let details = AssessmentDetails(
+            path: path,
+            result: result,
+            policy: policy,
+            overrideFlag: isOverride(item["override"], result: result, policy: policy),
+            sourceURL: sourceURL
+        )
+        let fields = assessmentFields(item, details: details)
+        let entities = assessmentEntities(path: details.path, result: details.result)
 
         let eventTime = parseDate(item["timestamp"] ?? item["time"] ?? item["assessed_at"])
             ?? fileMTime(sourceURL)
 
         return EventEnvelope(
-            eventTime: eventTime,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "GATEKEEPER",
-            eventType: "gatekeeper.assessment",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
+            identity: EventEnvelope.Identity(
+                kind: "gatekeeper.assessment",
+                label: "GATEKEEPER"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: eventTime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: entities,
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
         )
+    }
+
+    private func assessmentValue(_ item: [String: Any], keys: [String]) -> String {
+        keys.lazy.compactMap { stringValue(item[$0]) }.first ?? ""
+    }
+
+    private func isOverride(_ value: Any?, result: String, policy: String) -> Bool {
+        if let bool = value as? Bool { return bool }
+        if let number = value as? NSNumber { return number.boolValue }
+        if let string = value as? String { return ["true", "1", "yes"].contains(string.lowercased()) }
+        let explicitTerms = ["override", "user-approved", "user_override", "user approved"]
+        return explicitTerms.contains { result.lowercased().contains($0) }
+            || ["user_override", "user-override"].contains { policy.lowercased().contains($0) }
+    }
+
+    private func assessmentFields(
+        _ item: [String: Any],
+        details: AssessmentDetails
+    ) -> [String: String] {
+        var fields: [String: String] = [
+            FieldTaxonomy.filePath: details.path.isEmpty ? ArtifactRoot.pathKey(details.sourceURL) : details.path,
+            "gatekeeper.result": details.result,
+            "gatekeeper.policy": details.policy,
+            "gatekeeper.override": details.overrideFlag ? "true" : "false",
+            FieldTaxonomy.eventType: "gatekeeper.assessment",
+        ]
+        if details.overrideFlag || ["denied", "unsigned", "fail", "reject"].contains(where: details.result.lowercased().contains) {
+            fields["gatekeeper.suspicious"] = "true"
+        }
+        if !details.path.isEmpty { fields["gatekeeper.path"] = details.path }
+        if let signer = stringValue(item["signer"]) ?? stringValue(item["signing_id"]) { fields["gatekeeper.signer"] = signer }
+        if let team = stringValue(item["team_id"]) ?? stringValue(item["teamId"]) { fields["gatekeeper.team_id"] = team }
+        return fields
+    }
+
+    private func assessmentEntities(path: String, result: String) -> [EntityID] {
+        var entities = [EntityID(kind: .host, value: "gatekeeper|\(result)|\(path)")]
+        if !path.isEmpty { entities.append(.file(path: path)) }
+        return entities
     }
 
     private func fileMTime(_ url: URL) -> Date {

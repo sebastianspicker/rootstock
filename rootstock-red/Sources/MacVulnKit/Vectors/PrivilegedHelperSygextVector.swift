@@ -12,91 +12,56 @@ public struct PrivilegedHelperSygextVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
-        let helpers = state.privilegedHelperTools
-        let extensions = state.systemExtensionPaths
-        guard !helpers.isEmpty || !extensions.isEmpty else { return [] }
+        let scan = Self.scan(helpers: state.privilegedHelperTools, extensions: state.systemExtensionPaths)
+        guard !scan.evidence.isEmpty else { return [] }
+        let presentation = Self.presentation(for: scan, helperCount: state.privilegedHelperTools.count, extensionCount: state.systemExtensionPaths.count)
+        return [Self.finding(scan: scan, presentation: presentation)]
+    }
 
-        var evidence: [Evidence] = [
-            Evidence(
-                type: "summary",
-                detail: "privilegedHelpers=\(helpers.count) systemExtensions=\(extensions.count)"
-            ),
-        ]
 
-        var writableHelpers: [String] = []
-        for path in helpers.prefix(40) {
-            let writable = FileManager.default.isWritableFile(atPath: path)
-                || Self.parentWritable(path)
-            if writable { writableHelpers.append(path) }
-            evidence.append(
-                Evidence(
-                    type: "privileged_helper",
-                    path: path,
-                    detail: "writable=\(writable)"
-                )
-            )
-        }
+    private struct SurfaceScan {
+        let evidence: [Evidence]
+        let writableHelpers: Int
+        let writableExtensions: Int
+    }
 
-        var writableExts: [String] = []
-        for path in extensions.prefix(40) {
-            let writable = FileManager.default.isWritableFile(atPath: path)
-                || Self.parentWritable(path)
-            if writable { writableExts.append(path) }
-            evidence.append(
-                Evidence(
-                    type: "system_extension",
-                    path: path,
-                    detail: "writable=\(writable)"
-                )
-            )
-        }
-
+    private struct Presentation {
+        let title: String
         let severity: Severity
         let confidence: Confidence
-        let title: String
-        if !writableHelpers.isEmpty || !writableExts.isEmpty {
-            severity = .high
-            confidence = .medium
-            title =
-                "Privileged helper / system-extension vector: user-writable surface "
-                + "(\(writableHelpers.count + writableExts.count))"
-        } else if helpers.count + extensions.count >= 3 {
-            severity = .medium
-            confidence = .medium
-            title =
-                "Privileged helper / system-extension persistence surface "
-                + "(\(helpers.count) helpers, \(extensions.count) extensions)"
-        } else {
-            severity = .low
-            confidence = .medium
-            title =
-                "Privileged helper / system-extension inventory surface "
-                + "(\(helpers.count + extensions.count) paths)"
-        }
+        let opsecScore: Int
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: confidence,
-                category: .persist,
-                evidence: evidence,
-                attackTechniques: ["T1543.001", "T1543.004", "T1068", "T1574"],
-                remediation: [
-                    "Inventory PrivilegedHelperTools and SystemExtensions; remove unexpected vendors",
-                    "Ensure helpers are root-owned, non-user-writable, and properly code-signed",
-                    "System Extensions require user/MDM approval - monitor unexpected activation prompts",
-                    "OPSEC: listing /Library/PrivilegedHelperTools is quiet; installing fakes is high-risk and out of assess scope",
-                ],
-                falsePositiveNotes:
-                    "Legitimate security/MDM products install helpers and extensions. Writable flags on "
-                    + "SIP-protected system volumes should normally be false; lab temp paths may simulate writability.",
-                dryRunSafe: true,
-                opsecScore: writableHelpers.isEmpty && writableExts.isEmpty ? 20 : 55,
-                esfExpected: ["OPEN", "WRITE"]
-            ),
-        ]
+    private static func scan(helpers: [String], extensions: [String]) -> SurfaceScan {
+        guard !helpers.isEmpty || !extensions.isEmpty else { return SurfaceScan(evidence: [], writableHelpers: 0, writableExtensions: 0) }
+        let helperScan = scan(paths: helpers, type: "privileged_helper")
+        let extensionScan = scan(paths: extensions, type: "system_extension")
+        let evidence = [Evidence(type: "summary", detail: "privilegedHelpers=\(helpers.count) systemExtensions=\(extensions.count)")]
+            + helperScan.evidence + extensionScan.evidence
+        return SurfaceScan(evidence: evidence, writableHelpers: helperScan.writableCount, writableExtensions: extensionScan.writableCount)
+    }
+
+    private static func scan(paths: [String], type: String) -> (evidence: [Evidence], writableCount: Int) {
+        let results = paths.prefix(40).map { path -> (Evidence, Bool) in
+            let writable = FileManager.default.isWritableFile(atPath: path) || parentWritable(path)
+            return (Evidence(type: type, path: path, detail: "writable=\(writable)"), writable)
+        }
+        return (results.map(\.0), results.filter(\.1).count)
+    }
+
+    private static func presentation(for scan: SurfaceScan, helperCount: Int, extensionCount: Int) -> Presentation {
+        let writableCount = scan.writableHelpers + scan.writableExtensions
+        if writableCount > 0 {
+            return Presentation(title: "Privileged helper / system-extension vector: user-writable surface (\(writableCount))", severity: .high, confidence: .medium, opsecScore: 55)
+        }
+        if helperCount + extensionCount >= 3 {
+            return Presentation(title: "Privileged helper / system-extension persistence surface (\(helperCount) helpers, \(extensionCount) extensions)", severity: .medium, confidence: .medium, opsecScore: 20)
+        }
+        return Presentation(title: "Privileged helper / system-extension inventory surface (\(helperCount + extensionCount) paths)", severity: .low, confidence: .medium, opsecScore: 20)
+    }
+
+    private static func finding(scan: SurfaceScan, presentation: Presentation) -> Finding {
+        Finding(id: Self.id, title: presentation.title, severity: presentation.severity, category: .persist, resolution: .init(evidence: scan.evidence, attackTechniques: ["T1543.001", "T1543.004", "T1068", "T1574"], remediation: ["Inventory PrivilegedHelperTools and SystemExtensions; remove unexpected vendors", "Ensure helpers are root-owned, non-user-writable, and properly code-signed", "System Extensions require user/MDM approval - monitor unexpected activation prompts", "OPSEC: listing /Library/PrivilegedHelperTools is quiet; installing fakes is high-risk and out of assess scope"], falsePositiveNotes: "Legitimate security/MDM products install helpers and extensions. Writable flags on SIP-protected system volumes should normally be false; lab temp paths may simulate writability."), runtime: .init(confidence: presentation.confidence, dryRunSafe: true, opsecScore: presentation.opsecScore, esfExpected: ["OPEN", "WRITE"]))
     }
 
     private static func parentWritable(_ path: String) -> Bool {

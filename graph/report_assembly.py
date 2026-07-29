@@ -60,8 +60,6 @@ class ReportRows:
 # ── Themed Section Builders ──────────────────────────────────────────────────
 
 
-
-
 # ── Report Assembly ───────────────────────────────────────────────────────────
 
 
@@ -71,7 +69,6 @@ def _get_query_rows(
 ) -> list[dict]:
     result = query_results.get(filename, [])
     return result if isinstance(result, list) else []
-
 
 
 def _metadata_bool(value, true_label="Yes", false_label="No") -> str:
@@ -152,7 +149,10 @@ def _count_scan_metadata_rows(metadata: dict) -> list[list[str]]:
             "Entitlements Extracted",
             _metadata_count(metadata, "entitlement_count", "unknown"),
         ],
-        ["Bluetooth Devices", _metadata_count(metadata, "bluetooth_device_count", " - ")],
+        [
+            "Bluetooth Devices",
+            _metadata_count(metadata, "bluetooth_device_count", " - "),
+        ],
         ["File ACLs Audited", _metadata_count(metadata, "file_acl_count", " - ")],
         ["Login Sessions", _metadata_count(metadata, "login_session_count", " - ")],
     ]
@@ -471,7 +471,9 @@ def assemble_report(
     metadata: dict,
 ) -> str:
     """Assemble the full Markdown report from query results and metadata."""
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    now = (
+        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    )
     queries = discover_queries()
     rows = _collect_report_rows(query_results)
     sections: list[str] = []
@@ -492,61 +494,68 @@ def assemble_report(
     )
     _append_report_body(sections, query_results, queries, rows)
 
-    # Optional family open-export findings (red/blue multi-plane narrative)
+    _append_optional_family_sections(sections, metadata)
+
+    return "\n".join(sections)
+
+
+def _append_optional_family_sections(sections: list[str], metadata: dict) -> None:
     family_findings = metadata.get("family_findings") or []
-    family_source = metadata.get("family_source")
     if family_findings:
         sections.append(
             format_family_findings_section(
-                family_findings,
-                source=family_source,
+                family_findings, source=metadata.get("family_source")
             )
         )
+    _append_optional_sections(
+        sections,
+        metadata,
+        (
+            (
+                "multi_plane_campaign",
+                "multi_plane_campaign_name",
+                "Multi-plane campaign",
+                format_multi_plane_campaign_section,
+                "campaign",
+            ),
+            (
+                "multi_plane_severity_board",
+                "multi_plane_severity_title",
+                "Multi-plane severity board",
+                format_multi_plane_severity_board,
+                "title",
+            ),
+            (
+                "purple_engagement_pairs",
+                "purple_engagement_title",
+                "Purple engagement matrix",
+                format_purple_engagement_matrix,
+                "title",
+            ),
+            (
+                "kill_chain_stages",
+                "kill_chain_title",
+                "Kill-chain stage timeline",
+                format_kill_chain_stage_timeline,
+                "title",
+            ),
+            (
+                "fleet_campaigns",
+                "fleet_campaign_title",
+                "Fleet multi-plane campaign dashboard",
+                format_fleet_campaign_dashboard,
+                "title",
+            ),
+        ),
+    )
 
-    campaign_planes = metadata.get("multi_plane_campaign") or []
-    campaign_name = metadata.get("multi_plane_campaign_name") or "Multi-plane campaign"
-    if campaign_planes:
-        sections.append(
-            format_multi_plane_campaign_section(
-                campaign_planes,
-                campaign=campaign_name,
+
+def _append_optional_sections(
+    sections: list[str], metadata: dict, specifications: tuple
+) -> None:
+    for data_key, title_key, fallback, formatter, keyword in specifications:
+        rows = metadata.get(data_key) or []
+        if rows:
+            sections.append(
+                formatter(rows, **{keyword: metadata.get(title_key) or fallback})
             )
-        )
-
-    severity_board = metadata.get("multi_plane_severity_board") or []
-    if severity_board:
-        sections.append(
-            format_multi_plane_severity_board(
-                severity_board,
-                title=metadata.get("multi_plane_severity_title") or "Multi-plane severity board",
-            )
-        )
-
-    purple_pairs = metadata.get("purple_engagement_pairs") or []
-    if purple_pairs:
-        sections.append(
-            format_purple_engagement_matrix(
-                purple_pairs,
-                title=metadata.get("purple_engagement_title") or "Purple engagement matrix",
-            )
-        )
-
-    kill_chain_stages = metadata.get("kill_chain_stages") or []
-    if kill_chain_stages:
-        sections.append(
-            format_kill_chain_stage_timeline(
-                kill_chain_stages,
-                title=metadata.get("kill_chain_title") or "Kill-chain stage timeline",
-            )
-        )
-
-    fleet_campaigns = metadata.get("fleet_campaigns") or []
-    if fleet_campaigns:
-        sections.append(
-            format_fleet_campaign_dashboard(
-                fleet_campaigns,
-                title=metadata.get("fleet_campaign_title") or "Fleet multi-plane campaign dashboard",
-            )
-        )
-
-    return "\n".join(sections)

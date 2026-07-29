@@ -227,73 +227,18 @@ final class Wave5SOTA2026Tests: XCTestCase {
     }
 
     func testHardeningWave5PureFromSyntheticEvents() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "AUTHPLUGINS",
-                eventType: "persistence.item",
-                fields: [
-                    "persistence.kind": "authorization_plugin",
-                    "auth.plugin_name": "com.evil.authplugin",
-                    "persistence.risk_tags": "unknown_vendor,unsigned",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "NETUSAGE",
-                eventType: "network.usage",
-                fields: [
-                    "net.usage.process": "evil-agent",
-                    "net.usage.bytes_out": "999999999",
-                    "net.usage.domain": "c2.evil.example",
-                    "net.risk_tags": "anomalous_egress,high_volume",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "CODESIGN",
-                eventType: "codesign.assessment",
-                fields: [
-                    "codesign.path": "/Library/PrivilegedHelperTools/com.evil.privhelper",
-                    "codesign.signed": "false",
-                    "codesign.notarized": "false",
-                    "codesign.risk_tags": "unsigned,not_notarized",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "KEYCHAINMETA",
-                eventType: "keychain.metadata",
-                fields: [
-                    "keychain.label": "evil-implant-token",
-                    "keychain.access_group": "com.evil.implant",
-                    "keychain.risk_tags": "suspicious_label,unexpected_access_group",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "ARD",
-                eventType: "remote.management",
-                fields: [
-                    "ard.enabled": "true",
-                    "ard.all_local_users": "true",
-                    "remote.service": "ard",
-                    "remote.enabled": "true",
-                ]
-            ),
+        let synthetic = [
+            HardeningTestFixtures.event("AUTHPLUGINS", "persistence.item", ["persistence.kind": "authorization_plugin", "auth.plugin_name": "com.evil.authplugin", "persistence.risk_tags": "unknown_vendor,unsigned"]),
+            HardeningTestFixtures.event("NETUSAGE", "network.usage", ["net.usage.process": "evil-agent", "net.usage.bytes_out": "999999999", "net.usage.domain": "c2.evil.example", "net.risk_tags": "anomalous_egress,high_volume"]),
+            HardeningTestFixtures.event("CODESIGN", "codesign.assessment", ["codesign.path": "/Library/PrivilegedHelperTools/com.evil.privhelper", "codesign.signed": "false", "codesign.notarized": "false", "codesign.risk_tags": "unsigned,not_notarized"]),
+            HardeningTestFixtures.event("KEYCHAINMETA", "keychain.metadata", ["keychain.label": "evil-implant-token", "keychain.access_group": "com.evil.implant", "keychain.risk_tags": "suspicious_label,unexpected_access_group"]),
+            HardeningTestFixtures.event("ARD", "remote.management", ["ard.enabled": "true", "ard.all_local_users": "true", "remote.service": "ard", "remote.enabled": "true"]),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)
-        XCTAssertTrue(findings.contains { $0.control == "auth_plugin_unknown" && $0.status == "fail" })
-        XCTAssertTrue(findings.contains { $0.control == "netusage_anomalous_egress" && $0.status == "fail" })
-        XCTAssertTrue(findings.contains { $0.control == "unsigned_persistence_binary" && $0.status == "fail" })
-        XCTAssertTrue(findings.contains { $0.control == "keychain_metadata_anomaly" && $0.status == "fail" })
-        XCTAssertTrue(findings.contains { $0.control == "ard_all_local_users" && $0.status == "fail" })
-        for control in [
-            "auth_plugin_unknown", "netusage_anomalous_egress",
-            "unsigned_persistence_binary", "keychain_metadata_anomaly", "ard_all_local_users",
-        ] {
-            let f = findings.first { $0.control == control }!
-            XCTAssertFalse(f.remediation.isEmpty, control)
+        let controls = ["auth_plugin_unknown", "netusage_anomalous_egress", "unsigned_persistence_binary", "keychain_metadata_anomaly", "ard_all_local_users"]
+        for control in controls {
+            XCTAssertTrue(findings.contains { $0.control == control && $0.status == "fail" })
+            XCTAssertFalse(findings.first { $0.control == control }!.remediation.isEmpty, control)
         }
     }
 
@@ -414,13 +359,19 @@ final class Wave5SOTA2026Tests: XCTestCase {
     func testNonGoalKeychainNoSecretExportInAssess() {
         let synthetic: [EventEnvelope] = [
             EventEnvelope(
-                source: .parser,
-                sourcePlugin: "KEYCHAINMETA",
-                eventType: "keychain.metadata",
-                fields: [
+                identity: EventEnvelope.Identity(
+                    kind: "keychain.metadata",
+                    label: "KEYCHAINMETA"
+                ),
+                capture: EventEnvelope.Capture(
+                    source: .parser
+                ),
+                payload: EventEnvelope.Payload(
+                    properties: [
                     "keychain.label": "com.evil.token",
                     "keychain.risk_tags": "suspicious_label",
                 ]
+                )
             ),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)

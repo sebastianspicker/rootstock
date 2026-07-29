@@ -33,140 +33,100 @@ public struct SSHArtifactsParser: ArtifactParser {
 
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
-
-        // authorized_keys / authorized_keys2 under Users/*/.ssh/
-        for url in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            return (name == "authorized_keys" || name == "authorized_keys2")
-                && url.path.contains(".ssh")
-        }) {
-            if !seen.insert(url) { continue }
-            events.append(contentsOf: parseAuthorizedKeys(at: url))
-        }
-
-        // known_hosts
-        for url in root.enumerate(matching: { url in
-            url.lastPathComponent == "known_hosts" && url.path.contains(".ssh")
-        }) {
-            if !seen.insert(url) { continue }
-            events.append(contentsOf: parseKnownHosts(at: url))
-        }
-
-        // sshd_config
-        if let sshd = root.firstExisting([
-            "etc/ssh/sshd_config",
-            "private/etc/ssh/sshd_config",
-            "etc/sshd_config",
-        ]) {
-            if seen.insert(sshd) {
-                events.append(contentsOf: parseSSHDConfig(at: sshd))
-            }
-        }
-        for url in root.enumerate(matching: { $0.lastPathComponent == "sshd_config" }) {
-            if !seen.insert(url) { continue }
-            events.append(contentsOf: parseSSHDConfig(at: url))
-        }
-
-        return events
+        return parseArtifacts(root, paths: [], matching: Self.isAuthorizedKey, seen: &seen, parse: parseAuthorizedKeys)
+            + parseArtifacts(root, paths: [], matching: Self.isKnownHost, seen: &seen, parse: parseKnownHosts)
+            + parseArtifacts(root, paths: Self.sshdConfigPaths, matching: Self.isSSHDConfig, seen: &seen, parse: parseSSHDConfig)
     }
+
+    private static let sshdConfigPaths = ["etc/ssh/sshd_config", "private/etc/ssh/sshd_config", "etc/sshd_config"]
+
+    private func parseArtifacts(
+        _ root: ArtifactRoot,
+        paths: [String],
+        matching: (URL) -> Bool,
+        seen: inout PathDeduper,
+        parse: (URL) -> [EventEnvelope]
+    ) -> [EventEnvelope] {
+        let configured = paths.compactMap { root.firstExisting([$0]) }
+        let discovered = root.enumerate(matching: matching)
+        return (configured + discovered).flatMap { seen.insert($0) ? parse($0) : [] }
+    }
+
+    private static func isAuthorizedKey(_ url: URL) -> Bool {
+        ["authorized_keys", "authorized_keys2"].contains(url.lastPathComponent) && url.path.contains(".ssh")
+    }
+
+    private static func isKnownHost(_ url: URL) -> Bool {
+        url.lastPathComponent == "known_hosts" && url.path.contains(".ssh")
+    }
+
+    private static func isSSHDConfig(_ url: URL) -> Bool { url.lastPathComponent == "sshd_config" }
 
     // MARK: - authorized_keys
 
     private func parseAuthorizedKeys(at url: URL) -> [EventEnvelope] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let user = inferUser(from: url)
-        var events: [EventEnvelope] = []
-        var lineNo = 0
-
-        for rawLine in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
-            lineNo += 1
-            let line = String(rawLine).trimmingCharacters(in: .whitespaces)
-            if line.isEmpty || line.hasPrefix("#") { continue }
-
-            let parsed = parseAuthorizedKeyLine(line)
-            guard let keyType = parsed.keyType else { continue }
-
-            var fields: [String: String] = [
-                "ssh.key_type": keyType,
-                "ssh.key_comment": parsed.comment,
-                "ssh.options": parsed.options,
-                "ssh.user": user ?? "",
-                "ssh.line": String(lineNo),
-                FieldTaxonomy.filePath: ArtifactRoot.pathKey(url),
-                FieldTaxonomy.eventType: "auth.ssh_authorized_key",
-            ]
-            if let user {
-                fields[FieldTaxonomy.userName] = user
-            }
-
-            var entities: [EntityID] = [
-                EntityID(kind: .auth, value: "ssh_authorized_key|\(user ?? "unknown")|\(keyType)|\(parsed.comment)"),
-                .file(path: ArtifactRoot.pathKey(url)),
-            ]
-            if let user {
-                entities.append(.user(name: user))
-            }
-
-            events.append(
-                EventEnvelope(
-                    eventTime: fileMTime(url),
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "SSH",
-                    eventType: "auth.ssh_authorized_key",
-                    entityRefs: entities,
-                    fields: fields,
-                    rawRef: ArtifactRoot.pathKey(url),
-                    confidence: 0.96
-                )
-            )
+        return text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).enumerated().compactMap {
+            authorizedKeyEvent(rawLine: String($0.element), lineNumber: $0.offset + 1, url: url, user: user)
         }
-        return events
+    }
+
+    private func authorizedKeyEvent(rawLine: String, lineNumber: Int, url: URL, user: String?) -> EventEnvelope? {
+        let line = rawLine.trimmingCharacters(in: .whitespaces)
+        let parsed = parseAuthorizedKeyLine(line)
+        guard !line.isEmpty, !line.hasPrefix("#"), let keyType = parsed.keyType else { return nil }
+        let path = ArtifactRoot.pathKey(url)
+        return EventEnvelope(identity: EventEnvelope.Identity(kind: "auth.ssh_authorized_key", label: "SSH"), capture: EventEnvelope.Capture(source: .parser, eventTime: fileMTime(url), collectedAt: Date()), payload: EventEnvelope.Payload(entityRefs: authorizedKeyEntities(user: user, keyType: keyType, comment: parsed.comment, path: path), properties: authorizedKeyFields(parsed: parsed, user: user, lineNumber: lineNumber, path: path), provenance: path, confidence: 0.96))
+    }
+
+    private func authorizedKeyFields(parsed: AuthorizedKey, user: String?, lineNumber: Int, path: String) -> [String: String] {
+        var fields = ["ssh.key_type": parsed.keyType ?? "", "ssh.key_comment": parsed.comment, "ssh.options": parsed.options, "ssh.user": user ?? "", "ssh.line": String(lineNumber), FieldTaxonomy.filePath: path, FieldTaxonomy.eventType: "auth.ssh_authorized_key"]
+        if let user { fields[FieldTaxonomy.userName] = user }
+        return fields
+    }
+
+    private func authorizedKeyEntities(user: String?, keyType: String, comment: String, path: String) -> [EntityID] {
+        var entities: [EntityID] = [EntityID(kind: .auth, value: "ssh_authorized_key|\(user ?? "unknown")|\(keyType)|\(comment)"), .file(path: path)]
+        if let user { entities.append(.user(name: user)) }
+        return entities
     }
 
     /// Parse OpenSSH authorized_keys line: [options] key-type base64-key [comment]
-    private func parseAuthorizedKeyLine(_ line: String) -> (options: String, keyType: String?, comment: String) {
-        let knownTypes = [
-            "ssh-ed25519", "ssh-rsa", "ssh-dss", "ssh-ecdsa",
-            "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521",
-            "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com",
-            "ssh-ed25519-cert-v01@openssh.com", "ssh-rsa-cert-v01@openssh.com",
-        ]
-
-        // Fast path: line starts with key type.
-        let tokens = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard !tokens.isEmpty else { return ("", nil, "") }
-
-        if knownTypes.contains(tokens[0]) {
-            let comment = tokens.count > 2 ? tokens[2...].joined(separator: " ") : ""
-            return ("", tokens[0], comment)
+    private func parseAuthorizedKeyLine(_ line: String) -> AuthorizedKey {
+        let tokens = line.split(separator: " ", omittingEmptySubsequences: true).map { String($0) }
+        guard !tokens.isEmpty else { return .empty }
+        if let index = tokens.firstIndex(where: { Self.knownKeyTypes.contains($0) }) {
+            return Self.authorizedKey(tokens, keyTypeIndex: index)
         }
+        return Self.heuristicAuthorizedKey(tokens)
+    }
 
-        // Options may precede key type (comma-separated options with possible quoted values).
-        // Find first known key type token.
-        if let typeIdx = tokens.firstIndex(where: { knownTypes.contains($0) }) {
-            let options = tokens[..<typeIdx].joined(separator: " ")
-            let keyType = tokens[typeIdx]
-            let comment: String
-            if typeIdx + 2 < tokens.count {
-                comment = tokens[(typeIdx + 2)...].joined(separator: " ")
-            } else {
-                comment = ""
-            }
-            return (options, keyType, comment)
-        }
+    private static let knownKeyTypes: Set<String> = [
+        "ssh-ed25519", "ssh-rsa", "ssh-dss", "ssh-ecdsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384",
+        "ecdsa-sha2-nistp521", "sk-ssh-ed25519@openssh.com", "sk-ecdsa-sha2-nistp256@openssh.com",
+        "ssh-ed25519-cert-v01@openssh.com", "ssh-rsa-cert-v01@openssh.com",
+    ]
 
-        // Fallback: treat second token as key type if present (common simplified fixtures).
-        if tokens.count >= 2 {
-            // options=none, type at 0 may be wrong - try heuristic key-type pattern.
-            if tokens[0].hasPrefix("ssh-") || tokens[0].hasPrefix("ecdsa-") || tokens[0].hasPrefix("sk-") {
-                let comment = tokens.count > 2 ? tokens[2...].joined(separator: " ") : ""
-                return ("", tokens[0], comment)
-            }
-        }
-        return ("", nil, "")
+    private static func authorizedKey(_ tokens: [String], keyTypeIndex: Int) -> AuthorizedKey {
+        let commentStart = keyTypeIndex + 2
+        let comment = commentStart < tokens.count ? tokens[commentStart...].joined(separator: " ") : ""
+        return AuthorizedKey(options: tokens[..<keyTypeIndex].joined(separator: " "), keyType: tokens[keyTypeIndex], comment: comment)
+    }
+
+    private static func heuristicAuthorizedKey(_ tokens: [String]) -> AuthorizedKey {
+        guard tokens.count >= 2, ["ssh-", "ecdsa-", "sk-"].contains(where: tokens[0].hasPrefix) else { return .empty }
+        let comment = tokens.count > 2 ? tokens[2...].joined(separator: " ") : ""
+        return AuthorizedKey(options: "", keyType: tokens[0], comment: comment)
+    }
+
+    private struct AuthorizedKey {
+        let options: String
+        let keyType: String?
+        let comment: String
+
+        static let empty = AuthorizedKey(options: "", keyType: nil, comment: "")
     }
 
     // MARK: - known_hosts
@@ -192,49 +152,43 @@ public struct SSHArtifactsParser: ArtifactParser {
                 }
             }
 
-            let tokens = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            guard tokens.count >= 2 else { continue }
-            let hostPattern = tokens[0]
-            let keyType = tokens[1]
-
-            var fields: [String: String] = [
-                "ssh.host_pattern": hostPattern,
-                "ssh.key_type": keyType,
-                "ssh.line": String(lineNo),
-                FieldTaxonomy.filePath: ArtifactRoot.pathKey(url),
-                FieldTaxonomy.eventType: "auth.ssh_known_host",
-            ]
-            if !marker.isEmpty {
-                fields["ssh.marker"] = marker
-            }
-            if let user {
-                fields[FieldTaxonomy.userName] = user
-                fields["ssh.user"] = user
-            }
-
-            var entities: [EntityID] = [
-                EntityID(kind: .auth, value: "ssh_known_host|\(hostPattern)|\(keyType)"),
-                .file(path: ArtifactRoot.pathKey(url)),
-            ]
-            if let user {
-                entities.append(.user(name: user))
-            }
-
-            events.append(
-                EventEnvelope(
-                    eventTime: fileMTime(url),
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "SSH",
-                    eventType: "auth.ssh_known_host",
-                    entityRefs: entities,
-                    fields: fields,
-                    rawRef: ArtifactRoot.pathKey(url),
-                    confidence: 0.94
-                )
-            )
+            guard let event = knownHostEvent(from: line, marker: marker, url: url, user: user, lineNo: lineNo) else { continue }
+            events.append(event)
         }
         return events
+    }
+
+    private func knownHostEvent(from line: String, marker: String, url: URL, user: String?, lineNo: Int) -> EventEnvelope? {
+        let tokens = line.split(separator: " ", omittingEmptySubsequences: true).map { String($0) }
+        guard tokens.count >= 2 else { return nil }
+        let path = ArtifactRoot.pathKey(url)
+        let hostPattern = tokens[0]
+        let keyType = tokens[1]
+        var fields: [String: String] = ["ssh.host_pattern": hostPattern, "ssh.key_type": keyType, "ssh.line": String(lineNo), FieldTaxonomy.filePath: path, FieldTaxonomy.eventType: "auth.ssh_known_host"]
+        if !marker.isEmpty { fields["ssh.marker"] = marker }
+        if let user {
+            fields[FieldTaxonomy.userName] = user
+            fields["ssh.user"] = user
+        }
+        var entities: [EntityID] = [EntityID(kind: .auth, value: "ssh_known_host|\(hostPattern)|\(keyType)"), .file(path: path)]
+        if let user { entities.append(.user(name: user)) }
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "auth.ssh_known_host",
+                label: "SSH"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: fileMTime(url),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: entities,
+                properties: fields,
+                provenance: path,
+                confidence: 0.94
+            )
+        )
     }
 
     // MARK: - sshd_config
@@ -260,25 +214,31 @@ public struct SSHArtifactsParser: ArtifactParser {
 
             events.append(
                 EventEnvelope(
-                    eventTime: fileMTime(url),
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "SSH",
-                    eventType: "auth.sshd_config",
-                    entityRefs: [
+                    identity: EventEnvelope.Identity(
+                        kind: "auth.sshd_config",
+                        label: "SSH"
+                    ),
+                    capture: EventEnvelope.Capture(
+                        source: .parser,
+                        eventTime: fileMTime(url),
+                        collectedAt: Date()
+                    ),
+                    payload: EventEnvelope.Payload(
+                        entityRefs: [
                         EntityID(kind: .auth, value: "sshd_config|\(canonical)"),
                         .file(path: ArtifactRoot.pathKey(url)),
                         EntityID(kind: .host, value: "sshd"),
                     ],
-                    fields: [
+                        properties: [
                         "ssh.directive": canonical,
                         "ssh.value": value,
                         "ssh.line": String(lineNo),
                         FieldTaxonomy.filePath: ArtifactRoot.pathKey(url),
                         FieldTaxonomy.eventType: "auth.sshd_config",
                     ],
-                    rawRef: ArtifactRoot.pathKey(url),
-                    confidence: 0.97
+                        provenance: ArtifactRoot.pathKey(url),
+                        confidence: 0.97
+                    )
                 )
             )
         }

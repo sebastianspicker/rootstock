@@ -40,107 +40,122 @@ def load_yaml(path: Path) -> dict:
     return data
 
 
-def _load_yaml_minimal(text: str) -> dict:
-    """Parse the technique catalog without PyYAML (indent-based, list of maps)."""
-    # Strip comments
-    lines = []
-    for line in text.splitlines():
-        if line.strip().startswith("#"):
-            continue
-        # drop inline comments carefully only for full-line already handled
-        lines.append(line)
+class _MinimalCatalogParser:
+    """Parse the catalog subset needed when PyYAML is unavailable."""
 
-    techniques: list[dict] = []
-    version = 1
-    current: dict | None = None
-    section: str | None = None  # mappings key
-    list_key: str | None = None
-    depth_lines: list[str] = []
-    in_depth = False
+    _mapping_keys = ("graph_queries", "red_findings", "blue_detections")
 
-    def flush_depth():
-        nonlocal in_depth, depth_lines, current
-        if current is not None and in_depth:
-            current["depth_notes"] = "\n".join(depth_lines).strip()
-        depth_lines = []
-        in_depth = False
+    def __init__(self) -> None:
+        self.techniques: list[dict] = []
+        self.version = 1
+        self.current: dict | None = None
+        self.section: str | None = None
+        self.list_key: str | None = None
+        self.depth_lines: list[str] = []
+        self.in_depth = False
 
-    for raw in lines:
+    def parse(self, text: str) -> dict:
+        for raw in (line for line in text.splitlines() if not line.strip().startswith("#")):
+            self._consume(raw)
+        self._flush_depth()
+        self._finish_technique()
+        return {"version": self.version, "techniques": self.techniques}
+
+    def _consume(self, raw: str) -> None:
         if not raw.strip():
-            if in_depth:
-                depth_lines.append("")
-            continue
-        # version
-        m = re.match(r"^version:\s*(\d+)\s*$", raw)
-        if m:
-            version = int(m.group(1))
-            continue
-        if raw.startswith("techniques:"):
-            continue
-        # new technique
-        m = re.match(r"^\s*-\s*id:\s*(.+)\s*$", raw)
-        if m:
-            flush_depth()
-            if current is not None:
-                techniques.append(current)
-            current = {
-                "id": m.group(1).strip().strip("'\""),
-                "mappings": {
-                    "graph_queries": [],
-                    "red_findings": [],
-                    "blue_detections": [],
-                },
-            }
-            section = None
-            list_key = None
-            continue
-        if current is None:
-            continue
-        if re.match(r"^\s+depth_notes:\s*\|", raw):
-            flush_depth()
-            in_depth = True
-            depth_lines = []
-            list_key = None
-            section = None
-            continue
-        if in_depth:
-            # End block scalar when a peer field of the technique starts (4-space key)
-            if re.match(
-                r"^\s{4}(title|attack_techniques|surfaces|mappings|status|id):",
-                raw,
-            ):
-                flush_depth()
-            elif re.match(r"^\s*-\s*id:", raw):
-                flush_depth()
-            else:
-                depth_lines.append(raw.strip())
-                continue
-        m = re.match(r"^\s+title:\s*(.+)\s*$", raw)
-        if m:
-            current["title"] = m.group(1).strip().strip("'\"")
-            continue
-        m = re.match(r"^\s+status:\s*(\S+)\s*$", raw)
-        if m:
-            current["status"] = m.group(1).strip()
-            continue
+            self._append_depth_blank()
+        elif self._set_version(raw) or raw.startswith("techniques:"):
+            return
+        elif self._start_technique(raw):
+            return
+        elif self.current is not None:
+            self._consume_current(raw)
+
+    def _consume_current(self, raw: str) -> None:
+        if self._start_depth_notes(raw) or self._consume_depth_text(raw):
+            return
+        if self._set_scalar(raw, "title") or self._set_scalar(raw, "status"):
+            return
         if re.match(r"^\s+mappings:\s*$", raw):
-            section = "mappings"
-            list_key = None
-            continue
-        m = re.match(r"^\s+(graph_queries|red_findings|blue_detections):\s*$", raw)
-        if m:
-            list_key = m.group(1)
-            continue
-        m = re.match(r"^\s+-\s+(.+)\s*$", raw)
-        if m and list_key and section == "mappings":
-            val = m.group(1).strip().strip("'\"")
-            current["mappings"][list_key].append(val)
-            continue
-        # ignore other keys (attack_techniques, surfaces) for validation
-    flush_depth()
-    if current is not None:
-        techniques.append(current)
-    return {"version": version, "techniques": techniques}
+            self.section, self.list_key = "mappings", None
+            return
+        self._append_mapping_value(raw)
+
+    def _set_version(self, raw: str) -> bool:
+        match = re.match(r"^version:\s*(\d+)\s*$", raw)
+        if match is None:
+            return False
+        self.version = int(match.group(1))
+        return True
+
+    def _start_technique(self, raw: str) -> bool:
+        match = re.match(r"^\s*-\s*id:\s*(.+)\s*$", raw)
+        if match is None:
+            return False
+        self._flush_depth()
+        self._finish_technique()
+        self.current = {
+            "id": self._unquote(match.group(1)),
+            "mappings": {key: [] for key in self._mapping_keys},
+        }
+        self.section, self.list_key = None, None
+        return True
+
+    def _start_depth_notes(self, raw: str) -> bool:
+        if not re.match(r"^\s+depth_notes:\s*\|", raw):
+            return False
+        self._flush_depth()
+        self.in_depth = True
+        self.list_key, self.section = None, None
+        return True
+
+    def _consume_depth_text(self, raw: str) -> bool:
+        if not self.in_depth:
+            return False
+        if re.match(r"^\s{4}(title|attack_techniques|surfaces|mappings|status|id):", raw):
+            self._flush_depth()
+            return False
+        self.depth_lines.append(raw.strip())
+        return True
+
+    def _set_scalar(self, raw: str, key: str) -> bool:
+        match = re.match(rf"^\s+{key}:\s*(.+)\s*$", raw)
+        if match is None or self.current is None:
+            return False
+        self.current[key] = self._unquote(match.group(1))
+        return True
+
+    def _append_mapping_value(self, raw: str) -> None:
+        key_match = re.match(r"^\s+(graph_queries|red_findings|blue_detections):\s*$", raw)
+        if key_match:
+            self.list_key = key_match.group(1)
+            return
+        value_match = re.match(r"^\s+-\s+(.+)\s*$", raw)
+        if value_match and self.list_key and self.section == "mappings" and self.current:
+            self.current["mappings"][self.list_key].append(self._unquote(value_match.group(1)))
+
+    def _append_depth_blank(self) -> None:
+        if self.in_depth:
+            self.depth_lines.append("")
+
+    def _flush_depth(self) -> None:
+        if self.current is not None and self.in_depth:
+            self.current["depth_notes"] = "\n".join(self.depth_lines).strip()
+        self.depth_lines, self.in_depth = [], False
+
+    def _finish_technique(self) -> None:
+        if self.current is not None:
+            self.techniques.append(self.current)
+            self.current = None
+
+    @staticmethod
+    def _unquote(value: str) -> str:
+        return value.strip().strip(chr(39) + chr(34))
+
+
+def _load_yaml_minimal(text: str) -> dict:
+    """Parse the technique catalog without PyYAML."""
+    return _MinimalCatalogParser().parse(text)
 
 
 def collect_red_ids() -> set[str]:
@@ -157,6 +172,77 @@ def collect_red_ids() -> set[str]:
             continue
         ids.update(pat.findall(text))
     return ids
+
+
+def _catalog_errors(techniques: list[dict], red_ids: set[str]) -> list[str]:
+    errors: list[str] = []
+    seen_ids: set[str] = set()
+    for technique in techniques:
+        _validate_technique(technique, red_ids, seen_ids, errors)
+    return errors
+
+
+def _validate_technique(
+    technique: dict,
+    red_ids: set[str],
+    seen_ids: set[str],
+    errors: list[str],
+) -> None:
+    technique_id = _record_technique_id(technique, seen_ids, errors)
+    if technique_id is None:
+        return
+    _validate_technique_title(technique, technique_id, errors)
+    if technique.get("status", "mapped") == "planned":
+        return
+    mappings = technique.get("mappings") or {}
+    _validate_mapping_paths(technique_id, mappings, "graph_queries", QUERIES, "", errors)
+    _validate_mapping_paths(technique_id, mappings, "blue_detections", BLUE_DET, ".yaml", errors)
+    _validate_red_findings(technique_id, mappings, red_ids, errors)
+
+
+def _record_technique_id(technique: dict, seen_ids: set[str], errors: list[str]) -> str | None:
+    technique_id = technique.get("id")
+    if not technique_id:
+        errors.append("technique missing id")
+        return None
+    if technique_id in seen_ids:
+        errors.append(f"duplicate id: {technique_id}")
+    seen_ids.add(technique_id)
+    return technique_id
+
+
+def _validate_technique_title(technique: dict, technique_id: str, errors: list[str]) -> None:
+    if not technique.get("title"):
+        errors.append(f"{technique_id}: missing title")
+
+
+def _validate_red_findings(
+    technique_id: str, mappings: dict, red_ids: set[str], errors: list[str]
+) -> None:
+    for finding_id in mappings.get("red_findings") or []:
+        if finding_id not in red_ids:
+            errors.append(f"{technique_id}: red finding id not found in Sources: {finding_id}")
+
+
+def _validate_mapping_paths(
+    technique_id: str,
+    mappings: dict,
+    mapping_key: str,
+    directory: Path,
+    suffix: str,
+    errors: list[str],
+) -> None:
+    for item in mappings.get(mapping_key) or []:
+        if not (directory / f"{item}{suffix}").is_file():
+            label = mapping_key.replace("_", " ").removesuffix("s")
+            errors.append(f"{technique_id}: missing {label} {item}{suffix}")
+
+
+def _print_errors(errors: list[str]) -> None:
+    if errors:
+        print("Technique catalog check FAILED:")
+        for error in errors:
+            print(f"  - {error}")
 
 
 def main() -> int:
@@ -178,42 +264,9 @@ def main() -> int:
         )
         return 1
 
-    red_ids = collect_red_ids()
-    errors: list[str] = []
-    seen_ids: set[str] = set()
-
-    for tech in techniques:
-        tid = tech.get("id")
-        if not tid:
-            errors.append("technique missing id")
-            continue
-        if tid in seen_ids:
-            errors.append(f"duplicate id: {tid}")
-        seen_ids.add(tid)
-        if not tech.get("title"):
-            errors.append(f"{tid}: missing title")
-        status = tech.get("status") or "mapped"
-        mappings = tech.get("mappings") or {}
-        planned = status == "planned"
-
-        for q in mappings.get("graph_queries") or []:
-            path = QUERIES / q
-            if not path.is_file() and not planned:
-                errors.append(f"{tid}: missing graph query {q}")
-
-        for det in mappings.get("blue_detections") or []:
-            path = BLUE_DET / f"{det}.yaml"
-            if not path.is_file() and not planned:
-                errors.append(f"{tid}: missing blue detection {det}.yaml")
-
-        for fid in mappings.get("red_findings") or []:
-            if fid not in red_ids and not planned:
-                errors.append(f"{tid}: red finding id not found in Sources: {fid}")
-
+    errors = _catalog_errors(techniques, collect_red_ids())
     if errors:
-        print("Technique catalog check FAILED:")
-        for e in errors:
-            print(f"  - {e}")
+        _print_errors(errors)
         return 1
 
     print(

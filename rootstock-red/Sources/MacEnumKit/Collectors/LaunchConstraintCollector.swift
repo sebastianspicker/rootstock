@@ -20,102 +20,66 @@ public struct LaunchConstraintCollector: Collector {
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
-        let fm = FileManager.default
-        var notes: [String] = [
-            "Launch-constraint honesty: path/codesign heuristics only - no runtime inject",
-        ]
+        var accumulator = CollectionAccumulator()
+        for app in Self.sampleApps() {
+            Self.process(app: app, accumulator: &accumulator)
+        }
+        for root in Self.sampleRoots {
+            accumulator.notes.append("sample_root_exists=\(FileManager.default.fileExists(atPath: root)): \(root)")
+        }
+        return Self.state(from: accumulator)
+    }
+
+
+    private struct CollectionAccumulator {
+        var notes = ["Launch-constraint honesty: path/codesign heuristics only - no runtime inject"]
         var constrained: [String] = []
         var unconstrainedRisk: [String] = []
         var injectHits: [InjectabilityHit] = []
         var codesignSamples: [CodesignSample] = []
+    }
 
-        // Probe a small set of application bundles for Info.plist / MacOS binary presence.
-        let appsRoot = URL(fileURLWithPath: "/Applications", isDirectory: true)
-        let appURLs = (try? fm.contentsOfDirectory(
-            at: appsRoot,
+    private static func sampleApps() -> [URL] {
+        let root = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: root,
             includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]
         )) ?? []
-        let apps = appURLs
-            .filter { $0.pathExtension == "app" }
-            .prefix(12)
+        return contents.filter { $0.pathExtension == "app" }.prefix(12).map { $0 }
+    }
 
-        for app in apps {
-            let macOS = app
-                .appendingPathComponent("Contents/MacOS", isDirectory: true)
-            let info = app.appendingPathComponent("Contents/Info.plist")
-            guard fm.fileExists(atPath: info.path) else { continue }
-
-            // Launch constraint plists sometimes shipped under Contents/Library or Resources.
-            let constraintCandidates = [
-                app.appendingPathComponent("Contents/Library/LaunchConstraints"),
-                app.appendingPathComponent("Contents/Resources/launchd-constraint.plist"),
-                app.appendingPathComponent("Contents/CodeResources"),
-            ]
-            var hasConstraintArtifact = false
-            for c in constraintCandidates {
-                if fm.fileExists(atPath: c.path) {
-                    hasConstraintArtifact = true
-                    constrained.append(c.path)
-                    notes.append("constraint-ish artifact: \(c.path)")
-                }
+    private static func process(app: URL, accumulator: inout CollectionAccumulator) {
+        let fm = FileManager.default
+        let info = app.appendingPathComponent("Contents/Info.plist")
+        guard fm.fileExists(atPath: info.path) else { return }
+        let constraints = [app.appendingPathComponent("Contents/Library/LaunchConstraints"), app.appendingPathComponent("Contents/Resources/launchd-constraint.plist"), app.appendingPathComponent("Contents/CodeResources")]
+        let artifacts = constraints.filter { fm.fileExists(atPath: $0.path) }
+        accumulator.constrained.append(contentsOf: artifacts.map(\.path))
+        accumulator.notes.append(contentsOf: artifacts.map { "constraint-ish artifact: \($0.path)" })
+        let macOS = app.appendingPathComponent("Contents/MacOS", isDirectory: true)
+        guard let first = try? fm.contentsOfDirectory(atPath: macOS.path).first else { return }
+        let path = macOS.appendingPathComponent(first).path
+        let sample = codesignProbe(path: path)
+        accumulator.codesignSamples.append(sample)
+        let flags = riskFlags(from: sample)
+        if !flags.isEmpty {
+            accumulator.injectHits.append(InjectabilityHit(path: path, hardenedRuntime: sample.hardenedRuntime, getTaskAllow: sample.getTaskAllow, disableLibraryValidation: sample.disableLibraryValidation, allowDyldEnvironmentVariables: sample.allowDyldEnvironmentVariables, allowUnsignedExecutableMemory: sample.allowUnsignedExecutableMemory, riskFlags: flags, notes: sample.notes))
+            if artifacts.isEmpty {
+                accumulator.unconstrainedRisk.append(path)
+                accumulator.notes.append("risk without constraint artifact: \(path) flags=\(flags.joined(separator: ","))")
             }
-
-            // codesign --display is allowlisted in spirit; prefer lightweight file presence.
-            // Sample executable name from MacOS dir if listable.
-            if let bins = try? fm.contentsOfDirectory(atPath: macOS.path),
-               let first = bins.first
-            {
-                let binPath = macOS.appendingPathComponent(first).path
-                let sample = Self.codesignProbe(path: binPath)
-                codesignSamples.append(sample)
-
-                let riskFlags = Self.riskFlags(from: sample)
-                if !riskFlags.isEmpty {
-                    injectHits.append(
-                        InjectabilityHit(
-                            path: binPath,
-                            hardenedRuntime: sample.hardenedRuntime,
-                            getTaskAllow: sample.getTaskAllow,
-                            disableLibraryValidation: sample.disableLibraryValidation,
-                            allowDyldEnvironmentVariables: sample.allowDyldEnvironmentVariables,
-                            allowUnsignedExecutableMemory: sample.allowUnsignedExecutableMemory,
-                            riskFlags: riskFlags,
-                            notes: sample.notes
-                        )
-                    )
-                    if !hasConstraintArtifact {
-                        unconstrainedRisk.append(binPath)
-                        notes.append(
-                            "risk without constraint artifact: \(binPath) flags=\(riskFlags.joined(separator: ","))"
-                        )
-                    }
-                } else if hasConstraintArtifact {
-                    notes.append("constrained sample with no entitlement risk flags: \(binPath)")
-                }
-            }
+        } else if !artifacts.isEmpty {
+            accumulator.notes.append("constrained sample with no entitlement risk flags: \(path)")
         }
+    }
 
-        // Also note roots scanned.
-        for root in Self.sampleRoots {
-            notes.append("sample_root_exists=\(fm.fileExists(atPath: root)): \(root)")
-        }
-
+    private static func state(from accumulator: CollectionAccumulator) -> CollectedState {
         var state = CollectedState()
-        state.launchConstraints = LaunchConstraintState(
-            constrainedPaths: Array(Set(constrained)).sorted(),
-            unconstrainedRiskPaths: Array(Set(unconstrainedRisk)).sorted(),
-            notes: notes
-        )
-        if !injectHits.isEmpty {
-            state.injectabilityHits = injectHits
-        }
-        if !codesignSamples.isEmpty {
-            state.codesignSamples = codesignSamples
-        }
-        state.collectorNotes[Self.id] =
-            "constrained=\(constrained.count) unconstrainedRisk=\(unconstrainedRisk.count) "
-            + "injectSamples=\(injectHits.count)"
+        state.launchConstraints = LaunchConstraintState(constrainedPaths: Array(Set(accumulator.constrained)).sorted(), unconstrainedRiskPaths: Array(Set(accumulator.unconstrainedRisk)).sorted(), notes: accumulator.notes)
+        if !accumulator.injectHits.isEmpty { state.injectabilityHits = accumulator.injectHits }
+        if !accumulator.codesignSamples.isEmpty { state.codesignSamples = accumulator.codesignSamples }
+        state.collectorNotes[Self.id] = "constrained=\(accumulator.constrained.count) unconstrainedRisk=\(accumulator.unconstrainedRisk.count) " + "injectSamples=\(accumulator.injectHits.count)"
         return state
     }
 

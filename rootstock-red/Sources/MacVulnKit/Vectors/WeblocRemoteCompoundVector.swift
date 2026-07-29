@@ -46,26 +46,13 @@ public struct WeblocRemoteCompoundVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Webloc/inetloc delivery × remote compound"
-                    : "Webloc/inetloc delivery × impact compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1204", "T1566", "T1105"],
-                remediation: [
+                    : "Webloc/inetloc delivery × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1204", "T1566", "T1105"], remediation: [
                     "Prioritize hosts co-locating Webloc/inetloc delivery with remote/FDA amplifiers",
                     "Use Wave-12 lab plans under ROE for purple validation",
                     "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-                ],
-                falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first.",
-                dryRunSafe: true,
-                opsecScore: 27,
-                esfExpected: ["OPEN", "EXEC", "READ"]
-            ),
+                ], falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"])),
         ]
     }
 }

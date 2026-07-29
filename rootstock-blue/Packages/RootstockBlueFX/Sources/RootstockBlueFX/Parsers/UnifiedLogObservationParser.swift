@@ -32,10 +32,8 @@ public struct UnifiedLogObservationParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let name = url.lastPathComponent
             return name == "unified_log_observation.json" || name == "unified_log_observation.jsonl"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -54,57 +52,18 @@ public struct UnifiedLogObservationParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let secretKeys = ["password", "cookie", "cookie_value", "secret", "token", "keychain_data"]
-        for k in secretKeys { _ = item[k] }
-
-        let path = stringish(item["path"])
-            ?? stringish(item["tile_path"])
-            ?? stringish(item["handler_path"])
-            ?? stringish(item["tool_path"])
-            ?? ""
-        let name = stringish(item["name"])
-            ?? stringish(item["rule_name"])
-            ?? stringish(item["kind"])
-            ?? stringish(item["label"])
-            ?? ""
-        guard !path.isEmpty || !name.isEmpty else { return nil }
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.lowercased().contains("password_dump") }
-        }
-        if risk.isEmpty { risk.append("observation_surface") }
-        if !risk.contains("observation_surface") { risk.append("observation_surface") }
-
-        let user = stringish(item["user"]) ?? inferUser(from: path) ?? inferUser(from: sourceURL.path) ?? ""
-        var fields: [String: String] = [
-            "ulog.path": path,
-            "ulog.name": name,
-            "ulog.notes": stringish(item["notes"]) ?? "Unified log observation markers - never dumps private unified-log message bodies or force-collects other users' logarchives",
-            "ulog.secrets_exported": "false",
-            FieldTaxonomy.eventType: "unified_log.observation",
-            FieldTaxonomy.userName: user,
-        ]
-        if let host = stringish(item["url_host"]) { fields["ulog.url_host"] = host }
-        if let share = stringish(item["share_url"]) { fields["ulog.share_url"] = share }
-        if let depth = stringish(item["depth"]) { fields["ulog.depth"] = depth }
-        if boolish(item["runs_script"]) == true { fields["ulog.runs_script"] = "true" }
-        if boolish(item["tool_present"]) == true { fields["ulog.tool_present"] = "true" }
-        if !risk.isEmpty { fields["ulog.risk_tags"] = risk.joined(separator: ",") }
-
-        return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "UNIFIEDLOGOBS",
-            eventType: "unified_log.observation",
-            entityRefs: [
-                EntityID(kind: .host, value: "ulog|\(name.isEmpty ? path : name)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
+        SurfaceMarkerEventBuilder.makeEvent(
+            from: item,
+            sourceURL: sourceURL,
+            spec: SurfaceMarkerEventSpec(
+                fieldPrefix: "ulog",
+                eventType: "unified_log.observation",
+                identityKind: "unified_log.observation",
+                identityLabel: "UNIFIEDLOGOBS",
+                entityPrefix: "ulog",
+                defaultRiskTag: "observation_surface",
+                defaultNotes: "Unified log observation markers - never dumps private unified-log message bodies or force-collects other users' logarchives"
+            )
         )
     }
 }

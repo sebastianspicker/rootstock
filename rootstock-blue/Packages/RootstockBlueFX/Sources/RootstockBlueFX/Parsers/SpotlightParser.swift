@@ -34,10 +34,8 @@ public struct SpotlightParser: ArtifactParser {
             return name == "spotlight_inventory.json"
                 || name == "spotlight_export.json"
                 || name == "spotlight_export.jsonl"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -62,39 +60,49 @@ public struct SpotlightParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let path = stringish(item["path"])
-            ?? stringish(item["kMDItemPath"])
-            ?? stringish(item["fs_path"])
-            ?? ""
-        let displayName = stringish(item["display_name"])
-            ?? stringish(item["kMDItemDisplayName"])
-            ?? stringish(item["kMDItemFSName"])
-            ?? stringish(item["name"])
+        let path = stringish(item["path"]) ?? stringish(item["kMDItemPath"]) ?? stringish(item["fs_path"]) ?? ""
+        let displayName = stringish(item["display_name"]) ?? stringish(item["kMDItemDisplayName"])
+            ?? stringish(item["kMDItemFSName"]) ?? stringish(item["name"])
             ?? (path as NSString).lastPathComponent
-        let contentType = stringish(item["content_type"])
-            ?? stringish(item["kMDItemContentType"])
-            ?? stringish(item["uti"])
-            ?? ""
+        let contentType = stringish(item["content_type"]) ?? stringish(item["kMDItemContentType"])
+            ?? stringish(item["uti"]) ?? ""
 
         guard !path.isEmpty || !displayName.isEmpty else { return nil }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        let lowerPath = path.lowercased()
-        let lowerName = displayName.lowercased()
-        if lowerPath.contains("password") || lowerName.contains("password")
-            || lowerPath.contains("secret") || lowerName.contains("credential")
-            || lowerPath.contains("id_rsa") || lowerPath.contains(".pem") {
-            if !risk.contains("sensitive_path") { risk.append("sensitive_path") }
-            if !risk.contains("credential_filename") { risk.append("credential_filename") }
-        }
-        if lowerName.contains("evil") || lowerPath.contains("evil")
-            || lowerPath.contains("/tmp/") || lowerName.contains("payload") {
-            if !risk.contains("suspicious_name") { risk.append("suspicious_name") }
-        }
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "filesystem.spotlight",
+                label: "SPOTLIGHT"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["mtime"] ?? item["kMDItemContentModificationDate"])
+                ?? Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: spotlightEntities(path: path, displayName: displayName),
+                properties: spotlightFields(
+                item: item,
+                sourceURL: sourceURL,
+                path: path,
+                displayName: displayName,
+                contentType: contentType
+            ),
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.88
+            )
+        )
+    }
 
+    private func spotlightFields(
+        item: [String: Any],
+        sourceURL: URL,
+        path: String,
+        displayName: String,
+        contentType: String
+    ) -> [String: String] {
+        let risk = spotlightRiskTags(item: item, path: path, displayName: displayName)
         var fields: [String: String] = [
             "spotlight.path": path,
             "spotlight.display_name": displayName,
@@ -110,21 +118,40 @@ public struct SpotlightParser: ArtifactParser {
         if let user = inferUser(from: path.isEmpty ? sourceURL.path : path) {
             fields[FieldTaxonomy.userName] = user
         }
+        return fields
+    }
 
-        var refs: [EntityID] = []
-        if !path.isEmpty { refs.append(.file(path: path)) }
-        refs.append(EntityID(kind: .host, value: "spotlight|\(displayName)"))
+    private func spotlightRiskTags(item: [String: Any], path: String, displayName: String) -> [String] {
+        var risk = spotlightItemRiskTags(item)
+        let lowerPath = path.lowercased()
+        let lowerName = displayName.lowercased()
+        if ["password", "secret", "credential", "id_rsa", ".pem"].contains(where: {
+            lowerPath.contains($0) || lowerName.contains($0)
+        }) {
+            appendSpotlightRiskTag("sensitive_path", to: &risk)
+            appendSpotlightRiskTag("credential_filename", to: &risk)
+        }
+        if ["evil", "payload"].contains(where: { lowerPath.contains($0) || lowerName.contains($0) })
+            || lowerPath.contains("/tmp/") {
+            appendSpotlightRiskTag("suspicious_name", to: &risk)
+        }
+        return risk
+    }
 
-        return EventEnvelope(
-            eventTime: parseDate(item["mtime"] ?? item["kMDItemContentModificationDate"]) ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "SPOTLIGHT",
-            eventType: "filesystem.spotlight",
-            entityRefs: refs,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
-        )
+    private func spotlightItemRiskTags(_ item: [String: Any]) -> [String] {
+        guard let tags = stringish(item["risk_tags"]), !tags.isEmpty else { return [] }
+        return tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    private func appendSpotlightRiskTag(_ tag: String, to risk: inout [String]) {
+        guard !risk.contains(tag) else { return }
+        risk.append(tag)
+    }
+
+    private func spotlightEntities(path: String, displayName: String) -> [EntityID] {
+        var entities: [EntityID] = []
+        if !path.isEmpty { entities.append(.file(path: path)) }
+        entities.append(EntityID(kind: .host, value: "spotlight|\(displayName)"))
+        return entities
     }
 }

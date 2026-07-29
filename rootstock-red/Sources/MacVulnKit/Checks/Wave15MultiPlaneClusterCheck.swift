@@ -12,79 +12,28 @@ public struct Wave15MultiPlaneClusterCheck: Check {
         return [Self.compoundFinding(planes: planes, state: state)]
     }
     private static func pairPlanes(state: CollectedState) -> [String] {
-        var planes: [String] = []
+        hostSurfacePlanes(state) + persistencePlanes(state)
+    }
 
-        let _photos_library_path = state.photosLibraryPath
-        if _photos_library_path?.photosSurfacePresent == true
-            || ((_photos_library_path?.photosAppPaths.count ?? 0) >= 1)
-            || ((_photos_library_path?.photosLibraryPaths.count ?? 0) >= 1) {
-            planes.append("photos_library_path")
-        }
 
-        let _vpn_config_dualuse = state.vpnConfigDualuse
-        if _vpn_config_dualuse?.vpnSurfacePresent == true
-            || ((_vpn_config_dualuse?.vpnFrameworkPaths.count ?? 0) >= 1)
-            || ((_vpn_config_dualuse?.vpnPrefPaths.count ?? 0) >= 1) {
-            planes.append("vpn_config_dualuse")
-        }
+    private static func hostSurfacePlanes(_ state: CollectedState) -> [String] {
+        presentPlaneNames([
+            .init(name: "photos_library_path", isPresent: hasPlaneSurface(state.photosLibraryPath, isPresent: { $0.photosSurfacePresent }, primaryCount: { $0.photosAppPaths.count }, secondaryCount: { $0.photosLibraryPaths.count })),
+            .init(name: "vpn_config_dualuse", isPresent: hasPlaneSurface(state.vpnConfigDualuse, isPresent: { $0.vpnSurfacePresent }, primaryCount: { $0.vpnFrameworkPaths.count }, secondaryCount: { $0.vpnPrefPaths.count })),
+            .init(name: "sandbox_container_depth", isPresent: hasPlaneSurface(state.sandboxContainerDepth, isPresent: { $0.sandboxSurfacePresent }, primaryCount: { $0.containerRootPaths.count }, secondaryCount: { $0.sandboxProfilePaths.count })),
+            .init(name: "xpc_mach_service_depth", isPresent: hasPlaneSurface(state.xpcMachServiceDepth, isPresent: { $0.xpcMachSurfacePresent }, primaryCount: { $0.xpcBootstrapPaths.count }, secondaryCount: { $0.machServicePlistPaths.count })),
+            .init(name: "tm_local_snapshot_depth", isPresent: hasPlaneSurface(state.tmLocalSnapshotDepth, isPresent: { $0.tmSnapshotSurfacePresent }, primaryCount: { $0.tmUtilPaths.count }, secondaryCount: { $0.snapshotStorePaths.count })),
+        ])
+    }
 
-        let _sandbox_container_depth = state.sandboxContainerDepth
-        if _sandbox_container_depth?.sandboxSurfacePresent == true
-            || ((_sandbox_container_depth?.containerRootPaths.count ?? 0) >= 1)
-            || ((_sandbox_container_depth?.sandboxProfilePaths.count ?? 0) >= 1) {
-            planes.append("sandbox_container_depth")
-        }
-
-        let _xpc_mach_service_depth = state.xpcMachServiceDepth
-        if _xpc_mach_service_depth?.xpcMachSurfacePresent == true
-            || ((_xpc_mach_service_depth?.xpcBootstrapPaths.count ?? 0) >= 1)
-            || ((_xpc_mach_service_depth?.machServicePlistPaths.count ?? 0) >= 1) {
-            planes.append("xpc_mach_service_depth")
-        }
-
-        let _tm_local_snapshot_depth = state.tmLocalSnapshotDepth
-        if _tm_local_snapshot_depth?.tmSnapshotSurfacePresent == true
-            || ((_tm_local_snapshot_depth?.tmUtilPaths.count ?? 0) >= 1)
-            || ((_tm_local_snapshot_depth?.snapshotStorePaths.count ?? 0) >= 1) {
-            planes.append("tm_local_snapshot_depth")
-        }
-
-        let _emond_legacy_depth = state.emondLegacyDepth
-        if _emond_legacy_depth?.emondSurfacePresent == true
-            || ((_emond_legacy_depth?.emondBinaryPaths.count ?? 0) >= 1)
-            || ((_emond_legacy_depth?.emondRulePaths.count ?? 0) >= 1) {
-            planes.append("emond_legacy_depth")
-        }
-
-        let _screen_sharing_ard_depth = state.screenSharingArdDepth
-        if _screen_sharing_ard_depth?.ardSurfacePresent == true
-            || ((_screen_sharing_ard_depth?.screenSharingAppPaths.count ?? 0) >= 1)
-            || ((_screen_sharing_ard_depth?.ardAgentPaths.count ?? 0) >= 1) {
-            planes.append("screen_sharing_ard_depth")
-        }
-
-        let _keychain_acl_path = state.keychainAclPath
-        if _keychain_acl_path?.keychainAclSurfacePresent == true
-            || ((_keychain_acl_path?.keychainDbPaths.count ?? 0) >= 1)
-            || ((_keychain_acl_path?.securityToolPaths.count ?? 0) >= 1) {
-            planes.append("keychain_acl_path")
-        }
-
-        let _python_runtime_dualuse = state.pythonRuntimeDualuse
-        if _python_runtime_dualuse?.pythonSurfacePresent == true
-            || ((_python_runtime_dualuse?.pythonBinaryPaths.count ?? 0) >= 1)
-            || ((_python_runtime_dualuse?.sitePackagePaths.count ?? 0) >= 1) {
-            planes.append("python_runtime_dualuse")
-        }
-
-        let _shell_plugin_manager = state.shellPluginManager
-        if _shell_plugin_manager?.shellPluginSurfacePresent == true
-            || ((_shell_plugin_manager?.omzPaths.count ?? 0) >= 1)
-            || ((_shell_plugin_manager?.pluginDirPaths.count ?? 0) >= 1) {
-            planes.append("shell_plugin_manager")
-        }
-
-        return planes
+    private static func persistencePlanes(_ state: CollectedState) -> [String] {
+        presentPlaneNames([
+            .init(name: "emond_legacy_depth", isPresent: hasPlaneSurface(state.emondLegacyDepth, isPresent: { $0.emondSurfacePresent }, primaryCount: { $0.emondBinaryPaths.count }, secondaryCount: { $0.emondRulePaths.count })),
+            .init(name: "screen_sharing_ard_depth", isPresent: hasPlaneSurface(state.screenSharingArdDepth, isPresent: { $0.ardSurfacePresent }, primaryCount: { $0.screenSharingAppPaths.count }, secondaryCount: { $0.ardAgentPaths.count })),
+            .init(name: "keychain_acl_path", isPresent: hasPlaneSurface(state.keychainAclPath, isPresent: { $0.keychainAclSurfacePresent }, primaryCount: { $0.keychainDbPaths.count }, secondaryCount: { $0.securityToolPaths.count })),
+            .init(name: "python_runtime_dualuse", isPresent: hasPlaneSurface(state.pythonRuntimeDualuse, isPresent: { $0.pythonSurfacePresent }, primaryCount: { $0.pythonBinaryPaths.count }, secondaryCount: { $0.sitePackagePaths.count })),
+            .init(name: "shell_plugin_manager", isPresent: hasPlaneSurface(state.shellPluginManager, isPresent: { $0.shellPluginSurfacePresent }, primaryCount: { $0.omzPaths.count }, secondaryCount: { $0.pluginDirPaths.count })),
+        ])
     }
     private static func amplifiers(state: CollectedState) -> [String] {
         var amps: [String] = []
@@ -101,26 +50,17 @@ public struct Wave15MultiPlaneClusterCheck: Check {
         let amps = amplifiers(state: state).sorted()
         let severity: Severity = (sorted.count >= 5 && amps.contains("remote") && amps.contains("fda")) ? .high
             : ((sorted.count >= 3 || (sorted.count >= 2 && amps.count >= 2)) ? .medium : .low)
-        return Finding(
-            id: "\(id).multi_plane",
-            title: "Wave-15 multi-plane compound: \(sorted.count) planes (\(sorted.joined(separator: ", ")))",
-            severity: severity, confidence: .low, category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).multi_plane", title: "Wave-15 multi-plane compound: \(sorted.count) planes (\(sorted.joined(separator: ", ")))", severity: severity, category: .misconfig, resolution: .init(evidence: [
                 Evidence(type: "planes", detail: "planes=\(sorted.joined(separator: "|")) count=\(sorted.count)"),
                 Evidence(type: "amplifiers", detail: amps.isEmpty ? "amplifiers=none" : "amplifiers=\(amps.joined(separator: "|")) count=\(amps.count)"),
                 Evidence(type: "stage_labels", detail: "stages=collection|remote|sandbox|lolbin|persist (labels only - not auto-exploit)"),
                 Evidence(type: "host", detail: "host=\(state.host?.hostname ?? "unknown") user=\(state.host?.username ?? "unknown")"),
                 Evidence(type: "honesty", detail: "Wave-15 multi-plane ranking is path-to-impact narrative. Rootstock Red does not dump Photos/keychain secrets, enable ARD/VPN, break sandbox, install emond/cron, or run Python/shell plugin payloads."),
-            ],
-            attackTechniques: ["T1005", "T1021", "T1555.001", "T1059.006", "T1546.004", "T1546.014"],
-            remediation: [
+            ], attackTechniques: ["T1005", "T1021", "T1555.001", "T1059.006", "T1546.004", "T1546.014"], remediation: [
                 "Prioritize hosts co-locating multiple Wave-15 planes with remote/FDA amplifiers",
                 "Close remote access before deep dual-use inventory",
                 "Use Wave-15 lab plans under ROE for purple validation",
                 "OPSEC: multi-plane compounds are engagement narrative, not exploit scripts",
-            ],
-            falsePositiveNotes: "Developer workstations may co-locate many Wave-15 planes. Rank production remote hosts first.",
-            dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ"]
-        )
+            ], falsePositiveNotes: "Developer workstations may co-locate many Wave-15 planes. Rank production remote hosts first."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ"]))
     }
 }

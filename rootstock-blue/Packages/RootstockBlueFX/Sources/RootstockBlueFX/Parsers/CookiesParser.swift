@@ -6,16 +6,22 @@ import RootstockBlueCore
 /// Emits domain, name markers, secure/httpOnly flags, and risk tags.
 /// Does not export raw cookie values (privacy / anti-hijack non-goal).
 public struct CookiesParser: ArtifactParser {
+    private struct CookieMetadata {
+        let domain: String
+        let nameMarker: String
+        let engine: String
+        let path: String
+        let secure: Bool
+        let httpOnly: Bool
+        let sameSite: String
+        let user: String
+    }
+
     public let manifest = PluginManifest(
         id: "COOKIES",
         tier: .tier2,
         description: "Browser cookie domain inventory (no raw session values)"
     )
-
-    private static let forbiddenValueKeys: Set<String> = [
-        "value", "cookie_value", "raw_value", "session_value", "secret",
-        "token", "session_token", "auth_token", "bearer",
-    ]
 
     public init() {}
 
@@ -42,10 +48,8 @@ public struct CookiesParser: ArtifactParser {
                 || name == "browser_cookies.json"
                 || name == "cookies_export.jsonl"
                 || name == "Cookies.json"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -68,18 +72,9 @@ public struct CookiesParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let domain = stringish(item["domain"])
-            ?? stringish(item["host"])
-            ?? stringish(item["cookie.domain"])
-            ?? ""
-        let nameMarker = stringish(item["name_marker"])
-            ?? stringish(item["name"])
-            ?? stringish(item["cookie_name"])
-            ?? ""
-        let engine = stringish(item["engine"])
-            ?? stringish(item["browser"])
-            ?? stringish(item["browser.engine"])
-            ?? ""
+        let domain = cookieValue(item, keys: ["domain", "host", "cookie.domain"])
+        let nameMarker = cookieValue(item, keys: ["name_marker", "name", "cookie_name"])
+        let engine = cookieValue(item, keys: ["engine", "browser", "browser.engine"])
         let path = stringish(item["path"]) ?? "/"
         let secure = boolish(item["secure"]) ?? boolish(item["is_secure"]) ?? false
         let httpOnly = boolish(item["http_only"])
@@ -90,49 +85,83 @@ public struct CookiesParser: ArtifactParser {
 
         guard !domain.isEmpty || !nameMarker.isEmpty else { return nil }
 
-        // Never copy raw values even if present in source JSON
-        for key in item.keys {
-            if Self.forbiddenValueKeys.contains(key.lowercased()) {
-                continue
-            }
-        }
-
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        let lowerDomain = domain.lowercased()
-        if lowerDomain.contains("evil") || lowerDomain.contains("malware")
-            || lowerDomain.contains("c2.") || lowerDomain.hasSuffix(".evil") {
-            if !risk.contains("evil_domain") { risk.append("evil_domain") }
-        }
-        if lowerDomain.contains("pastebin") || lowerDomain.contains("ngrok")
-            || lowerDomain.contains("trycloudflare") {
-            if !risk.contains("suspicious_domain") { risk.append("suspicious_domain") }
-        }
-        let lowerName = nameMarker.lowercased()
-        if lowerName.contains("session") || lowerName.contains("sid")
-            || lowerName.contains("auth") || lowerName.contains("token") {
-            if !risk.contains("session_cookie") { risk.append("session_cookie") }
-        }
-        if !secure && (risk.contains("session_cookie") || risk.contains("evil_domain")) {
-            if !risk.contains("insecure_flag") { risk.append("insecure_flag") }
-        }
+        let risk = riskTags(for: item, domain: domain, nameMarker: nameMarker, secure: secure)
 
         let user = stringish(item["user"]) ?? inferUser(from: sourceURL.path) ?? ""
+        let metadata = CookieMetadata(
+            domain: domain,
+            nameMarker: nameMarker,
+            engine: engine,
+            path: path,
+            secure: secure,
+            httpOnly: httpOnly,
+            sameSite: sameSite,
+            user: user
+        )
+        let fields = cookieFields(item, metadata: metadata, risk: risk)
 
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "browser.cookie",
+                label: "COOKIES"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(item["created"] ?? item["last_access"] ?? item["timestamp"])
+                ?? Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [
+                EntityID(kind: .network, value: "cookie|\(domain)"),
+            ],
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.9
+            )
+        )
+    }
+
+    private func cookieValue(_ item: [String: Any], keys: [String]) -> String {
+        keys.lazy.compactMap { stringish(item[$0]) }.first ?? ""
+    }
+
+    private func riskTags(for item: [String: Any], domain: String, nameMarker: String, secure: Bool) -> [String] {
+        var tags = stringish(item["risk_tags"])?.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        } ?? []
+        let lowerDomain = domain.lowercased()
+        append("evil_domain", when: ["evil", "malware", "c2."].contains { lowerDomain.contains($0) } || lowerDomain.hasSuffix(".evil"), to: &tags)
+        append("suspicious_domain", when: ["pastebin", "ngrok", "trycloudflare"].contains { lowerDomain.contains($0) }, to: &tags)
+        let lowerName = nameMarker.lowercased()
+        append("session_cookie", when: ["session", "sid", "auth", "token"].contains { lowerName.contains($0) }, to: &tags)
+        append("insecure_flag", when: !secure && (tags.contains("session_cookie") || tags.contains("evil_domain")), to: &tags)
+        return tags
+    }
+
+    private func append(_ tag: String, when condition: Bool, to tags: inout [String]) {
+        if condition, !tags.contains(tag) {
+            tags.append(tag)
+        }
+    }
+
+    private func cookieFields(
+        _ item: [String: Any],
+        metadata: CookieMetadata,
+        risk: [String]
+    ) -> [String: String] {
         var fields: [String: String] = [
-            "cookie.domain": domain,
-            "cookie.name_marker": String(nameMarker.prefix(80)),
-            "cookie.path": path,
-            "cookie.secure": secure ? "true" : "false",
-            "cookie.http_only": httpOnly ? "true" : "false",
-            "cookie.same_site": sameSite,
-            "cookie.engine": engine,
+            "cookie.domain": metadata.domain,
+            "cookie.name_marker": String(metadata.nameMarker.prefix(80)),
+            "cookie.path": metadata.path,
+            "cookie.secure": metadata.secure ? "true" : "false",
+            "cookie.http_only": metadata.httpOnly ? "true" : "false",
+            "cookie.same_site": metadata.sameSite,
+            "cookie.engine": metadata.engine,
             "cookie.value_exported": "false",
             FieldTaxonomy.eventType: "browser.cookie",
-            FieldTaxonomy.browserName: engine,
-            FieldTaxonomy.userName: user,
+            FieldTaxonomy.browserName: metadata.engine,
+            FieldTaxonomy.userName: metadata.user,
         ]
         if let expires = stringish(item["expires"]) ?? stringish(item["expiry"]) {
             fields["cookie.expires"] = expires
@@ -140,24 +169,6 @@ public struct CookiesParser: ArtifactParser {
         if !risk.isEmpty {
             fields["cookie.risk_tags"] = risk.joined(separator: ",")
         }
-
-        // Defense: strip any accidental value fields
-        fields.removeValue(forKey: "cookie.value")
-        fields.removeValue(forKey: "value")
-
-        return EventEnvelope(
-            eventTime: parseDate(item["created"] ?? item["last_access"] ?? item["timestamp"])
-                ?? Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "COOKIES",
-            eventType: "browser.cookie",
-            entityRefs: [
-                EntityID(kind: .network, value: "cookie|\(domain)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
-        )
+        return fields
     }
 }

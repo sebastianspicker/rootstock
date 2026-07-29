@@ -57,28 +57,14 @@ public struct OsascriptScptDeliveryVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "OSA/scpt delivery with remote access amplifier"
-                    : "Compiled AppleScript / OSA delivery residual",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1059.002", "T1204", "T1027"],
-                remediation: [
+                    : "Compiled AppleScript / OSA delivery residual", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1059.002", "T1204", "T1027"], remediation: [
                     "Inventory and baseline OSA/scpt delivery paths via MDM/EDR",
                     "Correlate unexpected path co-presence with delivery timelines",
                     "Prioritize hosts with remote/FDA amplifiers",
                     "OPSEC: Rootstock Red never compiles malicious .scpt payloads or executes third-party AppleScripts",
-                ],
-                falsePositiveNotes:
-                    "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers.",
-                dryRunSafe: true,
-                opsecScore: 25,
-                esfExpected: ["OPEN", "READ", "EXEC"]
-            ),
+                ], falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"])),
         ]
     }
 }

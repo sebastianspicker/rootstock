@@ -12,85 +12,57 @@ public struct ClickFixTerminalDeliveryVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
-        let cf = state.clickFixTerminalDelivery
-        let terminal = cf?.terminalAppPaths.count ?? 0
-        let script = cf?.scriptEditorPaths.count ?? 0
-        let loaders = cf?.loaderBinaryPaths.count ?? 0
-        let surface = cf?.deliverySurfacePresent == true || terminal + script > 0 || loaders >= 2
-        let note = state.collectorNotes["collect.clickfix_terminal_delivery"] != nil
+        guard shouldReport(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
 
-        guard surface || note else { return [] }
+    private func shouldReport(_ state: CollectedState) -> Bool {
+        let delivery = state.clickFixTerminalDelivery
+        let terminal = delivery?.terminalAppPaths.count ?? 0
+        let script = delivery?.scriptEditorPaths.count ?? 0
+        let loaders = delivery?.loaderBinaryPaths.count ?? 0
+        let surface = delivery?.deliverySurfacePresent == true || terminal + script > 0 || loaders >= 2
+        return (surface || state.collectorNotes["collect.clickfix_terminal_delivery"] != nil)
+            && (loaders >= 1 || terminal >= 1 || script >= 1)
+    }
 
-        let remote =
-            state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
-        let sensorThin =
-            state.esf?.clientPaths.isEmpty == true
-            || (state.securityProducts.filter(\.present).isEmpty
-                && state.collectorNotes["collect.esf_endpoint_security"] != nil)
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let delivery = state.clickFixTerminalDelivery
+        let terminal = delivery?.terminalAppPaths.count ?? 0
+        let script = delivery?.scriptEditorPaths.count ?? 0
+        let loaders = delivery?.loaderBinaryPaths.count ?? 0
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let sensorThin = state.esf?.clientPaths.isEmpty == true
+            || (state.securityProducts.filter(\.present).isEmpty && state.collectorNotes["collect.esf_endpoint_security"] != nil)
         let gkOff = state.protections?.gatekeeperEnabled == false
-
-        // Path-to-impact: delivery surface always relevant when loaders co-present
-        guard loaders >= 1 || terminal >= 1 || script >= 1 else { return [] }
-
-        var evidence: [Evidence] = [
-            Evidence(
-                type: "clickfix_summary",
-                detail:
-                    "terminal=\(terminal) scriptEditor=\(script) loaders=\(loaders) "
-                    + "remote=\(remote) sensorThin=\(sensorThin) gkOff=\(gkOff)"
-            ),
-        ]
-        if let cf {
-            for path in (cf.terminalAppPaths + cf.scriptEditorPaths + cf.loaderBinaryPaths).prefix(12) {
+        var evidence = [Evidence(type: "clickfix_summary", detail: "terminal=\(terminal) scriptEditor=\(script) loaders=\(loaders) remote=\(remote) sensorThin=\(sensorThin) gkOff=\(gkOff)")]
+        if let delivery {
+            for path in (delivery.terminalAppPaths + delivery.scriptEditorPaths + delivery.loaderBinaryPaths).prefix(12) {
                 evidence.append(Evidence(type: "delivery_path", path: path, detail: "paste-run component"))
             }
-            for n in cf.notes.prefix(6) {
-                evidence.append(Evidence(type: "delivery_note", detail: n))
+            for note in delivery.notes.prefix(6) {
+                evidence.append(Evidence(type: "delivery_note", detail: note))
             }
         }
-        evidence.append(
-            Evidence(
-                type: "honesty",
-                detail:
-                    "Assess never builds ClickFix lures, never emits paste-this-payload recipes, "
-                    + "never weaponizes Terminal/Script Editor delivery."
-            )
-        )
+        evidence.append(Evidence(type: "honesty", detail: "Assess never builds ClickFix lures, never emits paste-this-payload recipes, never weaponizes Terminal/Script Editor delivery."))
+        return evidence
+    }
 
-        let severity: Severity
-        if remote && sensorThin {
-            severity = .high
-        } else if remote || gkOff || loaders >= 3 {
-            severity = .medium
-        } else {
-            severity = .low
-        }
-
-        return [
-            Finding(
-                id: Self.id,
-                title: remote
-                    ? "ClickFix paste-run delivery surface on remotely reachable host"
-                    : "ClickFix / paste-and-run Terminal delivery surface",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1204.002", "T1059.004", "T1105"],
-                remediation: [
-                    "Train users against paste-and-run 'fix' instructions (ClickFix/TerminalFix class)",
-                    "Prefer managed Terminal paste-warning posture on modern macOS where available",
-                    "Restrict dual-use loaders via MDM where policy allows; monitor curl|sh process trees",
-                    "OPSEC: Rootstock Red does not build lures or deliver paste-run payloads",
-                ],
-                falsePositiveNotes:
-                    "Terminal, shells, and curl ship with macOS. Prioritize hosts with remote access "
-                    + "or thin sensor coverage for engagement narrative ranking.",
-                dryRunSafe: true,
-                opsecScore: 18,
-                esfExpected: ["OPEN", "EXEC"]
-            ),
-        ]
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let delivery = state.clickFixTerminalDelivery
+        let loaders = delivery?.loaderBinaryPaths.count ?? 0
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let sensorThin = state.esf?.clientPaths.isEmpty == true
+            || (state.securityProducts.filter(\.present).isEmpty && state.collectorNotes["collect.esf_endpoint_security"] != nil)
+        let gkOff = state.protections?.gatekeeperEnabled == false
+        let severity: Severity = remote && sensorThin ? .high : (remote || gkOff || loaders >= 3 ? .medium : .low)
+        return Finding(id: Self.id, title: remote
+                ? "ClickFix paste-run delivery surface on remotely reachable host"
+                : "ClickFix / paste-and-run Terminal delivery surface", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1204.002", "T1059.004", "T1105"], remediation: [
+                "Train users against paste-and-run 'fix' instructions (ClickFix/TerminalFix class)",
+                "Prefer managed Terminal paste-warning posture on modern macOS where available",
+                "Restrict dual-use loaders via MDM where policy allows; monitor curl|sh process trees",
+                "OPSEC: Rootstock Red does not build lures or deliver paste-run payloads",
+            ], falsePositiveNotes: "Terminal, shells, and curl ship with macOS. Prioritize hosts with remote access or thin sensor coverage for engagement narrative ranking."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN", "EXEC"]))
     }
 }

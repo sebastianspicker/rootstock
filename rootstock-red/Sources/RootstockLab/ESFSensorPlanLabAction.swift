@@ -33,45 +33,20 @@ public struct ESFSensorPlanLabAction: LabAction {
           "neverUnloadSensors": true
         }
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run ESF sensor plan: would write observation stub expecting [\(events)] at \
-            \(markerURL.path). Does not unload Endpoint Security clients.
-            """,
-            planSteps: [
-                "Document expected ESF events: \(events)",
-                "Write purple sensor plan JSON under lab root only",
-                "Pair with offline osquery/ES rules - no live ES subscription from lab",
-                "Never unload endpointsecurityd or third-party sensors",
-            ],
-            planCleanup: [
-                "Delete \(markerURL.path)",
-                "Confirm no system ES client configuration was modified",
-            ],
-            applyDryRunMessage: "Dry-run: would write ESF sensor plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote ESF sensor plan at \(markerURL.path)",
-            applySteps: [
-            "Create esf-sensor-plan directory",
-            "Write sensor plan JSON for events \(events)",
-        ],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "ESF sensor plan present",
-            absentMessage: "ESF sensor plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete ESF sensor plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed ESF sensor plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No ES client unload performed"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, events: events)
+            )
         )
+    }
+
+    private static func copy(markerURL: URL, events: String) -> FileMarkerCopy {
+        FileMarkerCopy(plan: FileMarkerPlanCopy(message: "Dry-run ESF sensor plan: would write observation stub expecting [\(events)] at \(markerURL.path). Does not unload Endpoint Security clients.", steps: ["Document expected ESF events: \(events)", "Write purple sensor plan JSON under lab root only", "Pair with offline osquery/ES rules - no live ES subscription from lab", "Never unload endpointsecurityd or third-party sensors"], cleanup: ["Delete \(markerURL.path)", "Confirm no system ES client configuration was modified"]), apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write ESF sensor plan at \(markerURL.path)", successMessage: "Wrote ESF sensor plan at \(markerURL.path)", steps: ["Create esf-sensor-plan directory", "Write sensor plan JSON for events \(events)"], cleanup: ["Delete \(markerURL.path)"]), status: FileMarkerStatusCopy(presentMessage: "ESF sensor plan present", absentMessage: "ESF sensor plan absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]), remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete ESF sensor plan (exists=\(exists))" }, successMessage: { exists in "Removed ESF sensor plan (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No ES client unload performed"]))
     }
 
     public static func resolveLabRoot(params: [String: String]) -> URL {

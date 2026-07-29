@@ -72,14 +72,43 @@ struct AuditCommand: AsyncParsableCommand {
 
     func run() async throws {
         try SafetyRails.ensureNotDisabled()
+        let options = try validatedOptions()
+        let assessment = await performAssessment(options)
+        let auditURL = try await persistAudit(assessment, options: options)
+        try await persistProject(assessment, options: options)
 
+        try writeReport(assessment, format: options.reportFormat)
+
+        FileHandle.standardError.write(
+            Data(
+                "Rootstock Red assess complete: \(assessment.findings.count) findings; audit: \(auditURL.path)\n".utf8
+            )
+        )
+    }
+}
+
+private extension AuditCommand {
+    struct ValidatedOptions {
+        let scanProfile: ScanProfile
+        let reportFormat: ReportFormat
+        let projectURL: URL?
+        let context: EvaluationContext
+    }
+
+    struct Assessment {
+        let state: CollectedState
+        let findings: [Finding]
+        let registry: ModuleRegistry
+        let ledger: ArtifactLedger
+    }
+
+    func validatedOptions() throws -> ValidatedOptions {
         guard let scanProfile = ScanProfile(rawValue: profile) else {
             throw RootstockError.invalidArgument("Unknown profile: \(profile)")
         }
         guard let reportFormat = ReportFormat(rawValue: format) else {
             throw RootstockError.invalidArgument("Unknown format: \(format)")
         }
-
         let projectURL = project.map { URL(fileURLWithPath: $0) }
         let tokens = ConsentTokens(
             iAmAuthorized: consent.iAmAuthorized,
@@ -92,66 +121,101 @@ struct AuditCommand: AsyncParsableCommand {
             consent: tokens,
             projectDirectory: projectURL
         )
+        return ValidatedOptions(
+            scanProfile: scanProfile,
+            reportFormat: reportFormat,
+            projectURL: projectURL,
+            context: context
+        )
+    }
 
+    func performAssessment(_ options: ValidatedOptions) async -> Assessment {
         let registry = VulnModuleRegistry.fullRegistry()
         let ledger = ArtifactLedger()
         await ledger.record(path: "assessment", action: "start")
-
-        let state = await CollectionRunner.run(registry: registry, context: context)
+        let state = await CollectionRunner.run(registry: registry, context: options.context)
         await ledger.recordStatePaths(state)
-        var findings = await CheckRunner.run(registry: registry, state: state, context: context)
-        findings = OpsecScorer().annotateAll(findings)
+        let rawFindings = await CheckRunner.run(
+            registry: registry,
+            state: state,
+            context: options.context
+        )
+        return Assessment(
+            state: state,
+            findings: OpsecScorer().annotateAll(rawFindings),
+            registry: registry,
+            ledger: ledger
+        )
+    }
 
-        let auditURL = try AuditLog.defaultURL(projectDirectory: projectURL)
+    func persistAudit(
+        _ assessment: Assessment,
+        options: ValidatedOptions
+    ) async throws -> URL {
+        let auditURL = try AuditLog.defaultURL(projectDirectory: options.projectURL)
         let audit = AuditLog(fileURL: auditURL)
         try await audit.append(
             AuditRecord(
-                mode: .assess,
-                profile: scanProfile,
-                operatorName: consent.operatorName,
-                scope: consent.scope,
-                hostUUID: context.hostUUID,
-                argvSummary: "rootstock-red audit --profile \(profile) --format \(format)",
-                findingCount: findings.count,
-                collectorIds: registry.collectorIds,
-                checkIds: registry.checkIds,
-                allowNetwork: allowNetwork
+                run: .init(
+                    mode: .assess,
+                    profile: options.scanProfile,
+                    allowNetwork: allowNetwork
+                ),
+                subject: .init(
+                    operatorName: consent.operatorName,
+                    scope: consent.scope,
+                    hostUUID: options.context.hostUUID,
+                    argvSummary: "rootstock-red audit --profile \(profile) --format \(format)"
+                ),
+                outcome: .init(
+                    findingCount: assessment.findings.count,
+                    collectorIds: assessment.registry.collectorIds,
+                    checkIds: assessment.registry.checkIds
+                )
             )
         )
+        return auditURL
+    }
 
-        if let projectURL {
-            let bundle = ProjectBundle(directory: projectURL)
-            try bundle.write(
-                findings: findings,
-                state: state,
-                meta: [
-                    "profile": scanProfile.rawValue,
-                    "mode": RunMode.assess.rawValue,
-                ]
-            )
-            let artifactsURL = projectURL.appendingPathComponent("artifacts.json")
-            try await ledger.write(to: artifactsURL)
-            FileHandle.standardError.write(Data("Project written to \(projectURL.path)\n".utf8))
-        }
+    func persistProject(
+        _ assessment: Assessment,
+        options: ValidatedOptions
+    ) async throws {
+        guard let projectURL = options.projectURL else { return }
+        let bundle = ProjectBundle(directory: projectURL)
+        try bundle.write(
+            findings: assessment.findings,
+            state: assessment.state,
+            meta: [
+                "profile": options.scanProfile.rawValue,
+                "mode": RunMode.assess.rawValue,
+            ]
+        )
+        let artifactsURL = projectURL.appendingPathComponent("artifacts.json")
+        try await assessment.ledger.write(to: artifactsURL)
+        FileHandle.standardError.write(Data("Project written to \(projectURL.path)\n".utf8))
+    }
 
-        let data = try ReportWriter.render(format: reportFormat, findings: findings, state: state)
-        if let output {
-            try data.write(to: URL(fileURLWithPath: output), options: .atomic)
-            FileHandle.standardError.write(
-                Data("Wrote \(findings.count) findings to \(output)\n".utf8)
-            )
-        } else {
+    func writeReport(
+        _ assessment: Assessment,
+        format: ReportFormat
+    ) throws {
+        let data = try ReportWriter.render(
+            format: format,
+            findings: assessment.findings,
+            state: assessment.state
+        )
+        guard let output else {
             if let text = String(data: data, encoding: .utf8) {
                 print(text)
             } else {
                 FileHandle.standardOutput.write(data)
             }
+            return
         }
-
+        try data.write(to: URL(fileURLWithPath: output), options: .atomic)
         FileHandle.standardError.write(
-            Data(
-                "Rootstock Red assess complete: \(findings.count) findings; audit: \(auditURL.path)\n".utf8
-            )
+            Data("Wrote \(assessment.findings.count) findings to \(output)\n".utf8)
         )
     }
 }

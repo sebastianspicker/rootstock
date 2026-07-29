@@ -57,28 +57,14 @@ public struct UnifiedLogObservationVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Unified log observation with remote access amplifier"
-                    : "Unified log / logarchive observation depth",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1083", "T1005", "T1562"],
-                remediation: [
+                    : "Unified log / logarchive observation depth", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1083", "T1005", "T1562"], remediation: [
                     "Inventory and baseline Unified log observation paths via MDM/EDR",
                     "Correlate unexpected path co-presence with delivery timelines",
                     "Prioritize hosts with remote/FDA amplifiers",
                     "OPSEC: Rootstock Red never dumps private unified-log message bodies or force-collects other users' logarchives",
-                ],
-                falsePositiveNotes:
-                    "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers.",
-                dryRunSafe: true,
-                opsecScore: 25,
-                esfExpected: ["OPEN", "READ", "EXEC"]
-            ),
+                ], falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"])),
         ]
     }
 }

@@ -232,7 +232,7 @@ final class ActiveDirectoryTests: XCTestCase {
     func testDiffGroupMembershipReportsUnexpectedNonzeroExit() {
         let ds = ActiveDirectoryDataSource { _, arguments, _ in
             if arguments[0] == "/Search" {
-                return .nonZeroExit(Self.shellResult(status: 1, stderr: "Directory unavailable"))
+                return .nonZeroExit(Self.shellResult(stderr: "Directory unavailable", status: 1))
             }
             return .success(Self.shellResult(stdout: "GroupMembership: testuser"))
         }
@@ -246,7 +246,7 @@ final class ActiveDirectoryTests: XCTestCase {
     func testDiffGroupMembershipAcceptsExpectedMissingRecord() {
         let ds = ActiveDirectoryDataSource { _, arguments, _ in
             if arguments[0] == "/Search" {
-                return .nonZeroExit(Self.shellResult(status: 1, stderr: "eDSRecordNotFound"))
+                return .nonZeroExit(Self.shellResult(stderr: "eDSRecordNotFound", status: 1))
             }
             return .success(Self.shellResult(stdout: "GroupMembership: testuser"))
         }

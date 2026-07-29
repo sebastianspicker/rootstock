@@ -8,10 +8,10 @@ struct CaseTimelineView: View {
             summary: "Review the ordered merge of live ES events, offline parsers, and unified-log evidence using stable entity identifiers."
         ) {
             MetricStrip(metrics: [
-                ("Events", "0", .neutral),
-                ("Sources", "0", .neutral),
-                ("Earliest", "—", .neutral),
-                ("Latest", "—", .neutral),
+                WorkspaceMetric(label: "Events", value: "0", tone: .neutral),
+                WorkspaceMetric(label: "Sources", value: "0", tone: .neutral),
+                WorkspaceMetric(label: "Earliest", value: "—", tone: .neutral),
+                WorkspaceMetric(label: "Latest", value: "—", tone: .neutral),
             ])
 
             InstrumentSection("Event stream", detail: "Chronological") {

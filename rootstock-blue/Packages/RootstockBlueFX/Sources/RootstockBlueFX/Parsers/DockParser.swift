@@ -60,56 +60,52 @@ public struct DockParser: ArtifactParser {
         sourceURL: URL,
         user: String?
     ) -> [EventEnvelope] {
-        var out: [EventEnvelope] = []
-        for (idx, item) in items.enumerated() {
-            guard let tile = item as? [String: Any] else { continue }
-            let data = tile["tile-data"] as? [String: Any] ?? tile
-            let label = stringValue(data["file-label"])
-                ?? stringValue(data["file-label"])
-                ?? stringValue(data["bundle-identifier"])
-                ?? ""
-            let bundle = stringValue(data["bundle-identifier"]) ?? ""
-            let path = extractPath(from: data)
-            guard !label.isEmpty || !path.isEmpty || !bundle.isEmpty else { continue }
+        let context = TileContext(kind: kind, eventType: eventType, sourceURL: sourceURL, user: user)
+        return items.enumerated().compactMap { tileEvent(item: $0.element, index: $0.offset, context: context) }
+    }
 
-            var entities: [EntityID] = []
-            if !path.isEmpty {
-                entities.append(.file(path: path))
-            }
-            if let user, !user.isEmpty {
-                entities.append(.user(name: user))
-            }
+    private struct TileContext {
+        let kind: String
+        let eventType: String
+        let sourceURL: URL
+        let user: String?
+    }
 
-            var fields: [String: String] = [
-                "dock.kind": kind,
-                "dock.label": label,
-                "dock.bundle_id": bundle,
-                "dock.path": path,
-                "dock.index": String(idx),
-                "dock.plist_path": ArtifactRoot.pathKey(sourceURL),
-                FieldTaxonomy.filePath: path,
-                FieldTaxonomy.eventType: eventType,
-                FieldTaxonomy.userName: user ?? "",
-            ]
-            if !bundle.isEmpty {
-                fields["app.bundle_id"] = bundle
-            }
+    private struct DockTile {
+        let label: String
+        let bundle: String
+        let path: String
+    }
 
-            out.append(
-                EventEnvelope(
-                    eventTime: Date(timeIntervalSince1970: 0),
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "DOCK",
-                    eventType: eventType,
-                    entityRefs: entities,
-                    fields: fields,
-                    rawRef: ArtifactRoot.pathKey(sourceURL),
-                    confidence: 0.9
-                )
-            )
-        }
-        return out
+    private func tileEvent(item: Any, index: Int, context: TileContext) -> EventEnvelope? {
+        guard let tile = item as? [String: Any], let details = dockTile(from: tile) else { return nil }
+        return dockTileEnvelope(details: details, index: index, context: context)
+    }
+
+    private func dockTile(from tile: [String: Any]) -> DockTile? {
+        let data = tile["tile-data"] as? [String: Any] ?? tile
+        let label = stringValue(data["file-label"]) ?? stringValue(data["bundle-identifier"]) ?? ""
+        let bundle = stringValue(data["bundle-identifier"]) ?? ""
+        let path = extractPath(from: data)
+        guard !label.isEmpty || !path.isEmpty || !bundle.isEmpty else { return nil }
+        return DockTile(label: label, bundle: bundle, path: path)
+    }
+
+    private func dockTileEnvelope(details: DockTile, index: Int, context: TileContext) -> EventEnvelope {
+        EventEnvelope(identity: EventEnvelope.Identity(kind: context.eventType, label: "DOCK"), capture: EventEnvelope.Capture(source: .parser, eventTime: Date(timeIntervalSince1970: 0), collectedAt: Date()), payload: EventEnvelope.Payload(entityRefs: dockEntities(path: details.path, user: context.user), properties: dockFields(details: details, index: index, context: context), provenance: ArtifactRoot.pathKey(context.sourceURL), confidence: 0.9))
+    }
+
+    private func dockEntities(path: String, user: String?) -> [EntityID] {
+        var entities: [EntityID] = []
+        if !path.isEmpty { entities.append(.file(path: path)) }
+        if let user, !user.isEmpty { entities.append(.user(name: user)) }
+        return entities
+    }
+
+    private func dockFields(details: DockTile, index: Int, context: TileContext) -> [String: String] {
+        var fields = ["dock.kind": context.kind, "dock.label": details.label, "dock.bundle_id": details.bundle, "dock.path": details.path, "dock.index": String(index), "dock.plist_path": ArtifactRoot.pathKey(context.sourceURL), FieldTaxonomy.filePath: details.path, FieldTaxonomy.eventType: context.eventType, FieldTaxonomy.userName: context.user ?? ""]
+        if !details.bundle.isEmpty { fields["app.bundle_id"] = details.bundle }
+        return fields
     }
 
     private func extractPath(from tileData: [String: Any]) -> String {

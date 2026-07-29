@@ -73,6 +73,18 @@ public enum VulnModuleRegistry {
 }
 
 /// End-to-end assess pipeline for tests and embedders (no CLI).
+public struct AssessPipelineResult: Sendable {
+    public let state: CollectedState
+    public let findings: [Finding]
+    public let ledger: ArtifactLedger
+
+    public init(state: CollectedState, findings: [Finding], ledger: ArtifactLedger) {
+        self.state = state
+        self.findings = findings
+        self.ledger = ledger
+    }
+}
+
 public enum AssessPipeline {
     /// Run collectors → checks → OPSEC annotation for the given profile.
     ///
@@ -86,7 +98,7 @@ public enum AssessPipeline {
         profile: ScanProfile = .standard,
         ledger: ArtifactLedger? = nil,
         projectDirectory: URL? = nil
-    ) async -> (CollectedState, [Finding], ArtifactLedger) {
+    ) async -> AssessPipelineResult {
         let context = EvaluationContext.assess(
             profile: profile,
             projectDirectory: projectDirectory
@@ -104,6 +116,6 @@ public enum AssessPipeline {
             try? await activeLedger.write(to: artifactsURL)
         }
 
-        return (state, findings, activeLedger)
+        return AssessPipelineResult(state: state, findings: findings, ledger: activeLedger)
     }
 }

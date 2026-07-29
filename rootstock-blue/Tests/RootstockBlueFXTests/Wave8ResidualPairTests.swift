@@ -135,99 +135,46 @@ final class Wave8ResidualPairTests: XCTestCase {
 
     // MARK: - Hardening (gating pure path - MUST NOT skip)
 
-    func testHardenAssessSyntheticEmitsFourPairControls() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "PACKAGEKITDESIGN",
-                eventType: "packagekit.design",
-                fields: [
-                    "packagekit.service_present": "true",
-                    "packagekit.receipt_paths": "/Library/Receipts,/var/db/receipts",
-                    "packagekit.plugin_paths": "/Library/Installer Plugins",
-                    "packagekit.risk_tags": "design_surface,installer_service",
-                    "packagekit.notes": "PackageKit design surface path presence only",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "ARCHIVEEXTRACTOR",
-                eventType: "archive.extractor",
-                fields: [
-                    "archive.extractor_name": "Keka",
-                    "archive.extractor_path": "/Applications/Keka.app",
-                    "archive.third_party": "true",
-                    "archive.drop_hint": "/Users/alice/Downloads",
-                    "archive.risk_tags": "third_party_extractor,quarantine_non_inherit",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "INFOSTEALERPATH",
-                eventType: "stealer.path",
-                fields: [
-                    "stealer.path_family": "browser",
-                    "stealer.path": "/Users/alice/Library/Application Support/Google/Chrome",
-                    "stealer.fda_adjacent": "true",
-                    "stealer.risk_tags": "multi_app_collection,fda_adjacent",
-                    "stealer.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "INFOSTEALERPATH",
-                eventType: "stealer.path",
-                fields: [
-                    "stealer.path_family": "vault",
-                    "stealer.path": "/Users/alice/Library/Application Support/1Password",
-                    "stealer.fda_adjacent": "false",
-                    "stealer.risk_tags": "multi_app_collection",
-                    "stealer.secrets_exported": "false",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "TCCESFVISIBILITY",
-                eventType: "tcc_esf.visibility",
-                fields: [
-                    "visibility.depth": "thin",
-                    "visibility.tcc_path_listable": "false",
-                    "visibility.tool_present": "false",
-                    "visibility.tool_path": "",
-                    "visibility.risk_tags": "thin_visibility,sensor_gap_adjacent",
-                ]
-            ),
-        ]
-        let findings = HardeningAssessment.assess(events: synthetic)
+    private func assertWave8ControlFindings(_ findings: [HardeningAssessment.Finding]) {
         for control in wave8HardenControls {
-            XCTAssertTrue(
-                findings.contains { $0.control == control && ($0.status == "fail" || $0.status == "warn") },
-                "expected fail/warn for \(control); have \(findings.map { "\($0.control):\($0.status)" })"
-            )
-            let f = findings.first { $0.control == control }!
-            XCTAssertFalse(f.remediation.isEmpty, "empty remediation for \(control)")
+            let matching = findings.contains { finding in
+                finding.control == control && ["fail", "warn"].contains(finding.status)
+            }
+            XCTAssertTrue(matching, "expected fail/warn for \(control); have \(findings.map { "\($0.control):\($0.status)" })")
+            XCTAssertFalse(findings.first { $0.control == control }!.remediation.isEmpty, "empty remediation for \(control)")
         }
+    }
 
-        // Non-goal: packagekit remediations must not say build malicious pkg
-        if let pk = findings.first(where: { $0.control == "packagekit_installer_design" }) {
-            let blob = (pk.detail + " " + pk.remediation + " " + pk.title).lowercased()
+    private func assertWave8NonGoals(_ findings: [HardeningAssessment.Finding]) {
+        if let packageKit = findings.first(where: { $0.control == "packagekit_installer_design" }) {
+            let blob = (packageKit.detail + " " + packageKit.remediation + " " + packageKit.title).lowercased()
             XCTAssertFalse(blob.contains("build malicious pkg"))
             XCTAssertFalse(blob.contains("build a malicious package"))
             XCTAssertFalse(blob.contains("weaponize installd"))
         }
-
-        // Non-goal: stealer findings must not contain secret dumps
-        if let st = findings.first(where: { $0.control == "infostealer_path_plane" }) {
-            let blob = (st.detail + " " + st.remediation + " " + st.evidence).lowercased()
+        if let stealer = findings.first(where: { $0.control == "infostealer_path_plane" }) {
+            let blob = (stealer.detail + " " + stealer.remediation + " " + stealer.evidence).lowercased()
             XCTAssertFalse(blob.contains("password=secret"))
             XCTAssertFalse(blob.contains("cookie_value="))
             XCTAssertFalse(blob.contains("-----begin"))
-            XCTAssertTrue(
-                blob.contains("not export") || blob.contains("do not dump")
-                    || blob.contains("secrets not") || st.detail.lowercased().contains("not exported")
-                    || st.remediation.lowercased().contains("do not dump")
-            )
+            let safeLanguage = ["not export", "do not dump", "secrets not"].contains { blob.contains($0) }
+                || stealer.detail.lowercased().contains("not exported")
+                || stealer.remediation.lowercased().contains("do not dump")
+            XCTAssertTrue(safeLanguage)
         }
+    }
+
+    func testHardenAssessSyntheticEmitsFourPairControls() {
+        let synthetic = [
+            HardeningTestFixtures.event("PACKAGEKITDESIGN", "packagekit.design", ["packagekit.service_present": "true", "packagekit.receipt_paths": "/Library/Receipts,/var/db/receipts", "packagekit.plugin_paths": "/Library/Installer Plugins", "packagekit.risk_tags": "design_surface,installer_service", "packagekit.notes": "PackageKit design surface path presence only"]),
+            HardeningTestFixtures.event("ARCHIVEEXTRACTOR", "archive.extractor", ["archive.extractor_name": "Keka", "archive.extractor_path": "/Applications/Keka.app", "archive.third_party": "true", "archive.drop_hint": "/Users/alice/Downloads", "archive.risk_tags": "third_party_extractor,quarantine_non_inherit"]),
+            HardeningTestFixtures.event("INFOSTEALERPATH", "stealer.path", ["stealer.path_family": "browser", "stealer.path": "/Users/alice/Library/Application Support/Google/Chrome", "stealer.fda_adjacent": "true", "stealer.risk_tags": "multi_app_collection,fda_adjacent", "stealer.secrets_exported": "false"]),
+            HardeningTestFixtures.event("INFOSTEALERPATH", "stealer.path", ["stealer.path_family": "vault", "stealer.path": "/Users/alice/Library/Application Support/1Password", "stealer.fda_adjacent": "false", "stealer.risk_tags": "multi_app_collection", "stealer.secrets_exported": "false"]),
+            HardeningTestFixtures.event("TCCESFVISIBILITY", "tcc_esf.visibility", ["visibility.depth": "thin", "visibility.tcc_path_listable": "false", "visibility.tool_present": "false", "visibility.tool_path": "", "visibility.risk_tags": "thin_visibility,sensor_gap_adjacent"]),
+        ]
+        let findings = HardeningAssessment.assess(events: synthetic)
+        assertWave8ControlFindings(findings)
+        assertWave8NonGoals(findings)
     }
 
     func testHardeningAssessmentWave8OfflineWithRemediation() throws {
@@ -294,46 +241,10 @@ final class Wave8ResidualPairTests: XCTestCase {
 
     func testPrintWave8ControlsForEvidence() {
         let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "PACKAGEKITDESIGN",
-                eventType: "packagekit.design",
-                fields: [
-                    "packagekit.service_present": "true",
-                    "packagekit.receipt_paths": "/Library/Receipts",
-                    "packagekit.risk_tags": "design_surface",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "ARCHIVEEXTRACTOR",
-                eventType: "archive.extractor",
-                fields: [
-                    "archive.extractor_name": "Keka",
-                    "archive.third_party": "true",
-                    "archive.risk_tags": "third_party_extractor",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "INFOSTEALERPATH",
-                eventType: "stealer.path",
-                fields: [
-                    "stealer.path_family": "browser",
-                    "stealer.path": "/Users/alice/Library/Safari",
-                    "stealer.fda_adjacent": "true",
-                    "stealer.risk_tags": "multi_app_collection,fda_adjacent",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "TCCESFVISIBILITY",
-                eventType: "tcc_esf.visibility",
-                fields: [
-                    "visibility.depth": "thin",
-                    "visibility.risk_tags": "thin_visibility",
-                ]
-            ),
+            parserEvent("packagekit.design", "PACKAGEKITDESIGN", ["packagekit.service_present": "true", "packagekit.receipt_paths": "/Library/Receipts", "packagekit.risk_tags": "design_surface"]),
+            parserEvent("archive.extractor", "ARCHIVEEXTRACTOR", ["archive.extractor_name": "Keka", "archive.third_party": "true", "archive.risk_tags": "third_party_extractor"]),
+            parserEvent("stealer.path", "INFOSTEALERPATH", ["stealer.path_family": "browser", "stealer.path": "/Users/alice/Library/Safari", "stealer.fda_adjacent": "true", "stealer.risk_tags": "multi_app_collection,fda_adjacent"]),
+            parserEvent("tcc_esf.visibility", "TCCESFVISIBILITY", ["visibility.depth": "thin", "visibility.risk_tags": "thin_visibility"]),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)
         let controls = findings
@@ -341,5 +252,9 @@ final class Wave8ResidualPairTests: XCTestCase {
             .map { "\($0.control):\($0.status):\($0.severity)" }
         print("WAVE8_HARDEN_FINDINGS=\(controls.joined(separator: ";"))")
         XCTAssertEqual(Set(findings.map(\.control)).intersection(Set(wave8HardenControls)).count, 4)
+    }
+
+    private func parserEvent(_ kind: String, _ label: String, _ properties: [String: String]) -> EventEnvelope {
+        EventEnvelope(identity: .init(kind: kind, label: label), capture: .init(source: .parser), payload: .init(properties: properties))
     }
 }

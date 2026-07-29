@@ -18,12 +18,26 @@ public struct FolderActionsParser: ArtifactParser {
 
     public init() {}
 
+    private struct ActionDetails {
+        let name: String
+        let scriptPath: String
+        let watchedPath: String
+        let enabled: String
+        let user: String?
+        let riskTags: [String]
+        let rawRef: String
+    }
+
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
         let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
         var seen = PathDeduper()
+        return collectKnownJSONActions(root, seen: &seen)
+            + collectDiscoveredJSONActions(root, seen: &seen)
+            + collectScriptActions(root, seen: &seen)
+    }
 
-        // JSON inventory (fixture-friendly associations)
+    private func collectKnownJSONActions(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
         for rel in [
             "Library/Preferences/folder_actions.json",
             "Users/alice/Library/Workflows/folder_actions.json",
@@ -36,16 +50,12 @@ public struct FolderActionsParser: ArtifactParser {
                 events.append(contentsOf: parseJSONInventory(json, rawRef: key, defaultUser: inferUser(from: key)))
             }
         }
+        return events
+    }
 
-        // Per-user JSON under Users/*/
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            guard !url.hasDirectoryPath else { return false }
-            let name = url.lastPathComponent
-            return name == "folder_actions.json"
-                || name == "com.apple.FolderActionsDispatcher.json"
-                || (path.contains("/FolderActions") && name.hasSuffix(".json"))
-        }) {
+    private func collectDiscoveredJSONActions(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
+        for url in root.enumerate(matching: isFolderActionJSON) {
             guard seen.insert(url) else { continue }
             let key = ArtifactRoot.pathKey(url)
             if let json = ArtifactIO.jsonObject(contentsOf: url) {
@@ -56,178 +66,193 @@ public struct FolderActionsParser: ArtifactParser {
                 ))
             }
         }
+        return events
+    }
 
-        // Scripts / workflows on disk
-        for url in root.enumerate(matching: { url in
-            let path = url.path
-            if url.hasDirectoryPath { return false }
-            let name = url.lastPathComponent
-            if name.hasPrefix(".") { return false }
-            if path.contains("Folder Action Scripts") { return true }
-            if path.contains("/Workflows/Applications/Folder Actions/") { return true }
-            if path.contains("/Workflows/") && (name.hasSuffix(".workflow") || name.hasSuffix(".scpt") || name.hasSuffix(".applescript") || name.hasSuffix(".sh")) {
-                return path.lowercased().contains("folder")
-            }
-            return false
-        }) {
+    private func isFolderActionJSON(_ url: URL) -> Bool {
+        guard !url.hasDirectoryPath else { return false }
+        let name = url.lastPathComponent
+        return name == "folder_actions.json"
+            || name == "com.apple.FolderActionsDispatcher.json"
+            || (url.path.contains("/FolderActions") && name.hasSuffix(".json"))
+    }
+
+    private func collectScriptActions(_ root: ArtifactRoot, seen: inout PathDeduper) -> [EventEnvelope] {
+        var events: [EventEnvelope] = []
+        for url in root.enumerate(matching: isFolderActionScript) {
             guard seen.insert(url) else { continue }
             let key = ArtifactRoot.pathKey(url)
-
             let name = url.deletingPathExtension().lastPathComponent
             let user = inferUser(from: key)
             let textSample = loadTextSample(url) ?? ""
             var risk = riskTags(forScriptPath: key, watched: "", scriptText: textSample)
             risk = Array(Set(risk)).sorted()
-
-            events.append(
-                makeEvent(
-                    name: name,
-                    scriptPath: key,
-                    watchedPath: "",
-                    enabled: "true",
-                    user: user,
-                    riskTags: risk,
-                    rawRef: key
-                )
-            )
+            events.append(makeEvent(ActionDetails(
+                name: name, scriptPath: key, watchedPath: "", enabled: "true",
+                user: user, riskTags: risk, rawRef: key
+            )))
         }
-
         return events
     }
 
-    private func parseJSONInventory(_ json: Any, rawRef: String, defaultUser: String?) -> [EventEnvelope] {
-        var items = ArtifactIO.dictionaryEntries(
-            from: json,
-            nestedKeys: ["actions", "folder_actions", "folderActions"]
-        )
-        if items.isEmpty, let dict = json as? [String: Any] {
-            items = [dict]
-        } else if items.isEmpty, let arr = json as? [[String: Any]] {
-            items = arr
+    private func isFolderActionScript(_ url: URL) -> Bool {
+        guard !url.hasDirectoryPath, !url.lastPathComponent.hasPrefix(".") else { return false }
+        let path = url.path
+        if path.contains("Folder Action Scripts") || path.contains("/Workflows/Applications/Folder Actions/") {
+            return true
         }
+        return path.contains("/Workflows/")
+            && supportedScriptExtension(url.lastPathComponent)
+            && path.lowercased().contains("folder")
+    }
 
-        return items.compactMap { item -> EventEnvelope? in
-            let name = stringish(item["name"])
-                ?? stringish(item["label"])
-                ?? stringish(item["script"])
-                ?? "unnamed"
-            let script = stringish(item["script_path"])
-                ?? stringish(item["script"])
-                ?? stringish(item["path"])
-                ?? stringish(item["workflow"])
-                ?? ""
-            let watched = stringish(item["watched_path"])
-                ?? stringish(item["folder"])
-                ?? stringish(item["watched"])
-                ?? ""
-            let enabled = boolish(item["enabled"]).map { $0 ? "true" : "false" } ?? "true"
-            let user = stringish(item["user"]) ?? defaultUser
-            var risk: [String] = []
-            if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-                risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-            }
-            let command = stringish(item["command"]) ?? stringish(item["body"]) ?? script
-            risk.append(contentsOf: riskTags(forScriptPath: script, watched: watched, scriptText: command))
-            risk = Array(Set(risk)).sorted()
+    private func supportedScriptExtension(_ name: String) -> Bool {
+        name.hasSuffix(".workflow") || name.hasSuffix(".scpt")
+            || name.hasSuffix(".applescript") || name.hasSuffix(".sh")
+    }
 
-            guard !script.isEmpty || !watched.isEmpty || !name.isEmpty else { return nil }
-            return makeEvent(
-                name: name,
-                scriptPath: script.isEmpty ? rawRef : script,
-                watchedPath: watched,
-                enabled: enabled,
-                user: user,
-                riskTags: risk,
-                rawRef: rawRef
-            )
+    private func parseJSONInventory(_ json: Any, rawRef: String, defaultUser: String?) -> [EventEnvelope] {
+        actionItems(json).compactMap { item in
+            actionDetails(item, rawRef: rawRef, defaultUser: defaultUser).map(makeEvent)
         }
     }
 
-    private func makeEvent(
-        name: String,
-        scriptPath: String,
-        watchedPath: String,
-        enabled: String,
-        user: String?,
-        riskTags: [String],
-        rawRef: String
-    ) -> EventEnvelope {
+    private func actionItems(_ json: Any) -> [[String: Any]] {
+        let items = ArtifactIO.dictionaryEntries(from: json, nestedKeys: ["actions", "folder_actions", "folderActions"])
+        if !items.isEmpty { return items }
+        if let dict = json as? [String: Any] { return [dict] }
+        return json as? [[String: Any]] ?? []
+    }
+
+    private func actionDetails(_ item: [String: Any], rawRef: String, defaultUser: String?) -> ActionDetails? {
+        let name = stringish(item["name"]) ?? stringish(item["label"]) ?? stringish(item["script"]) ?? "unnamed"
+        let script = firstString(item, keys: ["script_path", "script", "path", "workflow"])
+        let watched = firstString(item, keys: ["watched_path", "folder", "watched"])
+        guard !script.isEmpty || !watched.isEmpty || !name.isEmpty else { return nil }
+        let risk = combinedRiskTags(item, script: script, watched: watched)
+        return ActionDetails(
+            name: name,
+            scriptPath: script.isEmpty ? rawRef : script,
+            watchedPath: watched,
+            enabled: boolish(item["enabled"]).map { $0 ? "true" : "false" } ?? "true",
+            user: stringish(item["user"]) ?? defaultUser,
+            riskTags: risk,
+            rawRef: rawRef
+        )
+    }
+
+    private func firstString(_ item: [String: Any], keys: [String]) -> String {
+        for key in keys {
+            if let value = stringish(item[key]) { return value }
+        }
+        return ""
+    }
+
+    private func combinedRiskTags(_ item: [String: Any], script: String, watched: String) -> [String] {
+        var tags = stringish(item["risk_tags"])?
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+        let command = stringish(item["command"]) ?? stringish(item["body"]) ?? script
+        tags.append(contentsOf: riskTags(forScriptPath: script, watched: watched, scriptText: command))
+        return Array(Set(tags)).sorted()
+    }
+
+    private func makeEvent(_ details: ActionDetails) -> EventEnvelope {
+        EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "persistence.item",
+                label: "FOLDERACTIONS"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: actionEntities(details),
+                properties: actionFields(details),
+                provenance: details.rawRef,
+                confidence: 0.93
+            )
+        )
+    }
+
+    private func actionFields(_ details: ActionDetails) -> [String: String] {
         var fields: [String: String] = [
             "persistence.kind": "folder_action",
-            "persistence.label": name,
-            "persistence.command": scriptPath,
-            "persistence.path": scriptPath,
-            "folder_action.name": name,
-            "folder_action.script_path": scriptPath,
-            "folder_action.enabled": enabled,
-            FieldTaxonomy.filePath: scriptPath,
+            "persistence.label": details.name,
+            "persistence.command": details.scriptPath,
+            "persistence.path": details.scriptPath,
+            "folder_action.name": details.name,
+            "folder_action.script_path": details.scriptPath,
+            "folder_action.enabled": details.enabled,
+            FieldTaxonomy.filePath: details.scriptPath,
             FieldTaxonomy.eventType: "persistence.item",
         ]
-        if !watchedPath.isEmpty {
-            fields["folder_action.watched_path"] = watchedPath
-            fields["persistence.watched_path"] = watchedPath
+        if !details.watchedPath.isEmpty {
+            fields["folder_action.watched_path"] = details.watchedPath
+            fields["persistence.watched_path"] = details.watchedPath
         }
-        if let user, !user.isEmpty {
+        if let user = details.user, !user.isEmpty {
             fields[FieldTaxonomy.userName] = user
             fields["folder_action.scope"] = "user"
         } else {
             fields["folder_action.scope"] = "system"
         }
-        if !riskTags.isEmpty {
-            fields["persistence.risk_tags"] = riskTags.joined(separator: ",")
-            fields["folder_action.risk_tags"] = riskTags.joined(separator: ",")
+        if !details.riskTags.isEmpty {
+            fields["persistence.risk_tags"] = details.riskTags.joined(separator: ",")
+            fields["folder_action.risk_tags"] = details.riskTags.joined(separator: ",")
         }
+        return fields
+    }
 
+    private func actionEntities(_ details: ActionDetails) -> [EntityID] {
         var entities: [EntityID] = [
-            EntityID(kind: .persistence, value: "folder_action|\(user ?? "system")|\(name)|\(scriptPath)"),
-            .file(path: scriptPath),
+            EntityID(kind: .persistence, value: "folder_action|\(details.user ?? "system")|\(details.name)|\(details.scriptPath)"),
+            .file(path: details.scriptPath),
         ]
-        if let user, !user.isEmpty {
+        if let user = details.user, !user.isEmpty {
             entities.append(.user(name: user))
         }
-        if !watchedPath.isEmpty {
-            entities.append(.file(path: watchedPath))
+        if !details.watchedPath.isEmpty {
+            entities.append(.file(path: details.watchedPath))
         }
-
-        return EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 0),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "FOLDERACTIONS",
-            eventType: "persistence.item",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: rawRef,
-            confidence: 0.93
-        )
+        return entities
     }
 
     private func riskTags(forScriptPath script: String, watched: String, scriptText: String) -> [String] {
-        var tags: [String] = []
         let lower = (script + " " + scriptText).lowercased()
         let watchedLower = watched.lowercased()
-        if lower.contains("do shell script") || lower.contains("doshellscript") {
-            tags.append("do_shell_script")
-        }
-        if lower.contains("curl") || lower.contains("wget") {
-            tags.append("network_fetch")
-        }
-        if lower.contains("/tmp/") || lower.contains("/var/tmp/") {
-            tags.append("tmp_payload")
-        }
-        if lower.contains("base64") {
-            tags.append("base64_payload")
-        }
-        if watchedLower.contains("/downloads") || watchedLower.hasSuffix("downloads") {
-            tags.append("downloads_watch")
-        }
-        if watchedLower.contains("/desktop") || watchedLower.hasSuffix("desktop") {
-            tags.append("desktop_watch")
-        }
-        if script.lowercased().contains("evil") || scriptText.lowercased().contains("evil") {
-            tags.append("suspicious_name")
-        }
-        return tags
+        return shellRisk(lower) + networkRisk(lower) + temporaryRisk(lower) + payloadRisk(lower)
+            + downloadsRisk(watchedLower) + desktopRisk(watchedLower) + suspiciousRisk(script, text: scriptText)
+    }
+
+    private func shellRisk(_ text: String) -> [String] {
+        (text.contains("do shell script") || text.contains("doshellscript")) ? ["do_shell_script"] : []
+    }
+
+    private func networkRisk(_ text: String) -> [String] {
+        (text.contains("curl") || text.contains("wget")) ? ["network_fetch"] : []
+    }
+
+    private func temporaryRisk(_ text: String) -> [String] {
+        (text.contains("/tmp/") || text.contains("/var/tmp/")) ? ["tmp_payload"] : []
+    }
+
+    private func payloadRisk(_ text: String) -> [String] {
+        text.contains("base64") ? ["base64_payload"] : []
+    }
+
+    private func downloadsRisk(_ watched: String) -> [String] {
+        (watched.contains("/downloads") || watched.hasSuffix("downloads")) ? ["downloads_watch"] : []
+    }
+
+    private func desktopRisk(_ watched: String) -> [String] {
+        (watched.contains("/desktop") || watched.hasSuffix("desktop")) ? ["desktop_watch"] : []
+    }
+
+    private func suspiciousRisk(_ script: String, text: String) -> [String] {
+        (script.lowercased().contains("evil") || text.lowercased().contains("evil")) ? ["suspicious_name"] : []
     }
 
     private func loadTextSample(_ url: URL) -> String? {

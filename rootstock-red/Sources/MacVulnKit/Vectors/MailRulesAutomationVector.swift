@@ -57,28 +57,14 @@ public struct MailRulesAutomationVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Mail rules automation with remote access amplifier"
-                    : "Mail rules / Apple Mail automation persistence",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1114", "T1059", "T1546"],
-                remediation: [
+                    : "Mail rules / Apple Mail automation persistence", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1114", "T1059", "T1546"], remediation: [
                     "Inventory and baseline Mail rules automation paths via MDM/EDR",
                     "Correlate unexpected path co-presence with delivery timelines",
                     "Prioritize hosts with remote/FDA amplifiers",
                     "OPSEC: Rootstock Red never reads Mail contents or modifies user Mail rules",
-                ],
-                falsePositiveNotes:
-                    "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers.",
-                dryRunSafe: true,
-                opsecScore: 25,
-                esfExpected: ["OPEN", "READ", "EXEC"]
-            ),
+                ], falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"])),
         ]
     }
 }

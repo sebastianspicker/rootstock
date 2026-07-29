@@ -51,26 +51,20 @@ public struct FileVaultEscrowCollector: Collector {
             "/System/Library/LaunchDaemons/com.apple.securekeybackupd.plist",
             "/usr/libexec/securekeybackupd",
         ]
-        for path in cryptoSupport {
-            if fm.fileExists(atPath: path) {
+        for path in cryptoSupport where fm.fileExists(atPath: path) {
                 notes.append("crypto_support: \(path)")
-            }
         }
 
         var escrow: [String] = []
-        for path in Self.escrowPathHints {
-            if fm.fileExists(atPath: path) {
+        for path in Self.escrowPathHints where fm.fileExists(atPath: path) {
                 escrow.append(path)
                 notes.append("escrow_path_hint: \(path)")
-            }
         }
 
         var institutional: [String] = []
-        for path in Self.institutionalEscrowHints {
-            if fm.fileExists(atPath: path) {
+        for path in Self.institutionalEscrowHints where fm.fileExists(atPath: path) {
                 institutional.append(path)
                 notes.append("institutional_escrow_hint: \(path)")
-            }
         }
 
         escrow = Array(Set(escrow)).sorted()

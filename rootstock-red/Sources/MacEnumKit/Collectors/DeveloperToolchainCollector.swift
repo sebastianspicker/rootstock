@@ -58,80 +58,50 @@ public struct DeveloperToolchainCollector: Collector {
     public init() {}
 
     public func collect(context: EvaluationContext) async throws -> CollectedState {
-        let fm = FileManager.default
-        var notes: [String] = [
-            "Developer toolchain dual-use inventory - path presence only; no compile/sign/run",
-        ]
-
-        var xcodePresent: Bool?
-        for path in Self.xcodePaths {
-            if fm.fileExists(atPath: path) {
-                xcodePresent = true
-                notes.append("Xcode present: \(path)")
-            }
-        }
-        if xcodePresent == nil {
-            xcodePresent = false
-            notes.append("Xcode.app not observed under /Applications")
-        }
-
-        var commandLineToolsPresent: Bool?
-        for path in Self.cltPaths {
-            if fm.fileExists(atPath: path) {
-                commandLineToolsPresent = true
-                notes.append("CommandLineTools path: \(path)")
-            }
-        }
-        if commandLineToolsPresent == nil {
-            commandLineToolsPresent = false
-            notes.append("CommandLineTools not observed at catalog paths")
-        }
-
-        var toolchainPaths: [String] = []
-        for path in Self.xcodePaths + Self.cltPaths + Self.extraToolchainPaths {
-            if fm.fileExists(atPath: path) {
-                toolchainPaths.append(path)
-            }
-        }
-
-        var dualUseBinaries: [String] = []
-        for probe in Self.dualUseBinaryProbes {
-            if fm.fileExists(atPath: probe.path) {
-                dualUseBinaries.append(probe.path)
-                notes.append("dual_use: \(probe.name) path=\(probe.path)")
-            }
-        }
-
-        // Home-dir toolchains (optional shallow probes).
-        let home = NSHomeDirectory()
-        let userToolchainHints = [
-            "\(home)/.swiftpm",
-            "\(home)/Library/Developer/Xcode",
-            "\(home)/Library/Developer/Toolchains",
-        ]
-        for path in userToolchainHints {
-            if fm.fileExists(atPath: path) {
-                toolchainPaths.append(path)
-                notes.append("user_toolchain: \(path)")
-            }
-        }
-
-        toolchainPaths = Array(Set(toolchainPaths)).sorted()
-        dualUseBinaries = Array(Set(dualUseBinaries)).sorted()
-
+        var notes = ["Developer toolchain dual-use inventory - path presence only; no compile/sign/run"]
+        let xcodePresent = observed(Self.xcodePaths, presentNote: "Xcode present", absentNote: "Xcode.app not observed under /Applications", notes: &notes)
+        let commandLineToolsPresent = observed(Self.cltPaths, presentNote: "CommandLineTools path", absentNote: "CommandLineTools not observed at catalog paths", notes: &notes)
+        let toolchainPaths = toolchainPaths(notes: &notes)
+        let dualUseBinaries = dualUseBinaries(notes: &notes)
         var state = CollectedState()
-        state.developerToolchain = DeveloperToolchainState(
-            xcodePresent: xcodePresent,
-            commandLineToolsPresent: commandLineToolsPresent,
-            toolchainPaths: toolchainPaths,
-            dualUseBinaries: dualUseBinaries,
-            notes: notes
-        )
-        state.collectorNotes[Self.id] =
-            "xcode=\(xcodePresent.map(String.init(describing:)) ?? "nil") "
-            + "clt=\(commandLineToolsPresent.map(String.init(describing:)) ?? "nil") "
-            + "toolchainPaths=\(toolchainPaths.count) "
-            + "dualUse=\(dualUseBinaries.count)"
+        state.developerToolchain = DeveloperToolchainState(xcodePresent: xcodePresent, commandLineToolsPresent: commandLineToolsPresent, toolchainPaths: toolchainPaths, dualUseBinaries: dualUseBinaries, notes: notes)
+        state.collectorNotes[Self.id] = "xcode=\(xcodePresent.map(String.init(describing:)) ?? "nil") " + "clt=\(commandLineToolsPresent.map(String.init(describing:)) ?? "nil") " + "toolchainPaths=\(toolchainPaths.count) " + "dualUse=\(dualUseBinaries.count)"
         return state
+    }
+
+
+    private func observed(_ paths: [String], presentNote: String, absentNote: String, notes: inout [String]) -> Bool? {
+        let matches = paths.filter { FileManager.default.fileExists(atPath: $0) }
+        notes.append(contentsOf: matches.map { "\(presentNote): \($0)" })
+        if matches.isEmpty {
+            notes.append(absentNote)
+            return false
+        }
+        return true
+    }
+
+    private func toolchainPaths(notes: inout [String]) -> [String] {
+        var paths = (Self.xcodePaths + Self.cltPaths + Self.extraToolchainPaths).filter {
+            FileManager.default.fileExists(atPath: $0)
+        }
+        for path in userToolchainHints() where FileManager.default.fileExists(atPath: path) {
+            paths.append(path)
+            notes.append("user_toolchain: \(path)")
+        }
+        return Array(Set(paths)).sorted()
+    }
+
+    private func dualUseBinaries(notes: inout [String]) -> [String] {
+        let paths = Self.dualUseBinaryProbes.compactMap { probe -> String? in
+            guard FileManager.default.fileExists(atPath: probe.path) else { return nil }
+            notes.append("dual_use: \(probe.name) path=\(probe.path)")
+            return probe.path
+        }
+        return Array(Set(paths)).sorted()
+    }
+
+    private func userToolchainHints() -> [String] {
+        let home = NSHomeDirectory()
+        return ["\(home)/.swiftpm", "\(home)/Library/Developer/Xcode", "\(home)/Library/Developer/Toolchains"]
     }
 }

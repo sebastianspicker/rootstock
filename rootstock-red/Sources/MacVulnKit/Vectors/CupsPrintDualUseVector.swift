@@ -15,32 +15,21 @@ public struct CupsPrintDualUseVector: Check {
         let note = state.collectorNotes["collect.cups_print_dualuse"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "cups_print_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "cups_print_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.cupsDaemonPaths + s.ppdConfigPaths + s.printToolPaths).prefix(12) {
-                evidence.append(Evidence(type: "cups_print_path", path: path, detail: "CUPS printer dual-use path"))
-            }
-            for n in s.notes.prefix(6) { evidence.append(Evidence(type: "cups_print_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.cupsDaemonPaths + s.ppdConfigPaths + s.printToolPaths, type: "cups_print_path", detail: "CUPS printer dual-use path", limit: 12)
+            evidence += VectorEvidence.notes(s.notes, type: "cups_print_note", limit: 6)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never submits print jobs or reconfigures CUPS remotely."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "CUPS printer dual-use with remote access amplifier" : "CUPS / printer dual-use residual surface",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1040", "T1071", "T1204"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "CUPS printer dual-use with remote access amplifier" : "CUPS / printer dual-use residual surface", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1040", "T1071", "T1204"], remediation: [
                 "Inventory and baseline CUPS printer dual-use paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never submits print jobs or reconfigures CUPS remotely",
-            ],
-            falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

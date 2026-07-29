@@ -180,6 +180,17 @@ export function relationshipDetail(direction: string, kind: string, nodeId: stri
   ]);
 }
 
+function connectedRecommendations(controller: Controller, nodeId: NodeId): ViewerNode[] {
+  const adjacent = [
+    ...(controller.state.graph.incoming.get(nodeId) ?? []).map((entry) => entry.source),
+    ...(controller.state.graph.outgoing.get(nodeId) ?? []).map((entry) => entry.target),
+  ];
+  return adjacent
+    .map((id) => controller.state.graph.nodeById.get(id))
+    .filter((candidate): candidate is ViewerNode =>
+      candidate !== undefined && /recommendation/i.test(candidate.kind));
+}
+
 export function remediationPanel(controller: Controller, nodeId: NodeId): HTMLElement {
   const panel = element("section", {
     class: "prop-section inspector-panel",
@@ -187,19 +198,22 @@ export function remediationPanel(controller: Controller, nodeId: NodeId): HTMLEl
     "data-inspector-panel": "remediation",
   });
   panel.hidden = true;
-  const connected = [
-    ...(controller.state.graph.incoming.get(nodeId) ?? []).map((entry) => entry.source),
-    ...(controller.state.graph.outgoing.get(nodeId) ?? []).map((entry) => entry.target),
-  ]
-    .map((id) => controller.state.graph.nodeById.get(id))
-    .filter((candidate): candidate is ViewerNode =>
-      candidate !== undefined && /recommendation/i.test(candidate.kind));
-  if (connected.length === 0) {
+  const connected = connectedRecommendations(controller, nodeId);
+  appendEmptyRecommendationState(panel, connected.length);
+  appendRecommendations(panel, connected);
+  return panel;
+}
+
+function appendEmptyRecommendationState(panel: HTMLElement, count: number): void {
+  if (count === 0) {
     panel.appendChild(element("p", {
       class: "empty-state compact",
       text: "No connected recommendation is present in this graph snapshot.",
     }));
   }
+}
+
+function appendRecommendations(panel: HTMLElement, connected: ViewerNode[]): void {
   for (const recommendation of connected) {
     panel.appendChild(element("div", {class: "recommendation-card"}, [
       element("span", {"aria-hidden": "true", text: "✓"}),
@@ -207,9 +221,8 @@ export function remediationPanel(controller: Controller, nodeId: NodeId): HTMLEl
         element("strong", {text: recommendation.label ?? recommendation.id}),
         element("p", {class: "field-help", text: "Graph recommendation"}),
       ]),
-    ]));
+      ]));
   }
-  return panel;
 }
 
 export function provenanceChain(controller: Controller): HTMLElement {

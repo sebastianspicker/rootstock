@@ -15,32 +15,21 @@ public struct EmondLegacyDepthVector: Check {
         let note = state.collectorNotes["collect.emond_legacy_depth"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "emond_legacy_depth_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "emond_legacy_depth_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.emondBinaryPaths + s.emondRulePaths + s.emondSupportPaths).prefix(12) {
-                evidence.append(Evidence(type: "emond_legacy_depth_path", path: path, detail: "Emond legacy depth path"))
-            }
-            for n in s.notes.prefix(5) { evidence.append(Evidence(type: "emond_legacy_depth_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.emondBinaryPaths + s.emondRulePaths + s.emondSupportPaths, type: "emond_legacy_depth_path", detail: "Emond legacy depth path", limit: 12)
+            evidence += VectorEvidence.notes(s.notes, type: "emond_legacy_depth_note", limit: 5)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never installs emond rules or enables the legacy event monitor daemon."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "Emond legacy depth with remote amplifier" : "Emond legacy rules residual depth",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1546.014", "T1546", "T1059"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "Emond legacy depth with remote amplifier" : "Emond legacy rules residual depth", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1546.014", "T1546", "T1059"], remediation: [
                 "Inventory and baseline Emond legacy depth paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never installs emond rules or enables the legacy event monitor daemon",
-            ],
-            falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

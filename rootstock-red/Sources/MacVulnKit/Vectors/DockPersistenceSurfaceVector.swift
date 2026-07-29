@@ -57,28 +57,14 @@ public struct DockPersistenceSurfaceVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Dock persistence dual-use with remote access amplifier"
-                    : "Dock persistent apps / recent items dual-use",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1547", "T1012", "T1083"],
-                remediation: [
+                    : "Dock persistent apps / recent items dual-use", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1547", "T1012", "T1083"], remediation: [
                     "Inventory and baseline Dock persistence dual-use paths via MDM/EDR",
                     "Correlate unexpected path co-presence with delivery timelines",
                     "Prioritize hosts with remote/FDA amplifiers",
                     "OPSEC: Rootstock Red never modifies Dock.plist or plants malicious Dock entries",
-                ],
-                falsePositiveNotes:
-                    "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers.",
-                dryRunSafe: true,
-                opsecScore: 25,
-                esfExpected: ["OPEN", "READ", "EXEC"]
-            ),
+                ], falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"])),
         ]
     }
 }

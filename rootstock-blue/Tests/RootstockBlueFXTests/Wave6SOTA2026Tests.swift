@@ -88,51 +88,34 @@ final class Wave6SOTA2026Tests: XCTestCase {
 
     /// Regression: walked .Trash files under /Users/<dev>/…/Fixtures/…/Users/alice must
     /// attribute user.name=alice (last Users segment) and emit image-relative trash_path.
+    private func isAliceFixtureTrashEvent(_ event: EventEnvelope) -> Bool {
+        let fields = event.fields
+        return (fields["trash.original_path"] ?? "").contains("alice")
+            || (fields["trash.trash_path"] ?? "").contains("alice")
+            || (fields["trash.filename"] ?? "").contains("evil")
+            || (fields["trash.filename"] ?? "") == "id_rsa"
+    }
+
     func testTrashParserUserAndPathNotHostDeveloper() throws {
         try XCTSkipIf(!FileManager.default.fileExists(atPath: absoluteRoot.path))
-        // Absolute root triggers host path containing /Users/<developer>/…
         let events = try TrashParser().parse(source: .directory(absoluteRoot))
         XCTAssertFalse(events.isEmpty)
-
         let hostUser = NSUserName()
-        for e in events {
-            if let user = e.fields[FieldTaxonomy.userName], !user.isEmpty {
-                XCTAssertNotEqual(
-                    user, hostUser,
-                    "trash user.name must not be host developer \(hostUser); event=\(e.fields)"
-                )
-                // Sample fixture places deleted items under alice
-                if (e.fields["trash.filename"] ?? "").contains("evil")
-                    || (e.fields["trash.filename"] ?? "") == "id_rsa"
-                    || (e.fields["trash.original_path"] ?? "").contains("alice") {
-                    XCTAssertEqual(user, "alice", "expected alice for fixture trash row: \(e.fields)")
+        for event in events {
+            if let user = event.fields[FieldTaxonomy.userName], !user.isEmpty {
+                XCTAssertNotEqual(user, hostUser, "trash user.name must not be host developer \(hostUser); event=\(event.fields)")
+                if isAliceFixtureTrashEvent(event) {
+                    XCTAssertEqual(user, "alice", "expected alice for fixture trash row: \(event.fields)")
                 }
             }
-            let trashPath = e.fields["trash.trash_path"] ?? ""
-            // Must not embed host workspace prefix
-            XCTAssertFalse(
-                trashPath.contains("/Git/mac-security-research"),
-                "trash_path must be image-relative, not host-absolute: \(trashPath)"
-            )
-            XCTAssertFalse(
-                trashPath.hasPrefix("/Users/\(hostUser)/"),
-                "trash_path must not start with host home: \(trashPath)"
-            )
+            let trashPath = event.fields["trash.trash_path"] ?? ""
+            XCTAssertFalse(trashPath.contains("/Git/mac-security-research"), "trash_path must be image-relative, not host-absolute: \(trashPath)")
+            XCTAssertFalse(trashPath.hasPrefix("/Users/\(hostUser)/"), "trash_path must not start with host home: \(trashPath)")
         }
-
-        // Inventory rows for alice fixture should resolve alice even on absolute roots
-        let aliceRows = events.filter {
-            ($0.fields["trash.original_path"] ?? "").contains("alice")
-                || ($0.fields["trash.trash_path"] ?? "").contains("alice")
-                || ($0.fields["trash.filename"] ?? "").contains("evil")
-                || ($0.fields["trash.filename"] ?? "") == "id_rsa"
-        }
+        let aliceRows = events.filter(isAliceFixtureTrashEvent)
         XCTAssertFalse(aliceRows.isEmpty)
-        for e in aliceRows {
-            XCTAssertEqual(
-                e.fields[FieldTaxonomy.userName], "alice",
-                "alice fixture row user: \(e.fields)"
-            )
+        for event in aliceRows {
+            XCTAssertEqual(event.fields[FieldTaxonomy.userName], "alice", "alice fixture row user: \(event.fields)")
         }
     }
 
@@ -343,97 +326,20 @@ final class Wave6SOTA2026Tests: XCTestCase {
     }
 
     func testHardeningWave6PureFromSyntheticEvents() {
-        let synthetic: [EventEnvelope] = [
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "TRASH",
-                eventType: "filesystem.trash",
-                fields: [
-                    "trash.filename": "id_rsa",
-                    "trash.original_path": "/Users/alice/.ssh/id_rsa",
-                    "trash.risk_tags": "credential_material,sensitive_path",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "SPOTLIGHT",
-                eventType: "filesystem.spotlight",
-                fields: [
-                    "spotlight.path": "/Users/alice/Documents/secrets/passwords.txt",
-                    "spotlight.display_name": "passwords.txt",
-                    "spotlight.risk_tags": "sensitive_path,credential_filename",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "FIREFOX",
-                eventType: "browser.download",
-                fields: [
-                    "browser.engine": "firefox",
-                    "browser.url": "https://evil.example/payload.sh",
-                    "browser.download_path": "/Users/alice/Downloads/payload.sh",
-                    "browser.risk_tags": "script_download,evil_domain",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "NOTIFICATIONS",
-                eventType: "notification.delivered",
-                fields: [
-                    "notif.app_id": "com.evil.implant",
-                    "notif.title_marker": "Remote access granted",
-                    "notif.body_exported": "false",
-                    "notif.risk_tags": "suspicious_app,security_sensitive",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "QUICKLOOK",
-                eventType: "filesystem.quicklook",
-                fields: [
-                    "ql.path": "/Users/alice/Documents/secrets/passwords.txt",
-                    "ql.risk_tags": "sensitive_path,credential_filename",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "SCREENTIME",
-                eventType: "pol.screentime",
-                fields: [
-                    "screentime.app_id": "com.evil.implant",
-                    "screentime.bundle_path": "/tmp/evil-implant.app",
-                    "screentime.risk_tags": "suspicious_app,tmp_path",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "ICLOUD",
-                eventType: "cloud.sync_posture",
-                fields: [
-                    "icloud.desktop_documents_sync": "true",
-                    "icloud.drive_enabled": "true",
-                    "icloud.risk_tags": "desktop_documents_sync",
-                ]
-            ),
-            EventEnvelope(
-                source: .parser,
-                sourcePlugin: "SAVEDSTATE",
-                eventType: "app.saved_state",
-                fields: [
-                    "savedstate.bundle_id": "com.evil.implant",
-                    "savedstate.app_path": "/tmp/evil-implant.app",
-                    "savedstate.risk_tags": "suspicious_bundle,tmp_path",
-                ]
-            ),
+        let synthetic = [
+            HardeningTestFixtures.event("TRASH", "filesystem.trash", ["trash.filename": "id_rsa", "trash.original_path": "/Users/alice/.ssh/id_rsa", "trash.risk_tags": "credential_material,sensitive_path"]),
+            HardeningTestFixtures.event("SPOTLIGHT", "filesystem.spotlight", ["spotlight.path": "/Users/alice/Documents/secrets/passwords.txt", "spotlight.display_name": "passwords.txt", "spotlight.risk_tags": "sensitive_path,credential_filename"]),
+            HardeningTestFixtures.event("FIREFOX", "browser.download", ["browser.engine": "firefox", "browser.url": "https://evil.example/payload.sh", "browser.download_path": "/Users/alice/Downloads/payload.sh", "browser.risk_tags": "script_download,evil_domain"]),
+            HardeningTestFixtures.event("NOTIFICATIONS", "notification.delivered", ["notif.app_id": "com.evil.implant", "notif.title_marker": "Remote access granted", "notif.body_exported": "false", "notif.risk_tags": "suspicious_app,security_sensitive"]),
+            HardeningTestFixtures.event("QUICKLOOK", "filesystem.quicklook", ["ql.path": "/Users/alice/Documents/secrets/passwords.txt", "ql.risk_tags": "sensitive_path,credential_filename"]),
+            HardeningTestFixtures.event("SCREENTIME", "pol.screentime", ["screentime.app_id": "com.evil.implant", "screentime.bundle_path": "/tmp/evil-implant.app", "screentime.risk_tags": "suspicious_app,tmp_path"]),
+            HardeningTestFixtures.event("ICLOUD", "cloud.sync_posture", ["icloud.desktop_documents_sync": "true", "icloud.drive_enabled": "true", "icloud.risk_tags": "desktop_documents_sync"]),
+            HardeningTestFixtures.event("SAVEDSTATE", "app.saved_state", ["savedstate.bundle_id": "com.evil.implant", "savedstate.app_path": "/tmp/evil-implant.app", "savedstate.risk_tags": "suspicious_bundle,tmp_path"]),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)
         for control in wave6HardenControls {
-            XCTAssertTrue(
-                findings.contains { $0.control == control && $0.status == "fail" },
-                "expected fail for \(control)"
-            )
-            let f = findings.first { $0.control == control }!
-            XCTAssertFalse(f.remediation.isEmpty, control)
+            XCTAssertTrue(findings.contains { $0.control == control && $0.status == "fail" }, "expected fail for \(control)")
+            XCTAssertFalse(findings.first { $0.control == control }!.remediation.isEmpty, control)
         }
     }
 
@@ -477,44 +383,26 @@ final class Wave6SOTA2026Tests: XCTestCase {
 
     func testParseIntoCaseDetectsWave6Signals() throws {
         try XCTSkipIf(!FileManager.default.fileExists(atPath: relativeRoot.path))
-        let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("wave6-case-\(UUID().uuidString).rsbcase")
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("wave6-case-\(UUID().uuidString).rsbcase")
         defer { try? FileManager.default.removeItem(at: tmp) }
         let pkg = try CasePackage.create(at: tmp, name: "wave6")
-        let n = try ForensicsEngine().parse(source: .directory(relativeRoot), into: pkg)
-        XCTAssertGreaterThan(n, 0)
-
+        XCTAssertGreaterThan(try ForensicsEngine().parse(source: .directory(relativeRoot), into: pkg), 0)
         let posture = try HostIRPosture.enumerateOffline(source: .directory(relativeRoot))
         _ = try HostIRPosture.writeToCase(posture, package: pkg, mode: "offline")
-
-        let harden = try HardeningAssessment.assessOffline(source: .directory(relativeRoot))
-        _ = try HardeningAssessment.writeToCase(harden, package: pkg, mode: "offline")
-
-        let inv = try PersistenceInventory.enumerate(source: .directory(relativeRoot))
-        _ = try PersistenceInventory.writeToCase(inv, package: pkg)
-
+        let hardening = try HardeningAssessment.assessOffline(source: .directory(relativeRoot))
+        _ = try HardeningAssessment.writeToCase(hardening, package: pkg, mode: "offline")
+        let inventory = try PersistenceInventory.enumerate(source: .directory(relativeRoot))
+        _ = try PersistenceInventory.writeToCase(inventory, package: pkg)
         let timeline = try CaseTimeline.merged(from: pkg)
         XCTAssertFalse(timeline.isEmpty)
         let plugins = Set(timeline.map(\.sourcePlugin))
-        for id in wave6IDs {
-            XCTAssertTrue(plugins.contains(id), "timeline missing \(id)")
-        }
+        for id in wave6IDs { XCTAssertTrue(plugins.contains(id), "timeline missing \(id)") }
         XCTAssertTrue(plugins.contains("HARDEN"))
-
         let rulesDir = URL(fileURLWithPath: "Content/detections/samples")
         try XCTSkipIf(!FileManager.default.fileExists(atPath: rulesDir.path))
-        let findings = try DetectionEngine().evaluate(rulesDirectory: rulesDir, events: timeline)
-        let ids = Set(findings.map(\.ruleID))
-        let wave6Hits = ids.filter {
-            $0.contains("trash") || $0.contains("spotlight") || $0.contains("firefox")
-                || $0.contains("notification") || $0.contains("quicklook")
-                || $0.contains("screentime") || $0.contains("icloud")
-                || $0.contains("saved_state")
-        }
-        XCTAssertFalse(
-            wave6Hits.isEmpty,
-            "expected wave-6 detection hits from real timeline, got rule ids: \(ids.sorted())"
-        )
+        let ids = Set(try DetectionEngine().evaluate(rulesDirectory: rulesDir, events: timeline).map(\.ruleID))
+        let fragments = ["trash", "spotlight", "firefox", "notification", "quicklook", "screentime", "icloud", "saved_state"]
+        XCTAssertTrue(ids.contains { id in fragments.contains { id.contains($0) } }, "expected wave-6 detection hits from real timeline, got rule ids: \(ids.sorted())")
     }
 
     func testWave6DetectionFixturesViaFixtureRunner() throws {
@@ -551,15 +439,21 @@ final class Wave6SOTA2026Tests: XCTestCase {
     func testNonGoalNotificationsNoBodyExport() {
         let synthetic: [EventEnvelope] = [
             EventEnvelope(
-                source: .parser,
-                sourcePlugin: "NOTIFICATIONS",
-                eventType: "notification.delivered",
-                fields: [
+                identity: EventEnvelope.Identity(
+                    kind: "notification.delivered",
+                    label: "NOTIFICATIONS"
+                ),
+                capture: EventEnvelope.Capture(
+                    source: .parser
+                ),
+                payload: EventEnvelope.Payload(
+                    properties: [
                     "notif.app_id": "com.evil.implant",
                     "notif.title_marker": "Remote access granted",
                     "notif.body_exported": "false",
                     "notif.risk_tags": "suspicious_app",
                 ]
+                )
             ),
         ]
         let findings = HardeningAssessment.assess(events: synthetic)

@@ -3,9 +3,8 @@
 Shared macOS security vocabulary and read-only helpers for the Core collector,
 Rootstock Red, and Rootstock Blue.
 
-> Alpha licensing notice: this package does not yet have an explicit license
-> scope. Do not publish or distribute it as a standalone package until the
-> maintainer records that decision.
+This package is licensed under Apache-2.0, consistent with its Rootstock Red
+and Rootstock Blue consumers. See [LICENSE](LICENSE).
 
 This source package has no independent runtime version. It follows the source
 state of the repository that consumes it.

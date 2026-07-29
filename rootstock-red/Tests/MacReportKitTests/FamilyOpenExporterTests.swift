@@ -25,12 +25,7 @@ final class FamilyOpenExporterTests: XCTestCase {
             ),
         ]
         let findings = [
-            Finding(
-                id: "rootstock.check.tcc.preflight_summary",
-                title: "TCC preflight",
-                severity: .info,
-                category: .tcc
-            ),
+            Finding(id: "rootstock.check.tcc.preflight_summary", title: "TCC preflight", severity: .info, category: .tcc),
         ]
 
         let dict = FamilyOpenExporter.build(findings: findings, state: state)

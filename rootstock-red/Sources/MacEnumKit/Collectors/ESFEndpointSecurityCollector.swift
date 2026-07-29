@@ -52,87 +52,15 @@ public struct ESFEndpointSecurityCollector: Collector {
         var notes: [String] = [
             "ESF/EDR posture: Apple infrastructure vs third-party clients separated - no client unload",
         ]
-        var appleInfra: [String] = []
-        var thirdPartyClients: [String] = []
-        var edrHints: [String] = []
+        let apple = Self.appleInfrastructure(fileManager: fm, notes: &notes)
+        let directClients = Self.directClients(fileManager: fm, notes: &notes)
+        let systemExtensions = Self.systemExtensionClients(fileManager: fm, notes: &notes)
+        let thirdPartyClients = Self.uniquePathsInDiscoveryOrder(directClients.paths + systemExtensions.paths)
+        let edrHints = Array(Set(directClients.hints)).sorted()
+        let appleInfra = Self.uniquePaths(apple.paths)
 
-        // MARK: Apple ES infrastructure (framework / daemon) - never clientPaths
-        var frameworkPresent: Bool?
-        var anyFrameworkHit = false
-        for probe in Self.appleInfrastructureProbes {
-            if fm.fileExists(atPath: probe.path) {
-                appleInfra.append(probe.path)
-                notes.append("apple_infra: \(probe.name) path=\(probe.path)")
-                if probe.path.contains("EndpointSecurity.framework") {
-                    anyFrameworkHit = true
-                }
-            }
-        }
-        frameworkPresent = anyFrameworkHit ? true : nil
-        if frameworkPresent == nil {
-            notes.append("EndpointSecurity.framework path not observed (unexpected on modern macOS)")
-        }
-
-        // MARK: Third-party EDR / ES client paths only
-        for probe in Self.thirdPartyClientProbes {
-            if fm.fileExists(atPath: probe.path) {
-                thirdPartyClients.append(probe.path)
-                edrHints.append(probe.name)
-                notes.append("third_party_client: \(probe.name) path=\(probe.path)")
-            }
-        }
-
-        // MARK: System extensions - count third-party .systemextension bundles only
-        // Bare directory existence is NOT a client hit.
-        var thirdPartySysextCount = 0
-        var thirdPartySysextPaths: [String] = []
-        let sysextRoot = URL(fileURLWithPath: "/Library/SystemExtensions", isDirectory: true)
-        if fm.fileExists(atPath: sysextRoot.path) {
-            notes.append("systemExtension root present (directory existence ≠ EDR client)")
-            if let contents = try? fm.contentsOfDirectory(
-                at: sysextRoot,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            ) {
-                var allSysext: [String] = []
-                for item in contents {
-                    if item.pathExtension == "systemextension" {
-                        allSysext.append(item.path)
-                    } else if let nested = try? fm.contentsOfDirectory(
-                        at: item,
-                        includingPropertiesForKeys: nil,
-                        options: [.skipsHiddenFiles]
-                    ) {
-                        allSysext.append(
-                            contentsOf: nested.filter { $0.pathExtension == "systemextension" }.map(\.path)
-                        )
-                    }
-                }
-                for path in allSysext {
-                    if Self.isAppleOwnedSysext(path) {
-                        notes.append("apple_sysext (ignored for client count): \(path)")
-                    } else {
-                        thirdPartySysextCount += 1
-                        thirdPartySysextPaths.append(path)
-                        thirdPartyClients.append(path)
-                        notes.append("third_party_sysext: \(path)")
-                    }
-                }
-                notes.append(
-                    "sysext thirdParty=\(thirdPartySysextCount) totalListed=\(allSysext.count)"
-                )
-            } else {
-                notes.append("systemExtension root present but listing denied")
-            }
-        } else {
-            notes.append("systemExtension root absent")
-        }
-
-        // Deduplicate
-        var seenClients = Set<String>()
-        thirdPartyClients = thirdPartyClients.filter { seenClients.insert($0).inserted }
-        edrHints = Array(Set(edrHints)).sorted()
-        appleInfra = Array(Set(appleInfra)).sorted()
+        let frameworkPresent = apple.frameworkPresent
+        let thirdPartySysextCount = systemExtensions.paths.count
 
         var state = CollectedState()
         state.esf = ESFPostureState(
@@ -155,6 +83,85 @@ public struct ESFEndpointSecurityCollector: Collector {
                 "third_party_clients=0 apple_infra_only=\(appleInfra.isEmpty ? "false" : "true")"
         }
         return state
+    }
+
+    private static func appleInfrastructure(
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> (paths: [String], frameworkPresent: Bool?) {
+        let paths = appleInfrastructureProbes.compactMap { probe -> String? in
+            guard fileManager.fileExists(atPath: probe.path) else { return nil }
+            notes.append("apple_infra: \(probe.name) path=\(probe.path)")
+            return probe.path
+        }
+        let frameworkPresent = paths.contains { $0.contains("EndpointSecurity.framework") } ? true : nil
+        if frameworkPresent == nil {
+            notes.append("EndpointSecurity.framework path not observed (unexpected on modern macOS)")
+        }
+        return (paths, frameworkPresent)
+    }
+
+    private static func directClients(
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> (paths: [String], hints: [String]) {
+        let probes = thirdPartyClientProbes.filter { fileManager.fileExists(atPath: $0.path) }
+        for probe in probes {
+            notes.append("third_party_client: \(probe.name) path=\(probe.path)")
+        }
+        return (probes.map(\.path), probes.map(\.name))
+    }
+
+    private static func systemExtensionClients(
+        fileManager: FileManager,
+        notes: inout [String]
+    ) -> (paths: [String], count: Int) {
+        let root = URL(fileURLWithPath: "/Library/SystemExtensions", isDirectory: true)
+        guard fileManager.fileExists(atPath: root.path) else {
+            notes.append("systemExtension root absent")
+            return ([], 0)
+        }
+        notes.append("systemExtension root present (directory existence ≠ EDR client)")
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            notes.append("systemExtension root present but listing denied")
+            return ([], 0)
+        }
+
+        let allExtensions = contents.flatMap { systemExtensions(in: $0, fileManager: fileManager) }
+        let thirdPartyPaths = allExtensions.filter { !isAppleOwnedSysext($0) }
+        for path in allExtensions where isAppleOwnedSysext(path) {
+            notes.append("apple_sysext (ignored for client count): \(path)")
+        }
+        for path in thirdPartyPaths {
+            notes.append("third_party_sysext: \(path)")
+        }
+        notes.append("sysext thirdParty=\(thirdPartyPaths.count) totalListed=\(allExtensions.count)")
+        return (thirdPartyPaths, thirdPartyPaths.count)
+    }
+
+    private static func systemExtensions(in item: URL, fileManager: FileManager) -> [String] {
+        if item.pathExtension == "systemextension" {
+            return [item.path]
+        }
+        let nested = (try? fileManager.contentsOfDirectory(
+            at: item,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        return nested.filter { $0.pathExtension == "systemextension" }.map(\.path)
+    }
+
+    private static func uniquePaths(_ paths: [String]) -> [String] {
+        Array(Set(paths)).sorted()
+    }
+
+    private static func uniquePathsInDiscoveryOrder(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        return paths.filter { seen.insert($0).inserted }
     }
 
     /// Whether a systemextension path looks Apple-owned (not a third-party EDR client).

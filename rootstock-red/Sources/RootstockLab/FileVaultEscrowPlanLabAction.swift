@@ -32,38 +32,24 @@ public struct FileVaultEscrowPlanLabAction: LabAction {
         - purple: expect OPEN of escrow preference paths if inspected under ROE
         ROOTSTOCK_RED_LAB_FILEVAULT_ESCROW=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
-            Dry-run FileVault/escrow plan for focus [\(focus)]: would write plan at \
-            \(markerURL.path). NEVER extracts recovery keys or runs unlock recipes.
-            """,
-            planSteps: [
-                "Document FV/escrow posture review for: \(focus)",
-                "Note escrow path presence without opening keychains",
-                "Write markdown plan under lab root only",
-                "Never run fdesetup auth/recovery extraction",
-            ],
-            planCleanup: ["Delete \(markerURL.path)"],
-            applyDryRunMessage: "Dry-run: would write FileVault escrow plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote FileVault escrow plan at \(markerURL.path)",
-            applySteps: ["Write FileVault escrow plan"],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "FileVault escrow plan present",
-            absentMessage: "FileVault escrow plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete FileVault escrow plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed FileVault escrow plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No recovery keys were accessed"]
-        )
         return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: Self.copy(markerURL: markerURL, focus: focus)
+            )
+        )
+    }
+
+    private static func copy(markerURL: URL, focus: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(message: "Dry-run FileVault/escrow plan for focus [\(focus)]: would write plan at \(markerURL.path). NEVER extracts recovery keys or runs unlock recipes.", steps: ["Document FV/escrow posture review for: \(focus)", "Note escrow path presence without opening keychains", "Write markdown plan under lab root only", "Never run fdesetup auth/recovery extraction"], cleanup: ["Delete \(markerURL.path)"]),
+            apply: FileMarkerApplyCopy(dryRunMessage: "Dry-run: would write FileVault escrow plan at \(markerURL.path)", successMessage: "Wrote FileVault escrow plan at \(markerURL.path)", steps: ["Write FileVault escrow plan"], cleanup: ["Delete \(markerURL.path)"]),
+            status: FileMarkerStatusCopy(presentMessage: "FileVault escrow plan present", absentMessage: "FileVault escrow plan absent", presentCleanup: ["Delete \(markerURL.path)"], absentCleanup: ["No artifact"]),
+            remove: FileMarkerRemoveCopy(dryRunMessage: { exists in "Dry-run: would delete FileVault escrow plan (exists=\(exists))" }, successMessage: { exists in "Removed FileVault escrow plan (wasPresent=\(exists))" }, steps: ["Delete \(markerURL.path)"], cleanup: ["No recovery keys were accessed"])
         )
     }
 

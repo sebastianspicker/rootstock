@@ -1,1 +1,7 @@
-user-revision-marker
+{
+  "revisions": [
+    {
+      "path": "user-revision-marker"
+    }
+  ]
+}

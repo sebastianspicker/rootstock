@@ -18,6 +18,25 @@ public struct TCCCollector: Collector {
 
     public init() {}
 
+    private struct TCCDatabaseSignals {
+        let userReadable: Bool
+        let systemReadable: Bool
+        let paths: [String]
+    }
+
+    private struct FoldersProbe {
+        let listable: [String]
+        let unlistable: [String]
+        let paths: [String]
+    }
+
+    private struct FDASensitiveProbe {
+        let readableHits: Int
+        let deniedHits: Int
+        let missingHits: Int
+        let paths: [String]
+    }
+
     public func collect(context: EvaluationContext) async throws -> CollectedState {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser
@@ -25,135 +44,24 @@ public struct TCCCollector: Collector {
         var notes: [String] = [
             "Non-prompting FDA/TCC heuristics only - no UI, no Keychain, no TCC.db content read",
         ]
-        var pathsTouched: [String] = []
-
-        // MARK: TCC database path readability (shared vocabulary)
-        let userTCC = MacSecurityPaths.userTCCDatabase(home: home)
-        let systemTCC = URL(fileURLWithPath: MacSecurityPaths.systemTCCDatabase)
-        pathsTouched.append(userTCC.path)
-        pathsTouched.append(systemTCC.path)
-
-        let userTCCExists = fm.fileExists(atPath: userTCC.path)
-        let userTCCReadable = fm.isReadableFile(atPath: userTCC.path)
-        let systemTCCExists = fm.fileExists(atPath: systemTCC.path)
-        let systemTCCReadable = fm.isReadableFile(atPath: systemTCC.path)
-
-        notes.append(
-            "User TCC.db exists=\(userTCCExists) readable=\(userTCCReadable) path=\(userTCC.path)"
-        )
-        notes.append(
-            "System TCC.db exists=\(systemTCCExists) readable=\(systemTCCReadable) path=\(systemTCC.path)"
-        )
-
-        // MARK: Files-and-Folders style listability (not full FDA)
-        let folderProbes: [(String, URL)] = [
-            ("Desktop", home.appendingPathComponent("Desktop")),
-            ("Documents", home.appendingPathComponent("Documents")),
-            ("Downloads", home.appendingPathComponent("Downloads")),
-        ]
-        var listableFolders: [String] = []
-        var unlistableFolders: [String] = []
-        for (name, url) in folderProbes {
-            pathsTouched.append(url.path)
-            let result = Self.listability(of: url, fm: fm)
-            switch result {
-            case .listable(let count):
-                listableFolders.append(name)
-                notes.append("\(name): listable (entries≈\(count))")
-            case .notListable(let reason):
-                unlistableFolders.append(name)
-                notes.append("\(name): not listable (\(reason))")
-            case .missing:
-                notes.append("\(name): path missing")
-            }
-        }
-
-        // MARK: FDA-sensitive path readability (stronger signal than Desktop)
-        let fdaSensitive: [(String, URL)] = [
-            ("Safari History.db", home.appendingPathComponent("Library/Safari/History.db")),
-            ("Mail", home.appendingPathComponent("Library/Mail")),
-            ("Messages chat.db", home.appendingPathComponent("Library/Messages/chat.db")),
-            ("Cookies", home.appendingPathComponent("Library/Cookies")),
-            ("Knowledge", home.appendingPathComponent("Library/Application Support/Knowledge")),
-            (
-                "CallHistoryDB",
-                home.appendingPathComponent("Library/Application Support/CallHistoryDB")
-            ),
-            // Additional FDA-gated / privacy areas (SwiftBelt-style path probes).
-            ("Calendars", home.appendingPathComponent("Library/Calendars")),
-            ("Reminders", home.appendingPathComponent("Library/Reminders")),
-            ("Accounts", home.appendingPathComponent("Library/Accounts")),
-            ("Containers meta", home.appendingPathComponent("Library/Containers")),
-            ("Group Containers", home.appendingPathComponent("Library/Group Containers")),
-            ("Suggestions", home.appendingPathComponent("Library/Suggestions")),
-            ("Metadata", home.appendingPathComponent("Library/Metadata")),
-        ]
-        var fdaReadableHits = 0
-        var fdaDeniedHits = 0
-        var fdaMissingHits = 0
-        for (label, url) in fdaSensitive {
-            pathsTouched.append(url.path)
-            if !fm.fileExists(atPath: url.path) {
-                fdaMissingHits += 1
-                notes.append("FDA-sensitive \(label): missing path=\(url.path)")
-                continue
-            }
-            if fm.isReadableFile(atPath: url.path) {
-                // For directories, also try a shallow list - isReadableFile alone is weak.
-                var isDir: ObjCBool = false
-                if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                    switch Self.listability(of: url, fm: fm) {
-                    case .listable:
-                        fdaReadableHits += 1
-                        notes.append("FDA-sensitive \(label): listable path=\(url.path)")
-                    case .notListable(let reason):
-                        fdaDeniedHits += 1
-                        notes.append(
-                            "FDA-sensitive \(label): dir not listable (\(reason)) path=\(url.path)"
-                        )
-                    case .missing:
-                        fdaMissingHits += 1
-                    }
-                } else {
-                    fdaReadableHits += 1
-                    notes.append("FDA-sensitive \(label): readable path=\(url.path)")
-                }
-            } else {
-                fdaDeniedHits += 1
-                notes.append("FDA-sensitive \(label): exists but not readable path=\(url.path)")
-            }
-        }
+        let databases = Self.tccDatabaseSignals(fileManager: fm, home: home, notes: &notes)
+        let folders = Self.folderListability(fileManager: fm, home: home, notes: &notes)
+        let fda = Self.fdaSensitivePaths(fileManager: fm, home: home, notes: &notes)
 
         // MARK: Spotlight MDItem attribute peek (no UI, no query window)
         let mdProbe = Self.spotlightMDItemProbe(home: home, fm: fm)
         notes.append(contentsOf: mdProbe.notes)
-        pathsTouched.append(contentsOf: mdProbe.paths)
+        let pathsTouched = databases.paths + folders.paths + fda.paths + mdProbe.paths
 
         // MARK: Aggregate FDA likelihood
-        let fullDiskAccessLikely: Bool?
-        if systemTCCReadable || fdaReadableHits >= 2 {
-            fullDiskAccessLikely = true
-            notes.append(
-                "FDA likely=true (systemTCCReadable=\(systemTCCReadable), fdaReadableHits=\(fdaReadableHits))"
-            )
-        } else if userTCCReadable {
-            // Unexpected on modern macOS without FDA; treat as likely.
-            fullDiskAccessLikely = true
-            notes.append("FDA likely=true (user TCC.db unexpectedly readable)")
-        } else if fdaDeniedHits >= 2 && !systemTCCReadable {
-            fullDiskAccessLikely = false
-            notes.append(
-                "FDA likely=false (fdaDeniedHits=\(fdaDeniedHits), system TCC not readable)"
-            )
-        } else {
-            fullDiskAccessLikely = nil
-            notes.append(
-                "FDA likely=unknown (insufficient signal; denied=\(fdaDeniedHits) readable=\(fdaReadableHits) missing=\(fdaMissingHits))"
-            )
-        }
+        let fullDiskAccessLikely = Self.fullDiskAccessLikelihood(
+            databases: databases,
+            fda: fda,
+            notes: &notes
+        )
 
         notes.append(
-            "Files-and-Folders listable: \(listableFolders.joined(separator: ",").ifEmpty("none")); not: \(unlistableFolders.joined(separator: ",").ifEmpty("none"))"
+            "Files-and-Folders listable: \(folders.listable.joined(separator: ",").ifEmpty("none")); not: \(folders.unlistable.joined(separator: ",").ifEmpty("none"))"
         )
         notes.append(
             "pathsTouched count=\(Set(pathsTouched).count) (for artifact ledger notes)"
@@ -179,6 +87,141 @@ public struct TCCCollector: Collector {
         case listable(count: Int)
         case notListable(reason: String)
         case missing
+    }
+
+    private static func tccDatabaseSignals(
+        fileManager: FileManager,
+        home: URL,
+        notes: inout [String]
+    ) -> TCCDatabaseSignals {
+        let userDatabase = MacSecurityPaths.userTCCDatabase(home: home)
+        let systemDatabase = URL(fileURLWithPath: MacSecurityPaths.systemTCCDatabase)
+        let userExists = fileManager.fileExists(atPath: userDatabase.path)
+        let userReadable = fileManager.isReadableFile(atPath: userDatabase.path)
+        let systemExists = fileManager.fileExists(atPath: systemDatabase.path)
+        let systemReadable = fileManager.isReadableFile(atPath: systemDatabase.path)
+        notes.append("User TCC.db exists=\(userExists) readable=\(userReadable) path=\(userDatabase.path)")
+        notes.append("System TCC.db exists=\(systemExists) readable=\(systemReadable) path=\(systemDatabase.path)")
+        return TCCDatabaseSignals(
+            userReadable: userReadable,
+            systemReadable: systemReadable,
+            paths: [userDatabase.path, systemDatabase.path]
+        )
+    }
+
+    private static func folderListability(
+        fileManager: FileManager,
+        home: URL,
+        notes: inout [String]
+    ) -> FoldersProbe {
+        let probes = ["Desktop", "Documents", "Downloads"].map {
+            ($0, home.appendingPathComponent($0))
+        }
+        var listable: [String] = []
+        var unlistable: [String] = []
+        for (name, url) in probes {
+            switch listability(of: url, fm: fileManager) {
+            case .listable(let count):
+                listable.append(name)
+                notes.append("\(name): listable (entries≈\(count))")
+            case .notListable(let reason):
+                unlistable.append(name)
+                notes.append("\(name): not listable (\(reason))")
+            case .missing:
+                notes.append("\(name): path missing")
+            }
+        }
+        return FoldersProbe(listable: listable, unlistable: unlistable, paths: probes.map { $0.1.path })
+    }
+
+    private static func fdaSensitivePaths(
+        fileManager: FileManager,
+        home: URL,
+        notes: inout [String]
+    ) -> FDASensitiveProbe {
+        let probes = [
+            ("Safari History.db", "Library/Safari/History.db"), ("Mail", "Library/Mail"),
+            ("Messages chat.db", "Library/Messages/chat.db"), ("Cookies", "Library/Cookies"),
+            ("Knowledge", "Library/Application Support/Knowledge"),
+            ("CallHistoryDB", "Library/Application Support/CallHistoryDB"),
+            ("Calendars", "Library/Calendars"), ("Reminders", "Library/Reminders"),
+            ("Accounts", "Library/Accounts"), ("Containers meta", "Library/Containers"),
+            ("Group Containers", "Library/Group Containers"), ("Suggestions", "Library/Suggestions"),
+            ("Metadata", "Library/Metadata"),
+        ].map { ($0.0, home.appendingPathComponent($0.1)) }
+        var readable = 0
+        var denied = 0
+        var missing = 0
+        for (label, url) in probes {
+            let result = fdaReadability(of: url, fileManager: fileManager)
+            switch result {
+            case .readable:
+                readable += 1
+                notes.append("FDA-sensitive \(label): readable path=\(url.path)")
+            case .listable:
+                readable += 1
+                notes.append("FDA-sensitive \(label): listable path=\(url.path)")
+            case .denied(let reason):
+                denied += 1
+                notes.append("FDA-sensitive \(label): \(reason) path=\(url.path)")
+            case .missing:
+                missing += 1
+                notes.append("FDA-sensitive \(label): missing path=\(url.path)")
+            }
+        }
+        return FDASensitiveProbe(
+            readableHits: readable,
+            deniedHits: denied,
+            missingHits: missing,
+            paths: probes.map { $0.1.path }
+        )
+    }
+
+    private enum FDAReadability {
+        case readable
+        case listable
+        case denied(String)
+        case missing
+    }
+
+    private static func fdaReadability(of url: URL, fileManager: FileManager) -> FDAReadability {
+        guard fileManager.fileExists(atPath: url.path) else { return .missing }
+        guard fileManager.isReadableFile(atPath: url.path) else {
+            return .denied("exists but not readable")
+        }
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return .readable
+        }
+        switch listability(of: url, fm: fileManager) {
+        case .listable:
+            return .listable
+        case .notListable(let reason):
+            return .denied("dir not listable (\(reason))")
+        case .missing:
+            return .missing
+        }
+    }
+
+    private static func fullDiskAccessLikelihood(
+        databases: TCCDatabaseSignals,
+        fda: FDASensitiveProbe,
+        notes: inout [String]
+    ) -> Bool? {
+        if databases.systemReadable || fda.readableHits >= 2 {
+            notes.append("FDA likely=true (systemTCCReadable=\(databases.systemReadable), fdaReadableHits=\(fda.readableHits))")
+            return true
+        }
+        if databases.userReadable {
+            notes.append("FDA likely=true (user TCC.db unexpectedly readable)")
+            return true
+        }
+        if fda.deniedHits >= 2 && !databases.systemReadable {
+            notes.append("FDA likely=false (fdaDeniedHits=\(fda.deniedHits), system TCC not readable)")
+            return false
+        }
+        notes.append("FDA likely=unknown (insufficient signal; denied=\(fda.deniedHits) readable=\(fda.readableHits) missing=\(fda.missingHits))")
+        return nil
     }
 
     private static func listability(of url: URL, fm: FileManager) -> ListResult {

@@ -4,6 +4,15 @@ import RootstockBlueCore
 /// Network locations / services from SystemConfiguration preferences or
 /// fixture `network_locations.json`.
 public struct NetworkLocationParser: ArtifactParser {
+    private struct LocationDetails {
+        let service: String
+        let interface: String
+        let ipv4: String
+        let location: String
+        let sourceURL: URL
+        let extra: [String: Any]
+    }
+
     public let manifest = PluginManifest(
         id: "NETLOCATION",
         tier: .tier2,
@@ -17,39 +26,32 @@ public struct NetworkLocationParser: ArtifactParser {
         var urls: [URL] = []
         var seen = PathDeduper()
 
-        for found in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            if name == "network_locations.json" { return true }
-            if name == "preferences.plist" && url.path.contains("SystemConfiguration") {
-                return true
-            }
-            return false
-        }) {
-            if !seen.insert(found) { continue }
-            ArtifactRoot.appendUnique(&urls, found)
-        }
+        appendURLs(root.enumerate(matching: { Self.isNetworkLocationFile($0) }), to: &urls, seen: &seen)
+        appendURLs(standardURLs(in: root), to: &urls, seen: &seen)
+        return urls.flatMap(parseFile)
+    }
 
-        for rel in [
+    private func standardURLs(in root: ArtifactRoot) -> [URL] {
+        [
             "Library/Preferences/SystemConfiguration/network_locations.json",
             "Library/Preferences/SystemConfiguration/preferences.plist",
             "Library/Preferences/network_locations.json",
-        ] {
-            if let u = root.firstExisting([rel]) {
-                if seen.insert(u) {
-                    ArtifactRoot.appendUnique(&urls, u)
-                }
-            }
-        }
+        ].compactMap { root.firstExisting([$0]) }
+    }
 
-        var events: [EventEnvelope] = []
-        for url in urls {
-            if url.pathExtension == "json" {
-                events.append(contentsOf: parseJSON(at: url))
-            } else {
-                events.append(contentsOf: parsePreferencesPlist(at: url))
-            }
+    private static func isNetworkLocationFile(_ url: URL) -> Bool {
+        url.lastPathComponent == "network_locations.json"
+            || (url.lastPathComponent == "preferences.plist" && url.path.contains("SystemConfiguration"))
+    }
+
+    private func appendURLs(_ candidates: [URL], to urls: inout [URL], seen: inout PathDeduper) {
+        for url in candidates where seen.insert(url) {
+            ArtifactRoot.appendUnique(&urls, url)
         }
-        return events
+    }
+
+    private func parseFile(_ url: URL) -> [EventEnvelope] {
+        url.pathExtension == "json" ? parseJSON(at: url) : parsePreferencesPlist(at: url)
     }
 
     // MARK: - JSON fixture
@@ -75,7 +77,7 @@ public struct NetworkLocationParser: ArtifactParser {
         }
 
         return entries.compactMap { item in
-            makeEvent(
+            makeEvent(LocationDetails(
                 service: stringValue(item["service"])
                     ?? stringValue(item["name"])
                     ?? stringValue(item["UserDefinedName"])
@@ -90,7 +92,7 @@ public struct NetworkLocationParser: ArtifactParser {
                 location: stringValue(item["location"]) ?? stringValue(item["Location"]) ?? "",
                 sourceURL: url,
                 extra: item
-            )
+            ))
         }
     }
 
@@ -98,102 +100,92 @@ public struct NetworkLocationParser: ArtifactParser {
 
     private func parsePreferencesPlist(at url: URL) -> [EventEnvelope] {
         guard let rootDict = ArtifactIO.plistDict(contentsOf: url) else { return [] }
+        let serviceEvents = eventsFromServices(rootDict["NetworkServices"], sourceURL: url)
+        return serviceEvents.isEmpty
+            ? eventsFromLocations(rootDict["Sets"], sourceURL: url)
+            : serviceEvents
+    }
 
-        var events: [EventEnvelope] = []
+    private func eventsFromServices(_ value: Any?, sourceURL: URL) -> [EventEnvelope] {
+        guard let services = value as? [String: Any] else { return [] }
+        return services.compactMap { uuid, value in
+            guard let service = value as? [String: Any] else { return nil }
+            return makeEvent(LocationDetails(
+                service: stringValue(service["UserDefinedName"]) ?? uuid,
+                interface: interfaceFromNested(service) ?? "",
+                ipv4: ipv4FromNested(service) ?? "",
+                location: "",
+                sourceURL: sourceURL,
+                extra: service
+            ))
+        }
+    }
 
-        // NetworkServices dict: UUID -> service
-        if let services = rootDict["NetworkServices"] as? [String: Any] {
-            for (uuid, value) in services {
-                guard let svc = value as? [String: Any] else { continue }
-                let name = stringValue(svc["UserDefinedName"]) ?? uuid
-                let iface = interfaceFromNested(svc) ?? ""
-                let ipv4 = ipv4FromNested(svc) ?? ""
-                if let event = makeEvent(
-                    service: name,
-                    interface: iface,
-                    ipv4: ipv4,
-                    location: "",
-                    sourceURL: url,
-                    extra: svc
-                ) {
-                    events.append(event)
-                }
+    private func eventsFromLocations(_ value: Any?, sourceURL: URL) -> [EventEnvelope] {
+        guard let sets = value as? [String: Any] else { return [] }
+        for value in sets.values {
+            guard let set = value as? [String: Any],
+                  let location = stringValue(set["UserDefinedName"]),
+                  !location.isEmpty
+            else { continue }
+            if let event = makeEvent(LocationDetails(
+                service: location,
+                interface: "",
+                ipv4: "",
+                location: location,
+                sourceURL: sourceURL,
+                extra: set
+            )) {
+                return [event]
             }
         }
-
-        // Sets / current location names
-        if let sets = rootDict["Sets"] as? [String: Any] {
-            for (_, value) in sets {
-                guard let setDict = value as? [String: Any] else { continue }
-                let locName = stringValue(setDict["UserDefinedName"]) ?? ""
-                if !locName.isEmpty, events.isEmpty {
-                    // Emit location-only if no services were found
-                    if let event = makeEvent(
-                        service: locName,
-                        interface: "",
-                        ipv4: "",
-                        location: locName,
-                        sourceURL: url,
-                        extra: setDict
-                    ) {
-                        events.append(event)
-                    }
-                } else if !locName.isEmpty {
-                    // Tag existing events? Prefer emit location summary
-                    _ = locName
-                }
-            }
-        }
-
-        // CurrentSet path only - skip if we already have services
-        return events
+        return []
     }
 
     // MARK: - event
 
-    private func makeEvent(
-        service: String,
-        interface: String,
-        ipv4: String,
-        location: String,
-        sourceURL: URL,
-        extra: [String: Any]
-    ) -> EventEnvelope? {
-        guard !service.isEmpty || !interface.isEmpty || !ipv4.isEmpty else { return nil }
+    private func makeEvent(_ details: LocationDetails) -> EventEnvelope? {
+        guard !details.service.isEmpty || !details.interface.isEmpty || !details.ipv4.isEmpty else { return nil }
 
         var fields: [String: String] = [
-            "net.service": service,
-            "net.interface": interface,
+            "net.service": details.service,
+            "net.interface": details.interface,
             FieldTaxonomy.eventType: "net.location",
-            FieldTaxonomy.filePath: ArtifactRoot.pathKey(sourceURL),
+            FieldTaxonomy.filePath: ArtifactRoot.pathKey(details.sourceURL),
         ]
-        if !ipv4.isEmpty {
-            fields["net.ipv4"] = ipv4
+        if !details.ipv4.isEmpty {
+            fields["net.ipv4"] = details.ipv4
         }
-        if !location.isEmpty {
-            fields["net.location_name"] = location
+        if !details.location.isEmpty {
+            fields["net.location_name"] = details.location
         }
-        if let mac = stringValue(extra["mac"]) ?? stringValue(extra["MAC"]) {
+        if let mac = stringValue(details.extra["mac"]) ?? stringValue(details.extra["MAC"]) {
             fields["net.mac"] = mac
         }
 
         var entities: [EntityID] = [
-            EntityID(kind: .network, value: "service=\(service.isEmpty ? interface : service)"),
+            EntityID(kind: .network, value: "service=\(details.service.isEmpty ? details.interface : details.service)"),
         ]
-        if !ipv4.isEmpty {
-            entities.append(EntityID(kind: .network, value: "ipv4=\(ipv4)"))
+        if !details.ipv4.isEmpty {
+            entities.append(EntityID(kind: .network, value: "ipv4=\(details.ipv4)"))
         }
 
         return EventEnvelope(
-            eventTime: fileMTime(sourceURL),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "NETLOCATION",
-            eventType: "net.location",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.9
+            identity: EventEnvelope.Identity(
+                kind: "net.location",
+                label: "NETLOCATION"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: fileMTime(details.sourceURL),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: entities,
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(details.sourceURL),
+                confidence: 0.9
+            )
         )
     }
 

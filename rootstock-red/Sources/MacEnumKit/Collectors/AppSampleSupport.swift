@@ -8,48 +8,38 @@ enum AppSampleSupport {
 
     /// Up to `sampleLimit` app bundle paths from /Applications, optionally unioned with extras.
     static func sampleAppBundlePaths(extraPaths: [String] = []) -> [String] {
-        let fm = FileManager.default
-        let appsRoot = URL(fileURLWithPath: "/Applications", isDirectory: true)
         var ordered: [String] = []
         var seen = Set<String>()
+        appendInstalledApps(to: &ordered, seen: &seen)
+        appendExtraPaths(extraPaths, to: &ordered, seen: &seen)
+        return Array(ordered.prefix(sampleLimit))
+    }
 
-        func append(_ path: String) {
-            let standardized = (path as NSString).standardizingPath
-            guard !seen.contains(standardized) else { return }
-            seen.insert(standardized)
-            ordered.append(standardized)
+
+    private static func appendInstalledApps(to ordered: inout [String], seen: inout Set<String>) {
+        let root = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        guard let contents = try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) else { return }
+        for app in contents.filter({ $0.pathExtension == "app" }).sorted(by: { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }) {
+            appendUnique(app.path, to: &ordered, seen: &seen)
+            if ordered.count >= sampleLimit { return }
         }
+    }
 
-        if let contents = try? fm.contentsOfDirectory(
-            at: appsRoot,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) {
-            let apps = contents
-                .filter { $0.pathExtension == "app" }
-                .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
-            for app in apps {
-                append(app.path)
-                if ordered.count >= sampleLimit { break }
-            }
-        }
-
-        for path in extraPaths where ordered.count < sampleLimit {
+    private static func appendExtraPaths(_ paths: [String], to ordered: inout [String], seen: inout Set<String>) {
+        for path in paths where ordered.count < sampleLimit {
             let lower = path.lowercased()
             if lower.hasSuffix(".app") || lower.contains(".app/") {
-                // Prefer the .app bundle root when given an inner path.
-                if let range = path.range(of: ".app", options: [.caseInsensitive]) {
-                    let bundle = String(path[..<range.upperBound])
-                    append(bundle)
-                } else {
-                    append(path)
-                }
-            } else if fm.fileExists(atPath: path) {
-                append(path)
+                appendUnique(path.range(of: ".app", options: [.caseInsensitive]).map { String(path[..<$0.upperBound]) } ?? path, to: &ordered, seen: &seen)
+            } else if FileManager.default.fileExists(atPath: path) {
+                appendUnique(path, to: &ordered, seen: &seen)
             }
         }
+    }
 
-        return Array(ordered.prefix(sampleLimit))
+    private static func appendUnique(_ path: String, to ordered: inout [String], seen: inout Set<String>) {
+        let standardized = (path as NSString).standardizingPath
+        guard seen.insert(standardized).inserted else { return }
+        ordered.append(standardized)
     }
 
     /// Main executable URL inside an .app, or the path itself for bare binaries.
@@ -79,11 +69,7 @@ enum AppSampleSupport {
         let cfURL = URL(fileURLWithPath: path) as CFURL
         let createStatus = SecStaticCodeCreateWithPath(cfURL, SecCSFlags(), &staticCode)
         guard createStatus == errSecSuccess, let code = staticCode else {
-            return CodesignSample(
-                path: path,
-                signed: false,
-                notes: ["SecStaticCodeCreateWithPath failed: \(createStatus)"]
-            )
+            return CodesignSample(path: path, signature: .init(signed: false), notes: ["SecStaticCodeCreateWithPath failed: \(createStatus)"])
         }
 
         var infoCF: CFDictionary?
@@ -94,11 +80,7 @@ enum AppSampleSupport {
             &infoCF
         )
         guard copyStatus == errSecSuccess, let infoCF else {
-            return CodesignSample(
-                path: path,
-                signed: false,
-                notes: ["SecCodeCopySigningInformation failed: \(copyStatus)"]
-            )
+            return CodesignSample(path: path, signature: .init(signed: false), notes: ["SecCodeCopySigningInformation failed: \(copyStatus)"])
         }
 
         let info = infoCF as NSDictionary
@@ -120,18 +102,7 @@ enum AppSampleSupport {
             return entitlements[key] != nil ? true : nil
         }
 
-        return CodesignSample(
-            path: path,
-            signed: true,
-            identifier: identifier,
-            teamIdentifier: team,
-            hardenedRuntime: hardened,
-            getTaskAllow: entBool("com.apple.security.get-task-allow"),
-            disableLibraryValidation: entBool("com.apple.security.cs.disable-library-validation"),
-            allowDyldEnvironmentVariables: entBool("com.apple.security.cs.allow-dyld-environment-variables"),
-            allowUnsignedExecutableMemory: entBool("com.apple.security.cs.allow-unsigned-executable-memory"),
-            notes: []
-        )
+        return CodesignSample(path: path, signature: .init(signed: true, identifier: identifier, teamIdentifier: team, hardenedRuntime: hardened, getTaskAllow: entBool("com.apple.security.get-task-allow"), disableLibraryValidation: entBool("com.apple.security.cs.disable-library-validation"), allowDyldEnvironmentVariables: entBool("com.apple.security.cs.allow-dyld-environment-variables"), allowUnsignedExecutableMemory: entBool("com.apple.security.cs.allow-unsigned-executable-memory")), notes: [])
     }
 
     static func injectabilityHit(from sample: CodesignSample) -> InjectabilityHit {
@@ -167,90 +138,83 @@ enum MachOWeakDylibScanner {
 
     /// Returns weak-dylib install names from a thin MH_MAGIC_64 (or first thin slice of a fat binary).
     static func weakDylibs(at path: String, maxBytes: Int = 2_000_000) -> (paths: [String], notes: [String]) {
-        guard let handle = FileHandle(forReadingAtPath: path) else {
-            return ([], ["unreadable"])
-        }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return ([], ["unreadable"]) }
         defer { try? handle.close() }
-
-        let data: Data
+        let result: Data?
         do {
-            if let full = try handle.read(upToCount: maxBytes) {
-                data = full
-            } else {
-                return ([], ["empty"])
-            }
+            result = try handle.read(upToCount: maxBytes)
         } catch {
             return ([], ["read failed"])
         }
-
+        guard let data = result else { return ([], ["empty"]) }
         guard data.count >= 32 else { return ([], ["too small"]) }
+        return parse(data)
+    }
 
+
+    private static func parse(_ data: Data) -> (paths: [String], notes: [String]) {
         let magic = readU32(data, 0, bigEndian: false)
-        if magic == fatMagic || magic == fatCigam {
-            let be = magic == fatCigam || magic == fatMagic
-            // fat_header: magic, nfat_arch
-            let nArch = Int(readU32(data, 4, bigEndian: true))
-            guard nArch > 0, data.count >= 8 + 20 else {
-                return ([], ["fat header truncated"])
-            }
-            // Prefer arm64 / x86_64 first arch that looks like MH_MAGIC_64
-            for i in 0..<min(nArch, 8) {
-                let base = 8 + i * 20
-                guard base + 20 <= data.count else { break }
-                let offset = Int(readU32(data, base + 8, bigEndian: true))
-                if offset + 32 <= data.count {
-                    let slice = data.subdata(in: offset..<data.count)
-                    let sliceMagic = readU32(slice, 0, bigEndian: false)
-                    if sliceMagic == mhMagic64 || sliceMagic == mhCigam64 {
-                        return parseThin64(slice)
-                    }
-                }
-            }
-            _ = be
-            return ([], ["no MH_MAGIC_64 fat slice found"])
-        }
-
-        if magic == mhMagic64 || magic == mhCigam64 {
-            return parseThin64(data)
-        }
-
+        if magic == fatMagic || magic == fatCigam { return parseFat64(data) }
+        if magic == mhMagic64 || magic == mhCigam64 { return parseThin64(data) }
         return ([], ["not MH_MAGIC_64 (magic=\(String(magic, radix: 16)))"])
+    }
+
+    private static func parseFat64(_ data: Data) -> (paths: [String], notes: [String]) {
+        let architectureCount = Int(readU32(data, 4, bigEndian: true))
+        guard architectureCount > 0, data.count >= 28 else {
+            return ([], ["fat header truncated"])
+        }
+
+        for index in 0..<min(architectureCount, 8) {
+            let base = 8 + index * 20
+            guard base + 20 <= data.count else { break }
+            let offset = Int(readU32(data, base + 8, bigEndian: true))
+            guard offset + 32 <= data.count else { continue }
+
+            let slice = data.subdata(in: offset..<data.count)
+            let magic = readU32(slice, 0, bigEndian: false)
+            if magic == mhMagic64 || magic == mhCigam64 {
+                return parseThin64(slice)
+            }
+        }
+        return ([], ["no MH_MAGIC_64 fat slice found"])
     }
 
     private static func parseThin64(_ data: Data) -> (paths: [String], notes: [String]) {
         let swap = readU32(data, 0, bigEndian: false) == mhCigam64
-        // mach_header_64: magic,cputype,cpusubtype,filetype,ncmds,sizeofcmds,flags,reserved
         guard data.count >= 32 else { return ([], ["header truncated"]) }
         let ncmds = Int(readU32(data, 16, bigEndian: swap))
-        let sizeofcmds = Int(readU32(data, 20, bigEndian: swap))
+        let end = min(data.count, 32 + Int(readU32(data, 20, bigEndian: swap)))
         var offset = 32
-        let end = min(data.count, 32 + sizeofcmds)
         var weak: [String] = []
-
         for _ in 0..<ncmds {
-            guard offset + 8 <= end else { break }
-            let cmd = readU32(data, offset, bigEndian: swap)
-            let cmdsize = Int(readU32(data, offset + 4, bigEndian: swap))
-            guard cmdsize >= 8, offset + cmdsize <= data.count else { break }
-
-            if cmd == lcLoadWeakDylib {
-                // dylib_command: cmd, cmdsize, dylib { name offset, timestamp, current, compat }
-                guard cmdsize >= 24 else {
-                    offset += cmdsize
-                    continue
-                }
-                let nameOffset = Int(readU32(data, offset + 8, bigEndian: swap))
-                if nameOffset > 0, offset + nameOffset < offset + cmdsize {
-                    let start = offset + nameOffset
-                    let limit = offset + cmdsize
-                    if let name = cString(data, start: start, end: limit) {
-                        weak.append(name)
-                    }
-                }
+            guard let command = command(data, offset: offset, end: end, swap: swap) else { break }
+            if command.kind == lcLoadWeakDylib, let name = weakDylibName(data, offset: offset, commandSize: command.size, swap: swap) {
+                weak.append(name)
             }
-            offset += cmdsize
+            offset += command.size
         }
         return (weak, [])
+    }
+
+
+    private struct LoadCommand {
+        let kind: UInt32
+        let size: Int
+    }
+
+    private static func command(_ data: Data, offset: Int, end: Int, swap: Bool) -> LoadCommand? {
+        guard offset + 8 <= end else { return nil }
+        let size = Int(readU32(data, offset + 4, bigEndian: swap))
+        guard size >= 8, offset + size <= data.count else { return nil }
+        return LoadCommand(kind: readU32(data, offset, bigEndian: swap), size: size)
+    }
+
+    private static func weakDylibName(_ data: Data, offset: Int, commandSize: Int, swap: Bool) -> String? {
+        guard commandSize >= 24 else { return nil }
+        let nameOffset = Int(readU32(data, offset + 8, bigEndian: swap))
+        guard nameOffset > 0, offset + nameOffset < offset + commandSize else { return nil }
+        return cString(data, start: offset + nameOffset, end: offset + commandSize)
     }
 
     private static func readU32(_ data: Data, _ offset: Int, bigEndian: Bool) -> UInt32 {

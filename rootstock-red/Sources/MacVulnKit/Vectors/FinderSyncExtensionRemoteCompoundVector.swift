@@ -11,12 +11,10 @@ public struct FinderSyncExtensionRemoteCompoundVector: Check {
         let a = s?.finderSyncFrameworkPaths.count ?? 0
         let b = s?.appScriptPaths.count ?? 0
         guard a >= 1, b >= 1 || a >= 2 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
-        let sensorThin = state.esf?.clientPaths.isEmpty == true || state.securityProducts.filter(\.present).isEmpty
-        guard remote || fda || sensorThin || a + b >= 3 else { return [] }
+        let compound = RemoteCompoundSignals(state: state)
+        guard compound.hasAmplifier || a + b >= 3 else { return [] }
         var evidence: [Evidence] = [
-            Evidence(type: "finder_sync_extension_compound", detail: "a=\(a) b=\(b) remote=\(remote) fda=\(fda) sensorThin=\(sensorThin)"),
+            Evidence(type: "finder_sync_extension_compound", detail: "a=\(a) b=\(b) remote=\(compound.remote) fda=\(compound.fullDiskAccess) sensorThin=\(compound.sensorThin)"),
         ]
         if let s {
             for path in (s.finderSyncFrameworkPaths + s.appScriptPaths).prefix(6) {
@@ -24,19 +22,11 @@ public struct FinderSyncExtensionRemoteCompoundVector: Check {
             }
         }
         evidence.append(Evidence(type: "honesty", detail: "never installs Finder Sync extensions or rewrites Finder preferences for abuse."))
-        let severity: Severity = (remote && fda) ? .high : ((remote || fda || sensorThin) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "Finder Sync dual-use × remote compound" : "Finder Sync dual-use × impact compound",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1546", "T1176", "T1059"],
-            remediation: [
+        let severity = compound.severity
+        return [Finding(id: Self.id, title: compound.remote ? "Finder Sync dual-use × remote compound" : "Finder Sync dual-use × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1546", "T1176", "T1059"], remediation: [
                 "Prioritize hosts co-locating Finder Sync dual-use with remote/FDA amplifiers",
                 "Use Wave-16 lab plans under ROE for purple validation",
                 "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-            ],
-            falsePositiveNotes: "Developer hosts may co-locate dual-use paths; rank production remote hosts first.",
-            dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"]
-        )]
+            ], falsePositiveNotes: "Developer hosts may co-locate dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"]))]
     }
 }

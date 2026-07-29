@@ -61,113 +61,71 @@ public enum LogicalAcquire {
         to destination: URL,
         actor: String = NSUserName()
     ) throws -> AcquisitionMaterializeResult {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         let source = sourceTree.standardizedFileURL
+        try validateMaterialization(source: source, destination: destination, sourceTree: sourceTree, fileManager: fileManager)
+        let staging = stagingDirectory(for: destination)
+        do {
+            try prepareStaging(staging, fileManager: fileManager)
+            let copied = try copyEvidence(from: source, into: staging, fileManager: fileManager)
+            let manifest = try writeBundleMetadata(staging: staging, sourceTree: sourceTree, actor: actor, copied: copied)
+            try publishStaging(staging, to: destination, fileManager: fileManager)
+            return AcquisitionMaterializeResult(destination: destination, filesCopied: copied.files, custodyHashes: copied.hashes, manifestURL: destination.appendingPathComponent(manifest.lastPathComponent))
+        } catch {
+            try? fileManager.removeItem(at: staging)
+            throw error
+        }
+    }
+
+    private static func validateMaterialization(source: URL, destination: URL, sourceTree: URL, fileManager: FileManager) throws {
         let resolvedSource = source.resolvingSymlinksInPath()
         let resolvedDestination = destination.standardizedFileURL.resolvingSymlinksInPath()
+        guard pathEntryExistsOrIsSymlink(source, fileManager: fileManager) else { throw RootstockBlueError.io("Source tree not found: \(sourceTree.path)") }
+        guard !isSymbolicLink(source, fileManager: fileManager), isDirectory(source, fileManager: fileManager) else { throw RootstockBlueError.io("Source tree must be a real directory, not a symbolic link or file: \(sourceTree.path)") }
+        guard !pathsOverlap(resolvedSource, resolvedDestination) else { throw RootstockBlueError.io("Source and destination must not overlap: \(sourceTree.path) and \(destination.path)") }
+        guard !pathEntryExistsOrIsSymlink(destination, fileManager: fileManager) else { throw RootstockBlueError.io("Destination already exists and will not be modified: \(destination.path)") }
+        try validateSourceTree(source, fileManager: fileManager)
+    }
 
-        guard pathEntryExistsOrIsSymlink(source, fileManager: fm) else {
-            throw RootstockBlueError.io("Source tree not found: \(sourceTree.path)")
-        }
-        guard !isSymbolicLink(source, fileManager: fm), isDirectory(source, fileManager: fm) else {
-            throw RootstockBlueError.io("Source tree must be a real directory, not a symbolic link or file: \(sourceTree.path)")
-        }
-        guard !pathsOverlap(resolvedSource, resolvedDestination) else {
-            throw RootstockBlueError.io("Source and destination must not overlap: \(sourceTree.path) and \(destination.path)")
-        }
-        guard !pathEntryExistsOrIsSymlink(destination, fileManager: fm) else {
-            throw RootstockBlueError.io("Destination already exists and will not be modified: \(destination.path)")
-        }
+    private static func prepareStaging(_ staging: URL, fileManager: FileManager) throws {
+        try fileManager.createDirectory(at: staging.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        try fileManager.createDirectory(at: staging.appendingPathComponent("evidence", isDirectory: true), withIntermediateDirectories: true)
+    }
 
-        try validateSourceTree(source, fileManager: fm)
-
-        try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let staging = stagingDirectory(for: destination)
-        var published = false
-        defer {
-            if !published, pathEntryExistsOrIsSymlink(staging, fileManager: fm) {
-                try? fm.removeItem(at: staging)
-            }
-        }
-
-        try fm.createDirectory(
-            at: staging,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-
-        let evidenceRoot = staging.appendingPathComponent("evidence", isDirectory: true)
-        try fm.createDirectory(at: evidenceRoot, withIntermediateDirectories: true)
-
-        var filesCopied = 0
-        var hashes: [String: String] = [:]
-
-        guard let enumerator = fm.enumerator(
-            at: source,
-            includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey],
-            options: []
-        ) else {
-            throw RootstockBlueError.io("Unable to enumerate source tree: \(sourceTree.path)")
-        }
-
+    private static func copyEvidence(from source: URL, into staging: URL, fileManager: FileManager) throws -> (files: Int, hashes: [String: String]) {
+        guard let enumerator = fileManager.enumerator(at: source, includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey], options: []) else { throw RootstockBlueError.io("Unable to enumerate source tree: \(source.path)") }
+        var copyState = EvidenceCopyState(fileManager: fileManager)
+        let evidence = staging.appendingPathComponent("evidence", isDirectory: true)
         while let item = enumerator.nextObject() as? URL {
-            let classification = try classify(item, fileManager: fm)
-            let rel = relativePath(of: item, under: source)
-            let dest = evidenceRoot.appendingPathComponent(rel)
-            if classification == .directory {
-                try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-                continue
+            let relative = relativePath(of: item, under: source)
+            let destination = evidence.appendingPathComponent(relative)
+            if try classify(item, fileManager: fileManager) == .directory {
+                try fileManager.createDirectory(at: destination, withIntermediateDirectories: true)
+            } else {
+                try copyState.copyFile(item, relative: relative, to: destination)
             }
-            try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-            guard !pathEntryExistsOrIsSymlink(dest, fileManager: fm) else {
-                throw RootstockBlueError.io("Source paths collide at destination: \(rel)")
-            }
-            try fm.copyItem(at: item, to: dest)
-            filesCopied += 1
-            hashes["evidence/\(rel)"] = try Hashing.sha256File(at: dest)
         }
+        return (copyState.files, copyState.hashes)
+    }
 
-        // Custody hash manifest
-        let sorted = hashes.keys.sorted().map { "\(hashes[$0] ?? "")  \($0)" }
-        let hashFile = staging.appendingPathComponent("sha256sums.txt")
-        try (sorted.joined(separator: "\n") + "\n").write(to: hashFile, atomically: true, encoding: .utf8)
-
-        let manifest: [String: Any] = [
-            "type": "rootstock-blue-evidence-bundle",
-            "version": 1,
-            "actor": actor,
-            "source": sourceTree.path,
-            "files_copied": filesCopied,
-            "created_at": ISO8601DateFormatter().string(from: Date()),
-            "note": "Logical tree copy only - not FileVault unlock or bit-for-bit disk image",
-            "non_goals": AcquisitionPreflight.report().nonGoals,
-        ]
+    private static func writeBundleMetadata(staging: URL, sourceTree: URL, actor: String, copied: (files: Int, hashes: [String: String])) throws -> URL {
+        try writeHashManifest(staging: staging, hashes: copied.hashes)
         let manifestURL = staging.appendingPathComponent("acquisition_manifest.json")
-        let mdata = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
-        try mdata.write(to: manifestURL)
+        let manifest: [String: Any] = ["type": "rootstock-blue-evidence-bundle", "version": 1, "actor": actor, "source": sourceTree.path, "files_copied": copied.files, "created_at": ISO8601DateFormatter().string(from: Date()), "note": "Logical tree copy only - not FileVault unlock or bit-for-bit disk image", "non_goals": AcquisitionPreflight.report().nonGoals]
+        try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys]).write(to: manifestURL)
+        try CustodyLog.append(url: staging.appendingPathComponent("custody.jsonl"), event: CustodyEvent(actor: actor, action: "materialize_fixture_bundle", detail: "files=\(copied.files) source=\(sourceTree.path)"))
+        return manifestURL
+    }
 
-        let custodyURL = staging.appendingPathComponent("custody.jsonl")
-        try CustodyLog.append(
-            url: custodyURL,
-            event: CustodyEvent(
-                actor: actor,
-                action: "materialize_fixture_bundle",
-                detail: "files=\(filesCopied) source=\(sourceTree.path)"
-            )
-        )
+    private static func writeHashManifest(staging: URL, hashes: [String: String]) throws {
+        let contents = hashes.keys.sorted().map { "\(hashes[$0] ?? "")  \($0)" }.joined(separator: "\n") + "\n"
+        try contents.write(to: staging.appendingPathComponent("sha256sums.txt"), atomically: true, encoding: .utf8)
+    }
 
-        guard !pathEntryExistsOrIsSymlink(destination, fileManager: fm) else {
-            throw RootstockBlueError.io("Destination already exists and will not be modified: \(destination.path)")
-        }
-        try fm.moveItem(at: staging, to: destination)
-        published = true
-
-        return AcquisitionMaterializeResult(
-            destination: destination,
-            filesCopied: filesCopied,
-            custodyHashes: hashes,
-            manifestURL: destination.appendingPathComponent(manifestURL.lastPathComponent)
-        )
+    private static func publishStaging(_ staging: URL, to destination: URL, fileManager: FileManager) throws {
+        guard !pathEntryExistsOrIsSymlink(destination, fileManager: fileManager) else { throw RootstockBlueError.io("Destination already exists and will not be modified: \(destination.path)") }
+        try fileManager.moveItem(at: staging, to: destination)
     }
 
     /// Legacy entry - requires destination; does not implement FV unlock.
@@ -196,6 +154,22 @@ public enum LogicalAcquire {
     private enum SourceItemKind {
         case directory
         case regularFile
+    }
+
+    private struct EvidenceCopyState {
+        let fileManager: FileManager
+        var files = 0
+        var hashes: [String: String] = [:]
+
+        mutating func copyFile(_ source: URL, relative: String, to destination: URL) throws {
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            guard !LogicalAcquire.pathEntryExistsOrIsSymlink(destination, fileManager: fileManager) else {
+                throw RootstockBlueError.io("Source paths collide at destination: \(relative)")
+            }
+            try fileManager.copyItem(at: source, to: destination)
+            files += 1
+            hashes["evidence/\(relative)"] = try Hashing.sha256File(at: destination)
+        }
     }
 
     private static func validateSourceTree(_ source: URL, fileManager: FileManager) throws {

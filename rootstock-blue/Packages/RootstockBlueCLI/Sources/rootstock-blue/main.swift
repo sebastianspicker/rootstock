@@ -10,7 +10,8 @@ import RootstockBlueExport
 import RootstockBlueAcquire
 import RootstockBlueIntegrations
 
-@main
+RootstockBlueCLI.main()
+
 struct RootstockBlueCLI {
     static func main() {
         let args = Array(CommandLine.arguments.dropFirst())
@@ -18,115 +19,41 @@ struct RootstockBlueCLI {
             printUsage()
             exit(1)
         }
+        guard let handler = commandHandler(for: command) else {
+            fputs("Unknown command: \(command)\n", stderr)
+            printUsage()
+            exit(1)
+        }
 
         do {
-            switch command {
-            case "version", "--version", "-v":
-                print("rootstock-blue \(RootstockBlueVersion.string)")
-            case "help", "--help", "-h":
-                printUsage()
-            case "case":
-                try handleCase(Array(args.dropFirst()))
-            case "record":
-                try handleRecord(Array(args.dropFirst()))
-            case "query":
-                try handleQuery(Array(args.dropFirst()))
-            case "detect":
-                try handleDetect(Array(args.dropFirst()))
-            case "collect":
-                try handleCollect(Array(args.dropFirst()))
-            case "parse":
-                try handleParse(Array(args.dropFirst()))
-            case "export":
-                try handleExport(Array(args.dropFirst()))
-            case "report":
-                try handleReport(Array(args.dropFirst()))
-            case "ir":
-                try handleIR(Array(args.dropFirst()))
-            case "timeline":
-                try handleTimeline(Array(args.dropFirst()))
-            case "preflight":
-                try handlePreflight(Array(args.dropFirst()))
-            case "import":
-                try handleImport(Array(args.dropFirst()))
-            case "uls":
-                try handleULS(Array(args.dropFirst()))
-            case "santa":
-                try handleSanta(Array(args.dropFirst()))
-            default:
-                fputs("Unknown command: \(command)\n", stderr)
-                printUsage()
-                exit(1)
-            }
+            try handler(Array(args.dropFirst()))
         } catch {
             fputs("error: \(error.localizedDescription)\n", stderr)
             exit(1)
         }
     }
 
-    static func printUsage() {
-        print(
-            """
-            rootstock-blue - post-incident macOS DFIR + IR case platform (\(RootstockBlueVersion.string))
+    private static func commandHandler(for command: String) -> (([String]) throws -> Void)? {
+        let handlers: [String: ([String]) throws -> Void] = [
+            "version": showVersion, "--version": showVersion, "-v": showVersion,
+            "help": showUsage, "--help": showUsage, "-h": showUsage,
+            "case": handleCase, "record": handleRecord, "query": handleQuery,
+            "detect": handleDetect, "collect": handleCollect, "parse": handleParse,
+            "export": handleExport, "report": handleReport, "ir": handleIR,
+            "timeline": handleTimeline, "preflight": handlePreflight,
+            "import": handleImport, "uls": handleULS, "santa": handleSanta,
+        ]
+        return handlers[command]
+    }
 
-            Usage:
-              rootstock-blue version
-              rootstock-blue case create <path.rsbcase> [--name NAME]
-              rootstock-blue case open <path.rsbcase>
-              rootstock-blue case verify <path.rsbcase>
-              rootstock-blue parse <artifact-tree> --case <path.rsbcase>
-              rootstock-blue collect <pack> --case <path.rsbcase> --source <tree> [--content-root PATH] [--offline]
-              rootstock-blue import scan-json <scan.json> --case <path.rsbcase>
-              rootstock-blue import findings-jsonl <findings.jsonl> --case <path.rsbcase>
-              rootstock-blue record inject --case <path.rsbcase> --jsonl <events.jsonl> [--profile ir|research|quiet]
-              rootstock-blue timeline <path.rsbcase> [--limit N]
-              rootstock-blue query <path.rsbcase> <SQL>
-              rootstock-blue export jsonl <path.rsbcase> <out.jsonl>
-              rootstock-blue export family <path.rsbcase> <out.json>
-              rootstock-blue report markdown <path.rsbcase> <out.md>
-              rootstock-blue detect run --ruleset samples [--content-root PATH] [--case <path.rsbcase>]
-              rootstock-blue ir posture --case <path.rsbcase> [--source <artifact-tree>] [--live]
-              rootstock-blue ir harden --case <path.rsbcase> [--source <artifact-tree>] [--live]
-              rootstock-blue ir triage --case <path.rsbcase> --source <artifact-tree> [--content-root PATH] [--offline]
-              rootstock-blue santa ingest <log.jsonl> --case <path.rsbcase>
-              rootstock-blue preflight <pack> [--content-root PATH] [--offline]
-              rootstock-blue uls status
-              rootstock-blue uls parse <logarchive> --out <events.jsonl>
+    private static func showVersion(_ args: [String]) {
+        _ = args
+        print("rootstock-blue \(RootstockBlueVersion.string)")
+    }
 
-            Post-incident DFIR loop:
-              case create → parse rooted evidence (and/or collect)
-              → ir posture → ir harden → detect (fixtures or --case) → report markdown
-              → timeline + query → export jsonl  (custody + hashes updated)
-              Or one-shot: ir triage --case ... --source ... (parse+posture+harden+inventory+detect)
-
-            Parsers include: TCC, Quarantine, Autostart, Users, Safari, Chromium,
-            knowledgeC + Biome (PoL), RecentItems, Terminal, FSEvents, XProtect,
-            BasicInfo, InstallHistory, Dock, BTM, WIFI, CONFIGPROFILES, SSH,
-            CRON, LOGINITEMS, SYSTEMEXTENSIONS, UTMPX, BROWSER_EXTENSIONS,
-            GATEKEEPER, NETLOCATION, SHELLPROFILES, EMOND, SUDOERS, LAUNCHDOVERRIDES,
-            PRIVHELPERS, FOLDERACTIONS, LOGINHOOKS, AUTHPLUGINS, NETUSAGE, USBHISTORY,
-            KEYCHAINMETA, CODESIGN, ARD, SPOTLIGHT, TRASH, DOCREVISIONS, SAVEDSTATE,
-            FIREFOX, NOTIFICATIONS, QUICKLOOK, SCREENTIME, ICLOUD,
-            COOKIES, BOOKMARKS, OFFICEMRU, PRINTJOBS, NOTES, IDEVICEBACKUP, MSRDC, CLOUDSYNC,
-            PACKAGEKITDESIGN, ARCHIVEEXTRACTOR, INFOSTEALERPATH, TCCESFVISIBILITY.
-            IR posture: FileVault/Firewall/SIP/Gatekeeper/XProtect/MRT/FDA +
-            System Extensions / Screen Sharing / Remote Login / File Sharing /
-            Guest+auto-login / Lockdown Mode / Software Update catalog (confidence + ir.mode).
-            Hardening assessment: structured findings + remediation (not MDM/AV),
-            including Wave-7 cookie/bookmark/office/print/notes/idevice/msrdc/cloudsync and
-            Wave-8 packagekit/archive-extractor/stealer-path/tcc-esf-visibility controls.
-            Persistence inventory: Autostart + BTM + Cron + LoginItems + ShellProfiles +
-            Emond + PrivilegedHelpers + FolderActions + LoginHooks + AuthPlugins + SavedState + SSH keys.
-
-            Collect packs: triage-lite, forensic-triage, post-incident-ir, browser,
-            collab, persistence, logs, network-context, access-surface.
-
-            Live ES mock inject works without FDA/entitlement; AUTH/block remains off.
-            Santa: integrate-only decision log ingest (JSONL) → case timeline; no rule engine.
-            ULS requires ROOTSTOCK_BLUE_ULS_BINARY (Mandiant macos-unifiedlogs); honest fail if unset.
-            Non-goals: FileVault/SE crack, multi-OS EDR, SIEM, MDM, RAM forensics.
-            """
-        )
+    private static func showUsage(_ args: [String]) {
+        _ = args
+        printUsage()
     }
 
     static func repoContentRoot() -> URL {
@@ -143,29 +70,39 @@ struct RootstockBlueCLI {
             throw RootstockBlueError.io("case requires create|open|verify")
         }
         switch sub {
-        case "create":
-            guard args.count >= 2 else { throw RootstockBlueError.io("usage: case create <path>") }
-            var name: String?
-            if let idx = args.firstIndex(of: "--name"), args.count > idx + 1 {
-                name = args[idx + 1]
-            }
-            let url = URL(fileURLWithPath: args[1])
-            let pkg = try CasePackage.create(at: url, name: name)
-            print("created \(pkg.rootURL.path)")
-            print("case_id \(pkg.manifest.caseID.uuidString)")
-        case "open":
-            guard args.count >= 2 else { throw RootstockBlueError.io("usage: case open <path>") }
-            let pkg = try CasePackage.open(at: URL(fileURLWithPath: args[1]))
-            print("opened \(pkg.manifest.name) (\(pkg.manifest.caseID.uuidString))")
-        case "verify":
-            guard args.count >= 2 else { throw RootstockBlueError.io("usage: case verify <path>") }
-            let pkg = try CasePackage.open(at: URL(fileURLWithPath: args[1]))
-            try pkg.verifyLayout()
-            let events = try pkg.loadAllEvents()
-            print("ok \(pkg.rootURL.path) events=\(events.count) jsonl_files=\(pkg.eventJSONLFileCount())")
+        case "create": try createCase(args)
+        case "open": try openCase(args)
+        case "verify": try verifyCase(args)
         default:
             throw RootstockBlueError.io("unknown case subcommand \(sub)")
         }
+    }
+
+    private static func createCase(_ args: [String]) throws {
+        guard args.count >= 2 else { throw RootstockBlueError.io("usage: case create <path>") }
+        let name = optionValue("--name", in: args)
+        let package = try CasePackage.create(at: URL(fileURLWithPath: args[1]), name: name)
+        print("created \(package.rootURL.path)")
+        print("case_id \(package.manifest.caseID.uuidString)")
+    }
+
+    private static func openCase(_ args: [String]) throws {
+        guard args.count >= 2 else { throw RootstockBlueError.io("usage: case open <path>") }
+        let package = try CasePackage.open(at: URL(fileURLWithPath: args[1]))
+        print("opened \(package.manifest.name) (\(package.manifest.caseID.uuidString))")
+    }
+
+    private static func verifyCase(_ args: [String]) throws {
+        guard args.count >= 2 else { throw RootstockBlueError.io("usage: case verify <path>") }
+        let package = try CasePackage.open(at: URL(fileURLWithPath: args[1]))
+        try package.verifyLayout()
+        let events = try package.loadAllEvents()
+        print("ok \(package.rootURL.path) events=\(events.count) jsonl_files=\(package.eventJSONLFileCount())")
+    }
+
+    private static func optionValue(_ option: String, in args: [String]) -> String? {
+        guard let index = args.firstIndex(of: option), args.count > index + 1 else { return nil }
+        return args[index + 1]
     }
 
     static func handleRecord(_ args: [String]) throws {
@@ -278,162 +215,6 @@ struct RootstockBlueCLI {
         }
         let stats = try CaseReport.exportMarkdown(package: pkg, to: out, findings: findings)
         print("report \(out.path) events=\(stats.eventCount) findings=\(stats.findings.count) custody=\(stats.custodyLines)")
-    }
-
-    static func handleIR(_ args: [String]) throws {
-        guard let sub = args.first else {
-            throw RootstockBlueError.io("usage: ir posture|harden|triage ...")
-        }
-        switch sub {
-        case "posture":
-            try handleIRPosture(Array(args.dropFirst()))
-        case "harden":
-            try handleIRHarden(Array(args.dropFirst()))
-        case "triage":
-            try handleIRTriage(Array(args.dropFirst()))
-        default:
-            throw RootstockBlueError.io("usage: ir posture|harden --case <path> [--source <tree>] [--live] | ir triage --case <path> --source <tree>")
-        }
-    }
-
-    static func handleIRPosture(_ args: [String]) throws {
-        guard let caseIdx = args.firstIndex(of: "--case"), args.count > caseIdx + 1 else {
-            throw RootstockBlueError.io("ir posture requires --case <path.rsbcase>")
-        }
-        let pkg = try CasePackage.open(at: URL(fileURLWithPath: args[caseIdx + 1]))
-        let live = args.contains("--live")
-        let events: [EventEnvelope]
-        let mode: String
-        if let srcIdx = args.firstIndex(of: "--source"), args.count > srcIdx + 1 {
-            let source = ImageSource.infer(from: URL(fileURLWithPath: args[srcIdx + 1]))
-            events = try HostIRPosture.enumerateOffline(source: source)
-            mode = "offline"
-        } else if live {
-            events = HostIRPosture.enumerateLive(runStatusProbes: true)
-            mode = "live"
-        } else {
-            events = HostIRPosture.enumerateLive(runStatusProbes: true)
-            mode = "live"
-        }
-        let n = try HostIRPosture.writeToCase(events, package: pkg, mode: mode)
-        print("ir_posture mode=\(mode) events_written=\(n)")
-        for e in events.prefix(20) {
-            let summary = e.fields["security.product"]
-                ?? e.fields["host.os_version"]
-                ?? e.fields["protection.name"]
-                ?? e.eventType
-            print("  \(e.eventType) \(summary)")
-        }
-    }
-
-    /// Hardening / defense assessment with structured remediation (live or offline).
-    static func handleIRHarden(_ args: [String]) throws {
-        guard let caseIdx = args.firstIndex(of: "--case"), args.count > caseIdx + 1 else {
-            throw RootstockBlueError.io("ir harden requires --case <path.rsbcase> [--source <tree>] [--live]")
-        }
-        let pkg = try CasePackage.open(at: URL(fileURLWithPath: args[caseIdx + 1]))
-        let live = args.contains("--live")
-        let findings: [HardeningAssessment.Finding]
-        let mode: String
-        if let srcIdx = args.firstIndex(of: "--source"), args.count > srcIdx + 1 {
-            let source = ImageSource.infer(from: URL(fileURLWithPath: args[srcIdx + 1]))
-            findings = try HardeningAssessment.assessOffline(source: source)
-            mode = "offline"
-        } else if live {
-            findings = HardeningAssessment.assessLive(runStatusProbes: true)
-            mode = "live"
-        } else {
-            findings = HardeningAssessment.assessLive(runStatusProbes: true)
-            mode = "live"
-        }
-        let n = try HardeningAssessment.writeToCase(findings, package: pkg, mode: mode)
-        let fails = findings.filter { $0.status == "fail" }.count
-        let warns = findings.filter { $0.status == "warn" }.count
-        print("ir_harden mode=\(mode) findings=\(n) fail=\(fails) warn=\(warns)")
-        for f in findings {
-            print("  [\(f.severity)/\(f.status)] \(f.control): \(f.title)")
-            if f.status == "fail" || f.status == "warn" {
-                print("    remediation: \(f.remediation)")
-            }
-        }
-    }
-
-    /// Full offline IR loop: parse → posture → harden → persistence inventory → detect.
-    static func handleIRTriage(_ args: [String]) throws {
-        guard let caseIdx = args.firstIndex(of: "--case"), args.count > caseIdx + 1 else {
-            throw RootstockBlueError.io("usage: ir triage --case <path.rsbcase> --source <tree> [--content-root PATH] [--offline]")
-        }
-        guard let srcIdx = args.firstIndex(of: "--source"), args.count > srcIdx + 1 else {
-            throw RootstockBlueError.io("ir triage requires --source <artifact-tree>")
-        }
-        var contentRoot = repoContentRoot()
-        if let idx = args.firstIndex(of: "--content-root"), args.count > idx + 1 {
-            contentRoot = URL(fileURLWithPath: args[idx + 1])
-        }
-
-        let pkg = try CasePackage.open(at: URL(fileURLWithPath: args[caseIdx + 1]))
-        let sourceURL = URL(fileURLWithPath: args[srcIdx + 1])
-        let source = ImageSource.infer(from: sourceURL)
-
-        // 1) Offline parse (all registered plugins)
-        let engine = ForensicsEngine()
-        let parsed = try engine.parse(source: source, into: pkg)
-
-        // 2) IR posture (offline honesty)
-        let postureEvents = try HostIRPosture.enumerateOffline(source: source)
-        let postureN = try HostIRPosture.writeToCase(postureEvents, package: pkg, mode: "offline")
-
-        // 3) Hardening / defense assessment with remediation
-        let hardenFindings = try HardeningAssessment.assessOffline(source: source)
-        let hardenN = try HardeningAssessment.writeToCase(hardenFindings, package: pkg, mode: "offline")
-        let hardenFails = hardenFindings.filter { $0.status == "fail" }.count
-
-        // 4) Unified persistence inventory (incl. shell profiles + emond)
-        let inventory = try PersistenceInventory.enumerate(source: source)
-        let invN = try PersistenceInventory.writeToCase(inventory, package: pkg)
-        let summary = PersistenceInventory.summarize(inventory)
-
-        // 5) Detect against case timeline
-        let rulesDir = contentRoot.appendingPathComponent("detections/samples")
-        let timeline = try CaseTimeline.merged(from: pkg)
-        var findings: [Finding] = []
-        if FileManager.default.fileExists(atPath: rulesDir.path) {
-            findings = try DetectionEngine().evaluate(rulesDirectory: rulesDir, events: timeline)
-        }
-
-        print("ir_triage mode=offline")
-        print("parsed=\(parsed) posture=\(postureN) harden=\(hardenN) harden_fail=\(hardenFails) persistence=\(invN) timeline=\(timeline.count) findings=\(findings.count)")
-        if !summary.isEmpty {
-            let kinds = summary.keys.sorted().map { "\($0)=\(summary[$0] ?? 0)" }.joined(separator: " ")
-            print("persistence_kinds \(kinds)")
-        }
-        // Surface wave-3/4/5/6 plugin hits for operator visibility
-        let wavePlugins = [
-            "SHELLPROFILES", "EMOND", "SUDOERS", "LAUNCHDOVERRIDES", "HARDEN",
-            "PRIVHELPERS", "FOLDERACTIONS", "LOGINHOOKS",
-            "AUTHPLUGINS", "NETUSAGE", "USBHISTORY", "KEYCHAINMETA", "CODESIGN", "ARD",
-            "SPOTLIGHT", "TRASH", "DOCREVISIONS", "SAVEDSTATE", "FIREFOX",
-            "NOTIFICATIONS", "QUICKLOOK", "SCREENTIME", "ICLOUD",
-        ]
-        var pluginCounts: [String: Int] = [:]
-        for e in timeline {
-            if wavePlugins.contains(e.sourcePlugin) {
-                pluginCounts[e.sourcePlugin, default: 0] += 1
-            }
-        }
-        if !pluginCounts.isEmpty {
-            let parts = pluginCounts.keys.sorted().map { "\($0)=\(pluginCounts[$0] ?? 0)" }.joined(separator: " ")
-            print("wave_plugins \(parts)")
-        }
-        for f in hardenFindings.filter({ $0.status == "fail" || $0.status == "warn" }).prefix(15) {
-            print("harden [\(f.severity)/\(f.status)] \(f.control): \(f.title)")
-        }
-        for f in findings.prefix(30) {
-            print("- [\(f.severity)] \(f.ruleID): \(f.title)")
-        }
-        if findings.isEmpty {
-            print("note: zero findings on case timeline (rules may need field alignment)")
-        }
     }
 
     static func handleCollect(_ args: [String]) throws {

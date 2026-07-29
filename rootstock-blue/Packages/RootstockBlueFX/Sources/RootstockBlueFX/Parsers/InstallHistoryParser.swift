@@ -45,49 +45,34 @@ public struct InstallHistoryParser: ArtifactParser {
             return []
         }
 
-        var out: [EventEnvelope] = []
-        for (idx, entry) in entries.enumerated() {
-            let displayName = stringValue(entry["displayName"]) ?? stringValue(entry["DisplayName"]) ?? ""
-            let version = stringValue(entry["displayVersion"]) ?? stringValue(entry["DisplayVersion"]) ?? ""
-            let process = stringValue(entry["processName"]) ?? stringValue(entry["ProcessName"]) ?? ""
-            let contentType = stringValue(entry["contentType"]) ?? stringValue(entry["ContentType"]) ?? ""
-            let packages = stringArray(entry["packageIdentifiers"] ?? entry["PackageIdentifiers"])
-            let date = parseDate(entry["date"] ?? entry["Date"]) ?? Date(timeIntervalSince1970: 0)
+        return entries.enumerated().compactMap { installEvent(entry: $0.element, index: $0.offset, sourceURL: url) }
+    }
 
-            guard !displayName.isEmpty || !packages.isEmpty else { continue }
-
-            let pkgKey = packages.first ?? displayName
-            var entities: [EntityID] = [
-                EntityID(kind: .file, value: "pkg:\(pkgKey)"),
-            ]
-            if !process.isEmpty {
-                entities.append(EntityID(kind: .process, value: "name=\(process)"))
-            }
-
-            out.append(
-                EventEnvelope(
-                    eventTime: date,
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "INSTALLHISTORY",
-                    eventType: "software.install",
-                    entityRefs: entities,
-                    fields: [
-                        "software.display_name": displayName,
-                        "software.version": version,
-                        "software.process_name": process,
-                        "software.content_type": contentType,
-                        "software.package_identifiers": packages.joined(separator: ","),
-                        "software.install_index": String(idx),
-                        "software.source_path": ArtifactRoot.pathKey(url),
-                        FieldTaxonomy.processPath: process,
-                        FieldTaxonomy.eventType: "software.install",
-                    ],
-                    rawRef: ArtifactRoot.pathKey(url),
-                    confidence: 0.96
-                )
+    private func installEvent(entry: [String: Any], index: Int, sourceURL: URL) -> EventEnvelope? {
+        let displayName = stringValue(entry["displayName"]) ?? stringValue(entry["DisplayName"]) ?? ""
+        let packages = stringArray(entry["packageIdentifiers"] ?? entry["PackageIdentifiers"])
+        guard !displayName.isEmpty || !packages.isEmpty else { return nil }
+        let process = stringValue(entry["processName"]) ?? stringValue(entry["ProcessName"]) ?? ""
+        let rawRef = ArtifactRoot.pathKey(sourceURL)
+        var entities: [EntityID] = [EntityID(kind: .file, value: "pkg:\(packages.first ?? displayName)")]
+        if !process.isEmpty { entities.append(EntityID(kind: .process, value: "name=\(process)")) }
+        let fields = ["software.display_name": displayName, "software.version": stringValue(entry["displayVersion"]) ?? stringValue(entry["DisplayVersion"]) ?? "", "software.process_name": process, "software.content_type": stringValue(entry["contentType"]) ?? stringValue(entry["ContentType"]) ?? "", "software.package_identifiers": packages.joined(separator: ","), "software.install_index": String(index), "software.source_path": rawRef, FieldTaxonomy.processPath: process, FieldTaxonomy.eventType: "software.install"]
+        return EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "software.install",
+                label: "INSTALLHISTORY"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(entry["date"] ?? entry["Date"]) ?? Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: entities,
+                properties: fields,
+                provenance: rawRef,
+                confidence: 0.96
             )
-        }
-        return out
+        )
     }
 }

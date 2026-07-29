@@ -88,13 +88,18 @@ public struct KnowledgeCParser: ArtifactParser {
         }
 
         return EventEnvelope(
-            eventTime: start,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "KNOWLEDGEC",
-            eventType: eventType,
-            entityRefs: refs,
-            fields: [
+            identity: EventEnvelope.Identity(
+                kind: eventType,
+                label: "KNOWLEDGEC"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: start,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: refs,
+                properties: [
                 "pol.stream": stream,
                 "pol.value": value,
                 "pol.duration_seconds": String(Int(duration)),
@@ -102,8 +107,9 @@ public struct KnowledgeCParser: ArtifactParser {
                 FieldTaxonomy.eventType: eventType,
                 FieldTaxonomy.userName: inferUser(from: dbPath) ?? "",
             ],
-            rawRef: ArtifactRoot.pathKey(dbPath),
-            confidence: 0.85
+                provenance: ArtifactRoot.pathKey(dbPath),
+                confidence: 0.85
+            )
         )
     }
 

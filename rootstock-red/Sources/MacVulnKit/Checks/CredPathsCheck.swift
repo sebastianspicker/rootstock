@@ -12,24 +12,12 @@ public struct CredPathsCheck: Check {
         let existing = state.credPaths.filter(\.exists)
         guard !existing.isEmpty else { return [] }
         return [
-            Finding(
-                id: Self.id,
-                title: "Credential-related paths present (metadata only)",
-                severity: .info,
-                confidence: .high,
-                category: .auth,
-                evidence: existing.map {
+            Finding(id: Self.id, title: "Credential-related paths present (metadata only)", severity: .info, category: .auth, resolution: .init(evidence: existing.map {
                     Evidence(type: "cred_path", path: $0.path, detail: "kind=\($0.kind)")
-                },
-                attackTechniques: ["T1552"],
-                remediation: [
+                }, attackTechniques: ["T1552"], remediation: [
                     "Ensure secrets are not world-readable",
                     "Rootstock Red does not read key material in assess mode",
-                ],
-                dryRunSafe: true,
-                opsecScore: 10,
-                esfExpected: ["OPEN"]
-            ),
+                ]), runtime: .init(confidence: .high, dryRunSafe: true, opsecScore: 10, esfExpected: ["OPEN"])),
         ]
     }
 }

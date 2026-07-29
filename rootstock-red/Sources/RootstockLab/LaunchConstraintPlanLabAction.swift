@@ -13,13 +13,20 @@ public struct LaunchConstraintPlanLabAction: LabAction {
         request: LabActionRequest,
         context: EvaluationContext
     ) async throws -> ActionResult {
-
         try SafetyRails.ensureLabConsent(context: context, policy: Self.consent)
-        let labRoot = LabPaths.resolveLabRoot(params: request.parameters)
         let target = request.parameters["target"] ?? "sample.app"
-        let markerURL = labRoot
+        let markerURL = LabPaths.resolveLabRoot(params: request.parameters)
             .appendingPathComponent("launch-constraint-plan", isDirectory: true)
             .appendingPathComponent("\(Self.sanitize(target)).plan.md")
+        return try execute(request: request, context: context, target: target, markerURL: markerURL)
+    }
+
+    private func execute(
+        request: LabActionRequest,
+        context: EvaluationContext,
+        target: String,
+        markerURL: URL
+    ) throws -> ActionResult {
         let body = """
         # rootstock-red-lab launch-constraint plan
         target: \(target)
@@ -32,38 +39,51 @@ public struct LaunchConstraintPlanLabAction: LabAction {
         inject: forbidden
         ROOTSTOCK_RED_LAB_LAUNCH_CONSTRAINT=1
         """
-        let copy = FileMarkerCopy(
-            planMessage: """
+        return try LabMarkerLifecycle.runFileMarker(
+            FileMarkerLifecycleRequest(
+                actionId: Self.id,
+                operation: request.operation,
+                markerURL: markerURL,
+                body: body,
+                contextDryRun: context.dryRun,
+                copy: markerCopy(markerURL: markerURL, target: target)
+            )
+        )
+    }
+
+    private func markerCopy(markerURL: URL, target: String) -> FileMarkerCopy {
+        FileMarkerCopy(
+            plan: FileMarkerPlanCopy(
+                message: """
             Dry-run launch-constraint plan for target=\(target): would write plan at \
             \(markerURL.path). No process injection.
             """,
-            planSteps: [
+                steps: [
                 "Document codesign/HR/LV/get-task-allow review for \(target)",
                 "Note launch-constraint artifacts if present",
                 "Purple: ESF OPEN/EXEC expected for codesign probes",
                 "Never perform runtime injection from lab",
             ],
-            planCleanup: ["Delete \(markerURL.path)"],
-            applyDryRunMessage: "Dry-run: would write launch-constraint plan at \(markerURL.path)",
-            applySuccessMessage: "Wrote launch-constraint plan at \(markerURL.path)",
-            applySteps: ["Write launch-constraint plan"],
-            applyCleanup: ["Delete \(markerURL.path)"],
-            presentMessage: "Launch-constraint plan present",
-            absentMessage: "Launch-constraint plan absent",
-            statusPresentCleanup: ["Delete \(markerURL.path)"],
-            statusAbsentCleanup: ["No artifact"],
-            removeDryRunMessage: { exists in "Dry-run: would delete launch-constraint plan (exists=\(exists))" },
-            removeSuccessMessage: { exists in "Removed launch-constraint plan (wasPresent=\(exists))" },
-            removeSteps: ["Delete \(markerURL.path)"],
-            removeCleanup: ["No runtime inject was performed"]
-        )
-        return try LabMarkerLifecycle.runFileMarker(
-            actionId: Self.id,
-            operation: request.operation,
-            markerURL: markerURL,
-            body: body,
-            contextDryRun: context.dryRun,
-            copy: copy
+                cleanup: ["Delete \(markerURL.path)"]
+            ),
+            apply: FileMarkerApplyCopy(
+                dryRunMessage: "Dry-run: would write launch-constraint plan at \(markerURL.path)",
+                successMessage: "Wrote launch-constraint plan at \(markerURL.path)",
+                steps: ["Write launch-constraint plan"],
+                cleanup: ["Delete \(markerURL.path)"]
+            ),
+            status: FileMarkerStatusCopy(
+                presentMessage: "Launch-constraint plan present",
+                absentMessage: "Launch-constraint plan absent",
+                presentCleanup: ["Delete \(markerURL.path)"],
+                absentCleanup: ["No artifact"]
+            ),
+            remove: FileMarkerRemoveCopy(
+                dryRunMessage: { exists in "Dry-run: would delete launch-constraint plan (exists=\(exists))" },
+                successMessage: { exists in "Removed launch-constraint plan (wasPresent=\(exists))" },
+                steps: ["Delete \(markerURL.path)"],
+                cleanup: ["No runtime inject was performed"]
+            )
         )
     }
 

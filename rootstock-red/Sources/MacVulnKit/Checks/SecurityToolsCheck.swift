@@ -12,41 +12,18 @@ public struct SecurityToolsDetectedCheck: Check {
         let present = state.securityProducts.filter(\.present)
         guard !present.isEmpty else {
             return [
-                Finding(
-                    id: "\(Self.id).none",
-                    title: "No common security products detected by path heuristic",
-                    severity: .low,
-                    confidence: .low,
-                    category: .securityProduct,
-                    evidence: [
+                Finding(id: "\(Self.id).none", title: "No common security products detected by path heuristic", severity: .low, category: .securityProduct, resolution: .init(evidence: [
                         Evidence(
                             type: "note",
                             detail: "Heuristic only - EDR may still be present under other paths"
                         ),
-                    ],
-                    attackTechniques: ["T1518.001"],
-                    remediation: ["Confirm endpoint security coverage via MDM inventory"],
-                    dryRunSafe: true,
-                    opsecScore: 5
-                ),
+                    ], attackTechniques: ["T1518.001"], remediation: ["Confirm endpoint security coverage via MDM inventory"]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 5)),
             ]
         }
         return [
-            Finding(
-                id: Self.id,
-                title: "Security products detected (\(present.count))",
-                severity: .info,
-                confidence: .medium,
-                category: .securityProduct,
-                evidence: present.map {
+            Finding(id: Self.id, title: "Security products detected (\(present.count))", severity: .info, category: .securityProduct, resolution: .init(evidence: present.map {
                     Evidence(type: "product", path: $0.path, detail: $0.name)
-                },
-                attackTechniques: ["T1518.001"],
-                remediation: ["Informational for OPSEC planning and purple-team validation"],
-                dryRunSafe: true,
-                opsecScore: 8,
-                esfExpected: ["OPEN"]
-            ),
+                }, attackTechniques: ["T1518.001"], remediation: ["Informational for OPSEC planning and purple-team validation"]), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 8, esfExpected: ["OPEN"])),
         ]
     }
 }

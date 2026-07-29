@@ -27,11 +27,17 @@ final class CoreTests: XCTestCase {
 
     func testEventEnvelopeCodable() throws {
         let e = EventEnvelope(
-            source: .es,
-            sourcePlugin: "test",
-            eventType: "NOTIFY_EXEC",
-            entityRefs: [.process(pid: 1, path: "/bin/ls")],
-            fields: [FieldTaxonomy.processPath: "/bin/ls"]
+            identity: EventEnvelope.Identity(
+                kind: "NOTIFY_EXEC",
+                label: "test"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .es
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [.process(pid: 1, path: "/bin/ls")],
+                properties: [FieldTaxonomy.processPath: "/bin/ls"]
+            )
         )
         let data = try JSONEncoder().encode(e)
         let decoded = try JSONDecoder().decode(EventEnvelope.self, from: data)
@@ -41,10 +47,16 @@ final class CoreTests: XCTestCase {
 
     func testEventJSONLRoundTrip() throws {
         let e = EventEnvelope(
-            source: .es,
-            sourcePlugin: "test",
-            eventType: "NOTIFY_EXEC",
-            fields: [FieldTaxonomy.processPath: "/bin/ls"]
+            identity: EventEnvelope.Identity(
+                kind: "NOTIFY_EXEC",
+                label: "test"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .es
+            ),
+            payload: EventEnvelope.Payload(
+                properties: [FieldTaxonomy.processPath: "/bin/ls"]
+            )
         )
         let data = try EventJSONL.encode([e])
         let text = String(data: data, encoding: .utf8)!
@@ -55,7 +67,18 @@ final class CoreTests: XCTestCase {
     }
 
     func testEventJSONLSkipInvalid() throws {
-        let good = EventEnvelope(source: .synthetic, sourcePlugin: "t", eventType: "x")
+        let good = EventEnvelope(
+            identity: EventEnvelope.Identity(
+                kind: "x",
+                label: "t"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .synthetic
+            ),
+            payload: EventEnvelope.Payload(
+
+            )
+        )
         let line = try EventJSONL.encodeLine(good)
         let mixed = String(data: line, encoding: .utf8)! + "{not-json}\n"
         let skipped = try EventJSONL.decode(text: mixed, skipInvalid: true)

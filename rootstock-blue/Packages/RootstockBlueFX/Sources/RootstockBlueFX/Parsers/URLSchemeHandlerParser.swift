@@ -33,10 +33,8 @@ public struct URLSchemeHandlerParser: ArtifactParser {
         for url in root.enumerate(matching: { url in
             let name = url.lastPathComponent
             return name == "url_scheme_handler.json" || name == "url_scheme_handler.jsonl"
-        }) {
-            if seen.insert(url) {
+        }) where seen.insert(url) {
                 events.append(contentsOf: parseFile(at: url))
-            }
         }
 
         return events
@@ -55,58 +53,46 @@ public struct URLSchemeHandlerParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], sourceURL: URL) -> EventEnvelope? {
-        let path = stringish(item["handler_path"])
-            ?? stringish(item["path"])
-            ?? stringish(item["launch_services_path"])
-            ?? stringish(item["opener_path"])
-            ?? ""
-        let scheme = stringish(item["scheme"])
-            ?? stringish(item["url_scheme"])
-            ?? ""
-        let kind = (stringish(item["handler_kind"])
-            ?? stringish(item["kind"])
-            ?? "launch_services").lowercased()
+        guard let details = handlerDetails(from: item) else { return nil }
+        let fields = handlerFields(item: item, details: details, sourceURL: sourceURL)
+        return handlerEnvelope(item: item, sourceURL: sourceURL, details: details, fields: fields)
+    }
+
+    private struct HandlerDetails {
+        let path: String
+        let scheme: String
+        let kind: String
+        let risk: [String]
+    }
+
+    private func handlerDetails(from item: [String: Any]) -> HandlerDetails? {
+        let path = stringish(item["handler_path"]) ?? stringish(item["path"]) ?? stringish(item["launch_services_path"]) ?? stringish(item["opener_path"]) ?? ""
+        let scheme = stringish(item["scheme"]) ?? stringish(item["url_scheme"]) ?? ""
         guard !path.isEmpty || !scheme.isEmpty else { return nil }
+        let kind = (stringish(item["handler_kind"]) ?? stringish(item["kind"]) ?? "launch_services").lowercased()
+        return HandlerDetails(path: path, scheme: scheme, kind: kind, risk: handlerRisk(item: item, path: path, scheme: scheme))
+    }
 
-        var risk: [String] = []
-        if let tags = stringish(item["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-        if boolish(item["handler_surface"]) == true || !path.isEmpty {
-            if !risk.contains("handler_surface") { risk.append("handler_surface") }
-        }
-        if boolish(item["third_party_handler"]) == true, !risk.contains("third_party_handler") {
-            risk.append("third_party_handler")
-        }
-        if !scheme.isEmpty, !risk.contains("custom_scheme") {
-            risk.append("custom_scheme")
-        }
+    private func handlerRisk(item: [String: Any], path: String, scheme: String) -> [String] {
+        var risk = (stringish(item["risk_tags"]) ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        if boolish(item["handler_surface"]) == true || !path.isEmpty { appendRisk("handler_surface", to: &risk) }
+        if boolish(item["third_party_handler"]) == true { appendRisk("third_party_handler", to: &risk) }
+        if !scheme.isEmpty { appendRisk("custom_scheme", to: &risk) }
+        return risk
+    }
 
-        let user = stringish(item["user"]) ?? inferUser(from: path) ?? inferUser(from: sourceURL.path) ?? ""
-        var fields: [String: String] = [
-            "url_scheme.handler_path": path,
-            "url_scheme.scheme": scheme,
-            "url_scheme.handler_kind": kind,
-            "url_scheme.notes": stringish(item["notes"]) ?? "URL scheme handler path presence only",
-            FieldTaxonomy.eventType: "url_scheme.handler",
-            FieldTaxonomy.userName: user,
-        ]
-        if !risk.isEmpty {
-            fields["url_scheme.risk_tags"] = risk.joined(separator: ",")
-        }
+    private func appendRisk(_ tag: String, to risk: inout [String]) {
+        if !risk.contains(tag) { risk.append(tag) }
+    }
 
-        return EventEnvelope(
-            eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "URLSCHEMEHANDLER",
-            eventType: "url_scheme.handler",
-            entityRefs: [
-                EntityID(kind: .host, value: "url_scheme|\(scheme.isEmpty ? path : scheme)"),
-            ],
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.88
-        )
+    private func handlerFields(item: [String: Any], details: HandlerDetails, sourceURL: URL) -> [String: String] {
+        let user = stringish(item["user"]) ?? inferUser(from: details.path) ?? inferUser(from: sourceURL.path) ?? ""
+        var fields = ["url_scheme.handler_path": details.path, "url_scheme.scheme": details.scheme, "url_scheme.handler_kind": details.kind, "url_scheme.notes": stringish(item["notes"]) ?? "URL scheme handler path presence only", FieldTaxonomy.eventType: "url_scheme.handler", FieldTaxonomy.userName: user]
+        if !details.risk.isEmpty { fields["url_scheme.risk_tags"] = details.risk.joined(separator: ",") }
+        return fields
+    }
+
+    private func handlerEnvelope(item: [String: Any], sourceURL: URL, details: HandlerDetails, fields: [String: String]) -> EventEnvelope {
+        EventEnvelope(identity: EventEnvelope.Identity(kind: "url_scheme.handler", label: "URLSCHEMEHANDLER"), capture: EventEnvelope.Capture(source: .parser, eventTime: parseDate(item["timestamp"] ?? item["seen_at"]) ?? Date(), collectedAt: Date()), payload: EventEnvelope.Payload(entityRefs: [EntityID(kind: .host, value: "url_scheme|\(details.scheme.isEmpty ? details.path : details.scheme)")], properties: fields, provenance: ArtifactRoot.pathKey(sourceURL), confidence: 0.88))
     }
 }

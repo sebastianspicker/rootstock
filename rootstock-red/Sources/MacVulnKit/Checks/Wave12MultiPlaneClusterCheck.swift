@@ -18,57 +18,14 @@ public struct Wave12MultiPlaneClusterCheck: Check {
     }
 
     private static func pairPlanes(state: CollectedState) -> [String] {
-        var planes: [String] = []
-
-        let webloc_inetloc = state.weblocInetlocDelivery
-        if webloc_inetloc?.deliverySurfacePresent == true
-            || ((webloc_inetloc?.weblocSamplePaths.count ?? 0) >= 1)
-            || ((webloc_inetloc?.inetlocSamplePaths.count ?? 0) >= 1)
-        {
-            planes.append("webloc_inetloc")
-        }
-
-        let mail_rules = state.mailRulesAutomation
-        if mail_rules?.rulesSurfacePresent == true
-            || ((mail_rules?.mailAppPaths.count ?? 0) >= 1)
-            || ((mail_rules?.rulesPlistPaths.count ?? 0) >= 1)
-        {
-            planes.append("mail_rules")
-        }
-
-        let unified_log = state.unifiedLogObservation
-        if unified_log?.observationSurfacePresent == true
-            || ((unified_log?.logToolPaths.count ?? 0) >= 1)
-            || ((unified_log?.logarchiveHints.count ?? 0) >= 1)
-        {
-            planes.append("unified_log")
-        }
-
-        let dock_persist = state.dockPersistenceSurface
-        if dock_persist?.dockSurfacePresent == true
-            || ((dock_persist?.dockPlistPaths.count ?? 0) >= 1)
-            || ((dock_persist?.recentItemsPaths.count ?? 0) >= 1)
-        {
-            planes.append("dock_persist")
-        }
-
-        let osascript_scpt = state.osascriptScptDelivery
-        if osascript_scpt?.scptSurfacePresent == true
-            || ((osascript_scpt?.osaToolPaths.count ?? 0) >= 1)
-            || ((osascript_scpt?.scriptEditorPaths.count ?? 0) >= 1)
-        {
-            planes.append("osascript_scpt")
-        }
-
-        let network_share = state.networkShareMount
-        if network_share?.shareSurfacePresent == true
-            || ((network_share?.smbClientPaths.count ?? 0) >= 1)
-            || ((network_share?.netAuthPaths.count ?? 0) >= 1)
-        {
-            planes.append("network_share")
-        }
-
-        return planes
+        presentPlaneNames([
+            .init(name: "webloc_inetloc", isPresent: hasPlaneSurface(state.weblocInetlocDelivery, isPresent: { $0.deliverySurfacePresent }, primaryCount: { $0.weblocSamplePaths.count }, secondaryCount: { $0.inetlocSamplePaths.count })),
+            .init(name: "mail_rules", isPresent: hasPlaneSurface(state.mailRulesAutomation, isPresent: { $0.rulesSurfacePresent }, primaryCount: { $0.mailAppPaths.count }, secondaryCount: { $0.rulesPlistPaths.count })),
+            .init(name: "unified_log", isPresent: hasPlaneSurface(state.unifiedLogObservation, isPresent: { $0.observationSurfacePresent }, primaryCount: { $0.logToolPaths.count }, secondaryCount: { $0.logarchiveHints.count })),
+            .init(name: "dock_persist", isPresent: hasPlaneSurface(state.dockPersistenceSurface, isPresent: { $0.dockSurfacePresent }, primaryCount: { $0.dockPlistPaths.count }, secondaryCount: { $0.recentItemsPaths.count })),
+            .init(name: "osascript_scpt", isPresent: hasPlaneSurface(state.osascriptScptDelivery, isPresent: { $0.scptSurfacePresent }, primaryCount: { $0.osaToolPaths.count }, secondaryCount: { $0.scriptEditorPaths.count })),
+            .init(name: "network_share", isPresent: hasPlaneSurface(state.networkShareMount, isPresent: { $0.shareSurfacePresent }, primaryCount: { $0.smbClientPaths.count }, secondaryCount: { $0.netAuthPaths.count })),
+        ])
     }
 
     private static func amplifiers(state: CollectedState) -> [String] {
@@ -97,15 +54,8 @@ public struct Wave12MultiPlaneClusterCheck: Check {
             severity = .low
         }
 
-        return Finding(
-            id: "\(id).multi_plane",
-            title:
-                "Wave-12 multi-plane compound: \(sorted.count) planes "
-                + "(\(sorted.joined(separator: ", ")))",
-            severity: severity,
-            confidence: .low,
-            category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).multi_plane", title: "Wave-12 multi-plane compound: \(sorted.count) planes "
+                + "(\(sorted.joined(separator: ", ")))", severity: severity, category: .misconfig, resolution: .init(evidence: [
                 Evidence(
                     type: "planes",
                     detail: "planes=\(sorted.joined(separator: "|")) count=\(sorted.count)"
@@ -134,20 +84,12 @@ public struct Wave12MultiPlaneClusterCheck: Check {
                         + "Rootstock Red does not craft webloc lures, modify Mail rules, dump unified logs, "
                         + "edit Dock.plist, compile malicious scpt, or mount attacker shares."
                 ),
-            ],
-            attackTechniques: ["T1204", "T1114", "T1059.002", "T1021.002", "T1547", "T1083"],
-            remediation: [
+            ], attackTechniques: ["T1204", "T1114", "T1059.002", "T1021.002", "T1547", "T1083"], remediation: [
                 "Prioritize hosts co-locating multiple Wave-12 planes with remote/FDA amplifiers",
                 "Close remote access before deep dual-use inventory",
                 "Use Wave-12 lab plans under ROE for purple validation",
                 "OPSEC: multi-plane compounds are engagement narrative, not exploit scripts",
-            ],
-            falsePositiveNotes:
-                "Developer workstations may legitimately co-locate many Wave-12 planes. "
-                + "Rank production hosts with remote/FDA amplifiers first.",
-            dryRunSafe: true,
-            opsecScore: 28,
-            esfExpected: ["OPEN", "EXEC", "READ"]
-        )
+            ], falsePositiveNotes: "Developer workstations may legitimately co-locate many Wave-12 planes. "
+                + "Rank production hosts with remote/FDA amplifiers first."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ"]))
     }
 }

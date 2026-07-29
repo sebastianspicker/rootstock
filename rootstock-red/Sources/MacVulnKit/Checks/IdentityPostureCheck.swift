@@ -55,24 +55,10 @@ public struct IdentityPostureCheck: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: identity.adBound != nil || identity.platformSSO != nil ? .medium : .low,
-                category: .auth,
-                evidence: evidence,
-                attackTechniques: ["T1087", "T1082", "T1558"],
-                remediation: [
+            Finding(id: Self.id, title: title, severity: severity, category: .auth, resolution: .init(evidence: evidence, attackTechniques: ["T1087", "T1082", "T1558"], remediation: [
                     "Informational directory / SSO join state for engagement notes",
                     "Validate AD/Platform SSO via inventory systems (not only local heuristics)",
-                ],
-                falsePositiveNotes:
-                    "Path presence is not a live bind/auth proof; Kerberos conf may exist without AD join",
-                dryRunSafe: true,
-                opsecScore: 6,
-                esfExpected: []
-            ),
+                ], falsePositiveNotes: "Path presence is not a live bind/auth proof; Kerberos conf may exist without AD join"), runtime: .init(confidence: identity.adBound != nil || identity.platformSSO != nil ? .medium : .low, dryRunSafe: true, opsecScore: 6, esfExpected: [])),
         ]
     }
 

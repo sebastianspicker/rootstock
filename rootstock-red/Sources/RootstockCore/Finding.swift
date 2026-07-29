@@ -51,6 +51,38 @@ public struct Evidence: Codable, Sendable, Equatable {
 
 /// Evidence-grade assessment finding (schema v1).
 public struct Finding: Codable, Sendable, Identifiable, Equatable {
+    public struct Resolution: Sendable {
+        public var evidence: [Evidence] = []
+        public var attackTechniques: [String] = []
+        public var remediation: [String] = []
+        public var falsePositiveNotes: String? = nil
+
+        public init(evidence: [Evidence] = [], attackTechniques: [String] = [], remediation: [String] = [], falsePositiveNotes: String? = nil) {
+            self.evidence = evidence
+            self.attackTechniques = attackTechniques
+            self.remediation = remediation
+            self.falsePositiveNotes = falsePositiveNotes
+        }
+    }
+
+    public struct Runtime: Sendable {
+        public var confidence: Confidence = .medium
+        public var dryRunSafe: Bool = true
+        public var opsecScore: Int? = nil
+        public var tccDomains: [String] = []
+        public var esfExpected: [String] = []
+        public var osRange: String? = nil
+
+        public init(confidence: Confidence = .medium, dryRunSafe: Bool = true, opsecScore: Int? = nil, tccDomains: [String] = [], esfExpected: [String] = [], osRange: String? = nil) {
+            self.confidence = confidence
+            self.dryRunSafe = dryRunSafe
+            self.opsecScore = opsecScore
+            self.tccDomains = tccDomains
+            self.esfExpected = esfExpected
+            self.osRange = osRange
+        }
+    }
+
     public var id: String
     public var title: String
     public var severity: Severity
@@ -71,31 +103,23 @@ public struct Finding: Codable, Sendable, Identifiable, Equatable {
         id: String,
         title: String,
         severity: Severity,
-        confidence: Confidence = .medium,
         category: FindingCategory,
-        evidence: [Evidence] = [],
-        attackTechniques: [String] = [],
-        remediation: [String] = [],
-        falsePositiveNotes: String? = nil,
-        dryRunSafe: Bool = true,
-        opsecScore: Int? = nil,
-        tccDomains: [String] = [],
-        esfExpected: [String] = [],
-        osRange: String? = nil
+        resolution: Resolution = .init(),
+        runtime: Runtime = .init()
     ) {
         self.id = id
         self.title = title
         self.severity = severity
-        self.confidence = confidence
+        self.confidence = runtime.confidence
         self.category = category
-        self.evidence = evidence
-        self.attackTechniques = attackTechniques
-        self.remediation = remediation
-        self.falsePositiveNotes = falsePositiveNotes
-        self.dryRunSafe = dryRunSafe
-        self.opsecScore = opsecScore
-        self.tccDomains = tccDomains
-        self.esfExpected = esfExpected
-        self.osRange = osRange
+        self.evidence = resolution.evidence
+        self.attackTechniques = resolution.attackTechniques
+        self.remediation = resolution.remediation
+        self.falsePositiveNotes = resolution.falsePositiveNotes
+        self.dryRunSafe = runtime.dryRunSafe
+        self.opsecScore = runtime.opsecScore
+        self.tccDomains = runtime.tccDomains
+        self.esfExpected = runtime.esfExpected
+        self.osRange = runtime.osRange
     }
 }

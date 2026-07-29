@@ -12,6 +12,11 @@ public struct ESFSensorGapVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard shouldReport(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func shouldReport(_ state: CollectedState) -> Bool {
         let esf = state.esf
         let productPresent = state.securityProducts.contains(where: \.present)
         // clientPaths = third-party EDR/ES clients only (Apple infra excluded by collector).
@@ -26,42 +31,17 @@ public struct ESFSensorGapVector: Check {
             && thirdPartyClientCount == 0
             && hints.isEmpty
 
-        let remote =
-            state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
-        let highValue =
-            state.credPaths.contains(where: \.exists)
-            || state.identity?.platformSSO == true
-            || state.identity?.adBound == true
+        return thinThirdPartySensor && (Self.hasRemoteAccess(state) || Self.hasHighValueSurface(state) || Self.hasGapNote(state))
+    }
 
-        let gapNote = state.collectorNotes["esf.sensor_gap"] != nil
-            || state.collectorNotes["collect.esf_endpoint_security"]?
-                .contains("thirdPartyClients=0") == true
-
-        let shouldFire =
-            thinThirdPartySensor && (remote || highValue || gapNote)
-        guard shouldFire else { return [] }
-
-        var evidence: [Evidence] = [
-            Evidence(
-                type: "sensor_summary",
-                detail:
-                    "securityProductsPresent=\(state.securityProducts.filter(\.present).count) "
-                    + "thirdPartyClients=\(thirdPartyClientCount) edrHints=\(hints.count) "
-                    + "thirdPartySysext≈\(thirdPartySysext) "
-                    + "(Apple ES infrastructure excluded from client count)"
-            ),
-        ]
-        if let esf {
-            for note in esf.notes.prefix(12) {
-                evidence.append(Evidence(type: "esf_note", detail: note))
-            }
-            for path in esf.clientPaths.prefix(12) {
-                evidence.append(
-                    Evidence(type: "third_party_client", path: path, detail: "third-party ES/EDR path")
-                )
-            }
-        }
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let esf = state.esf
+        let thirdPartyClientCount = esf?.clientPaths.count ?? 0
+        let hints = esf?.edrHints ?? []
+        let thirdPartySysext = esf?.systemExtensionCount ?? 0
+        let remote = Self.hasRemoteAccess(state)
+        let highValue = Self.hasHighValueSurface(state)
+        var evidence = Self.baseEvidence(ESFBaseEvidenceInput(state: state, notes: esf?.notes ?? [], paths: esf?.clientPaths ?? [], clientCount: thirdPartyClientCount, hints: hints, systemExtensions: thirdPartySysext))
         if remote {
             evidence.append(
                 Evidence(
@@ -92,33 +72,43 @@ public struct ESFSensorGapVector: Check {
             )
         )
 
-        let severity: Severity = (thinThirdPartySensor && remote) ? .medium : .low
+        return evidence
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: thinThirdPartySensor && remote
+    private static func baseEvidence(_ input: ESFBaseEvidenceInput) -> [Evidence] {
+        var evidence = [Evidence(type: "sensor_summary", detail: "securityProductsPresent=\(input.state.securityProducts.filter(\.present).count) " + "thirdPartyClients=\(input.clientCount) edrHints=\(input.hints.count) " + "thirdPartySysext≈\(input.systemExtensions) " + "(Apple ES infrastructure excluded from client count)")]
+        evidence += input.notes.prefix(12).map { Evidence(type: "esf_note", detail: $0) }
+        evidence += input.paths.prefix(12).map { Evidence(type: "third_party_client", path: $0, detail: "third-party ES/EDR path") }
+        return evidence
+    }
+
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let remote = hasRemoteAccess(state)
+        let thinThirdPartySensor = !state.securityProducts.contains(where: \.present)
+            && (state.esf?.clientPaths.count ?? 0) == 0 && (state.esf?.edrHints ?? []).isEmpty
+        let severity: Severity = (thinThirdPartySensor && remote) ? .medium : .low
+        return Finding(id: Self.id, title: thinThirdPartySensor && remote
                     ? "ESF/EDR sensor gap: no third-party sensor inventory with remote access enabled"
-                    : "ESF/EDR sensor posture: thin third-party Endpoint Security coverage",
-                severity: severity,
-                confidence: .low,
-                category: .securityProduct,
-                evidence: evidence,
-                attackTechniques: ["T1518.001", "T1562.001", "T1021"],
-                remediation: [
+                    : "ESF/EDR sensor posture: thin third-party Endpoint Security coverage", severity: severity, category: .securityProduct, resolution: .init(evidence: evidence, attackTechniques: ["T1518.001", "T1562.001", "T1021"], remediation: [
                     "Confirm EDR/ES client deployment via MDM inventory (not only local paths)",
                     "Prioritize sensor coverage on hosts with Remote Login / Screen Sharing",
                     "Purple: pair assess findings with ESF OPEN/EXEC expectations for dual-use bins",
                     "OPSEC: Rootstock Red never unloads ES clients or disables security products",
-                ],
-                falsePositiveNotes:
-                    "Many enterprise agents install under vendor-specific paths not in the probe catalog. "
-                    + "Absence of path hits ≠ confirmed absence of telemetry.",
-                dryRunSafe: true,
-                opsecScore: 12,
-                esfExpected: ["OPEN"]
-            ),
-        ]
+                ], falsePositiveNotes: "Many enterprise agents install under vendor-specific paths not in the probe catalog. "
+                    + "Absence of path hits ≠ confirmed absence of telemetry."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 12, esfExpected: ["OPEN"]))
     }
 
+    private static func hasRemoteAccess(_ state: CollectedState) -> Bool { state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true }
+    private static func hasHighValueSurface(_ state: CollectedState) -> Bool { state.credPaths.contains(where: \.exists) || state.identity?.platformSSO == true || state.identity?.adBound == true }
+    private static func hasGapNote(_ state: CollectedState) -> Bool { state.collectorNotes["esf.sensor_gap"] != nil || state.collectorNotes["collect.esf_endpoint_security"]?.contains("thirdPartyClients=0") == true }
+
+}
+
+private struct ESFBaseEvidenceInput {
+    let state: CollectedState
+    let notes: [String]
+    let paths: [String]
+    let clientCount: Int
+    let hints: [String]
+    let systemExtensions: Int
 }

@@ -57,28 +57,14 @@ public struct WeblocInetlocDeliveryVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Webloc/inetloc delivery with remote access amplifier"
-                    : "Webloc / Internet Location file delivery",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1204", "T1566", "T1105"],
-                remediation: [
+                    : "Webloc / Internet Location file delivery", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1204", "T1566", "T1105"], remediation: [
                     "Inventory and baseline Webloc/inetloc delivery paths via MDM/EDR",
                     "Correlate unexpected path co-presence with delivery timelines",
                     "Prioritize hosts with remote/FDA amplifiers",
                     "OPSEC: Rootstock Red never crafts phishing webloc/inetloc payloads or rewrites Internet Location files",
-                ],
-                falsePositiveNotes:
-                    "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers.",
-                dryRunSafe: true,
-                opsecScore: 25,
-                esfExpected: ["OPEN", "READ", "EXEC"]
-            ),
+                ], falsePositiveNotes: "Stock macOS paths often exist. Elevate multi-path co-presence with remote/FDA amplifiers."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"])),
         ]
     }
 }

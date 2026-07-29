@@ -33,60 +33,9 @@ public enum FamilyOpenExporter: Sendable {
         ]
         var edges: [[String: String]] = []
 
-        if let protections = state.protections {
-            appendProtection(
-                name: "SIP",
-                enabled: protections.sipEnabled,
-                hostId: hostId,
-                nodes: &nodes,
-                edges: &edges
-            )
-            appendProtection(
-                name: "Gatekeeper",
-                enabled: protections.gatekeeperEnabled,
-                hostId: hostId,
-                nodes: &nodes,
-                edges: &edges
-            )
-            appendProtection(
-                name: "FileVault",
-                enabled: protections.fileVaultOn,
-                hostId: hostId,
-                nodes: &nodes,
-                edges: &edges
-            )
-        }
-
-        for item in state.launchAgents.prefix(50) {
-            let id = "LaunchItem:\(sanitize(item.label ?? item.path))"
-            nodes.append(
-                [
-                    "id": id,
-                    "type": "LaunchItem",
-                    "name": item.label ?? item.path,
-                    "label": item.label ?? "",
-                    "path": item.path,
-                    "program": item.programArguments.first ?? "",
-                ]
-            )
-            edges.append(["from": hostId, "to": id, "type": "HAS_LAUNCH_ITEM"])
-        }
-
-        for finding in findings.prefix(200) {
-            let id = "Finding:\(sanitize(finding.id))"
-            nodes.append(
-                [
-                    "id": id,
-                    "type": "Finding",
-                    "name": finding.title,
-                    "finding_id": finding.id,
-                    "severity": finding.severity.rawValue,
-                    "category": finding.category.rawValue,
-                    "confidence": finding.confidence.rawValue,
-                ]
-            )
-            edges.append(["from": hostId, "to": id, "type": "HAS_FINDING"])
-        }
+        appendProtections(state, hostId: hostId, nodes: &nodes, edges: &edges)
+        appendLaunchItems(state, hostId: hostId, nodes: &nodes, edges: &edges)
+        appendFindings(findings, hostId: hostId, nodes: &nodes, edges: &edges)
 
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
@@ -103,6 +52,27 @@ public enum FamilyOpenExporter: Sendable {
             "nodes": nodes,
             "edges": edges,
         ]
+    }
+
+    private static func appendProtections(_ state: CollectedState, hostId: String, nodes: inout [[String: Any]], edges: inout [[String: String]]) {
+        guard let protections = state.protections else { return }
+        [("SIP", protections.sipEnabled), ("Gatekeeper", protections.gatekeeperEnabled), ("FileVault", protections.fileVaultOn)].forEach { appendProtection(name: $0.0, enabled: $0.1, hostId: hostId, nodes: &nodes, edges: &edges) }
+    }
+
+    private static func appendLaunchItems(_ state: CollectedState, hostId: String, nodes: inout [[String: Any]], edges: inout [[String: String]]) {
+        for item in state.launchAgents.prefix(50) {
+            let id = "LaunchItem:\(sanitize(item.label ?? item.path))"
+            nodes.append(["id": id, "type": "LaunchItem", "name": item.label ?? item.path, "label": item.label ?? "", "path": item.path, "program": item.programArguments.first ?? ""])
+            edges.append(["from": hostId, "to": id, "type": "HAS_LAUNCH_ITEM"])
+        }
+    }
+
+    private static func appendFindings(_ findings: [Finding], hostId: String, nodes: inout [[String: Any]], edges: inout [[String: String]]) {
+        for finding in findings.prefix(200) {
+            let id = "Finding:\(sanitize(finding.id))"
+            nodes.append(["id": id, "type": "Finding", "name": finding.title, "finding_id": finding.id, "severity": finding.severity.rawValue, "category": finding.category.rawValue, "confidence": finding.confidence.rawValue])
+            edges.append(["from": hostId, "to": id, "type": "HAS_FINDING"])
+        }
     }
 
     public static func writeJSON(

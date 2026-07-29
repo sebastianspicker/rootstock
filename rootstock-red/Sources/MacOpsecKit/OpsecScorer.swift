@@ -54,40 +54,7 @@ public struct OpsecScorer: Sendable {
         if copy.esfExpected.isEmpty {
             copy.esfExpected = OpsecESFCatalog.defaultShortClasses(for: copy.category)
         }
-
-        let pathEvidence = copy.evidence.compactMap(\.path)
-        let sensitiveReads = pathEvidence.filter { OpsecESFCatalog.isSensitivePath($0) }.count
-        let notifyClasses = OpsecESFCatalog.notifyEventNames(from: copy.esfExpected)
-
-        let tccLower = copy.tccDomains.map { $0.lowercased() }
-        let appleEvents =
-            tccLower.contains { $0.contains("appleevent") || $0.contains("automation") }
-
-        let networkish =
-            copy.category == .network
-            || copy.esfExpected.contains {
-                let u = $0.uppercased()
-                return u.contains("CONNECT") || u.contains("NETWORK") || u == "LOOKUP"
-            }
-
-        let userVisible =
-            copy.esfExpected.contains {
-                $0.uppercased().contains("USER_PROMPT")
-            }
-
-        let signals = OpsecSignals(
-            processSpawns: copy.esfExpected.contains {
-                let u = $0.uppercased()
-                return u == "EXEC" || u == "FORK" || u.contains("NOTIFY_EXEC") || u.contains("NOTIFY_FORK")
-            } ? 1 : 0,
-            sensitiveFileOpens: pathEvidence.count,
-            tccDomains: copy.tccDomains,
-            networkEgress: networkish,
-            userVisible: userVisible,
-            esfEventClasses: notifyClasses,
-            sensitivePathReads: sensitiveReads,
-            appleEvents: appleEvents
-        )
+        let signals = signals(for: copy)
 
         let scoreValue = score(signals)
         copy.opsecScore = scoreValue
@@ -104,6 +71,23 @@ public struct OpsecScorer: Sendable {
 
         return copy
     }
+
+    private func signals(for finding: Finding) -> OpsecSignals {
+        let paths = finding.evidence.compactMap(\.path)
+        let classes = finding.esfExpected.map { $0.uppercased() }
+        return OpsecSignals(
+            processSpawns: classes.contains(where: isProcessEvent) ? 1 : 0,
+            sensitiveFileOpens: paths.count, tccDomains: finding.tccDomains,
+            networkEgress: finding.category == .network || classes.contains(where: isNetworkEvent),
+            userVisible: classes.contains { $0.contains("USER_PROMPT") },
+            esfEventClasses: OpsecESFCatalog.notifyEventNames(from: finding.esfExpected),
+            sensitivePathReads: paths.filter(OpsecESFCatalog.isSensitivePath).count,
+            appleEvents: finding.tccDomains.contains { $0.lowercased().contains("appleevent") || $0.lowercased().contains("automation") }
+        )
+    }
+
+    private func isProcessEvent(_ event: String) -> Bool { event == "EXEC" || event == "FORK" || event.contains("NOTIFY_EXEC") || event.contains("NOTIFY_FORK") }
+    private func isNetworkEvent(_ event: String) -> Bool { event.contains("CONNECT") || event.contains("NETWORK") || event == "LOOKUP" }
 
     public func annotateAll(_ findings: [Finding]) -> [Finding] {
         findings.map { annotate($0) }

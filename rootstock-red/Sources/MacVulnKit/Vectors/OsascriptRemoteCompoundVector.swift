@@ -46,26 +46,13 @@ public struct OsascriptRemoteCompoundVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "OSA/scpt delivery × remote compound"
-                    : "OSA/scpt delivery × impact compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1059.002", "T1204", "T1027"],
-                remediation: [
+                    : "OSA/scpt delivery × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1059.002", "T1204", "T1027"], remediation: [
                     "Prioritize hosts co-locating OSA/scpt delivery with remote/FDA amplifiers",
                     "Use Wave-12 lab plans under ROE for purple validation",
                     "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-                ],
-                falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first.",
-                dryRunSafe: true,
-                opsecScore: 27,
-                esfExpected: ["OPEN", "EXEC", "READ"]
-            ),
+                ], falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"])),
         ]
     }
 }

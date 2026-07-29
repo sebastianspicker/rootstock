@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html as html_mod
 
+from family_finding_classification import is_red_family_finding
 from utils import sanitize_id as sanitize_mermaid_id, truncate as _truncate
 
 
@@ -361,41 +362,13 @@ def mermaid_family_findings_block(
         return "_No family findings to diagram._"
 
     lines = ["```mermaid", "flowchart TB"]
-    lines.append("  subgraph FamilyFindings[\"Family findings (red / blue)\"]")
+    lines.append('  subgraph FamilyFindings["Family findings (red / blue)"]')
     red_ids: list[str] = []
     blue_ids: list[str] = []
 
-    for i, f in enumerate(findings[:max_findings]):
-        fid = str(
-            f.get("finding_id")
-            or f.get("id")
-            or f.get("name")
-            or f"finding_{i}"
-        )
-        title = str(f.get("name") or f.get("title") or fid)
-        sev = str(f.get("severity") or "info").lower()
-        src = str(
-            f.get("source")
-            or f.get("family_source")
-            or source
-            or f.get("kind")
-            or ""
-        ).lower()
-        is_red = "red" in src or src.endswith("rootstock-red") or "rs_red" in src
-        is_blue = "blue" in src or src.endswith("rootstock-blue") or "rs_blue" in src
-        if not is_red and not is_blue:
-            # Heuristic: rootstock.vector / rootstock.check → red; harden/sample → blue
-            lower_id = fid.lower()
-            if lower_id.startswith("rootstock.") or "vector" in lower_id:
-                is_red = True
-            elif lower_id.startswith("harden.") or lower_id.startswith("sample.") or "control" in lower_id:
-                is_blue = True
-            else:
-                is_red = True
-
-        node_id = sanitize_mermaid_id(f"f{i}_{fid}")[:48]
-        label = _safe_label(f"{'[R] ' if is_red else '[B] '}{title} ({sev})", max_len=42)
-        lines.append(f"    {node_id}[\"{label}\"]")
+    for index, finding in enumerate(findings[:max_findings]):
+        node_id, label, is_red = _family_finding_node(finding, index, source)
+        lines.append(f'    {node_id}["{label}"]')
         if is_red:
             red_ids.append(node_id)
         else:
@@ -408,6 +381,32 @@ def mermaid_family_findings_block(
         lines.append(f"  style {nid} fill:#2471a3,color:#fff,stroke:#1a5276")
     lines.append("```")
     return "\n".join(lines)
+
+
+def _family_finding_node(finding: dict, index: int, source: str | None) -> tuple[str, str, bool]:
+    finding_id = _family_finding_id(finding, index)
+    title = str(finding.get("name") or finding.get("title") or finding_id)
+    severity = str(finding.get("severity") or "info").lower()
+    is_red = is_red_family_finding(finding, finding_id, source)
+    node_id = sanitize_mermaid_id(f"f{index}_{finding_id}")[:48]
+    label = _safe_label(
+        f"{'[R] ' if is_red else '[B] '}{title} ({severity})", max_len=42
+    )
+    return node_id, label, is_red
+
+
+def _family_finding_id(finding: dict, index: int = 0) -> str:
+    return str(finding.get("finding_id") or finding.get("id") or finding.get("name") or f"finding_{index}")
+
+
+def _family_finding_row(finding: dict, source: str | None = None) -> str:
+    finding_id = _family_finding_id(finding)
+    title = str(finding.get("name") or finding.get("title") or finding_id).replace(
+        "|", "/"
+    )
+    severity = str(finding.get("severity") or "info")
+    side = "red" if is_red_family_finding(finding, finding_id, source) else "blue"
+    return f"| {side} | `{finding_id}` | {severity} | {title} |"
 
 
 def format_family_findings_section(
@@ -432,18 +431,16 @@ def format_family_findings_section(
         "| Side | Finding ID | Severity | Title |",
         "|------|------------|----------|-------|",
     ]
-    for f in findings[:max_findings]:
-        fid = str(f.get("finding_id") or f.get("id") or "?")
-        title = str(f.get("name") or f.get("title") or fid).replace("|", "/")
-        sev = str(f.get("severity") or "info")
-        src = str(f.get("source") or source or "").lower()
-        side = "red" if "red" in src or fid.startswith("rootstock.") else "blue"
-        if fid.startswith("harden.") or fid.startswith("sample."):
-            side = "blue"
-        parts.append(f"| {side} | `{fid}` | {sev} | {title} |")
+    parts.extend(
+        _family_finding_row(finding, source) for finding in findings[:max_findings]
+    )
     parts.append("")
     parts.append("### Family findings diagram")
-    parts.append(mermaid_family_findings_block(findings, source=source, max_findings=max_findings))
+    parts.append(
+        mermaid_family_findings_block(
+            findings, source=source, max_findings=max_findings
+        )
+    )
     parts.append("")
     return "\n".join(parts)
 
@@ -460,10 +457,7 @@ def format_multi_plane_campaign_section(
     stage (delivery|persist|visibility|lateral|collection).
     """
     if not planes:
-        return (
-            f"## {campaign} campaign\n\n"
-            "_No multi-plane themes provided._\n"
-        )
+        return f"## {campaign} campaign\n\n_No multi-plane themes provided._\n"
     parts = [
         f"## {campaign} campaign",
         "",
@@ -474,38 +468,50 @@ def format_multi_plane_campaign_section(
         "|-------|-------|--------------|---------------|",
     ]
     mermaid_nodes: list[dict] = []
-    for p in planes[:max_planes]:
-        pid = str(p.get("id") or p.get("title") or "?")
-        title = str(p.get("title") or pid).replace("|", "/")
-        stage = str(p.get("stage") or "posture")
-        reds = p.get("red_ids") or []
-        blues = p.get("blue_ids") or []
-        red_s = ", ".join(f"`{r}`" for r in reds[:3]) or " - "
-        blue_s = ", ".join(f"`{b}`" for b in blues[:3]) or " - "
-        parts.append(f"| {title} | {stage} | {red_s} | {blue_s} |")
-        for r in reds[:2]:
-            mermaid_nodes.append(
-                {
-                    "finding_id": r,
-                    "name": r.split(".")[-1],
-                    "severity": "medium",
-                    "source": "rootstock-red",
-                }
-            )
-        for b in blues[:2]:
-            mermaid_nodes.append(
-                {
-                    "finding_id": b,
-                    "name": b,
-                    "severity": "medium",
-                    "source": "rootstock-blue",
-                }
-            )
+    for plane in planes[:max_planes]:
+        row, nodes = _campaign_plane_row(plane)
+        parts.append(row)
+        mermaid_nodes.extend(nodes)
     parts.append("")
     parts.append("### Multi-plane family diagram")
-    parts.append(mermaid_family_findings_block(mermaid_nodes, max_findings=max_planes * 2))
+    parts.append(
+        mermaid_family_findings_block(mermaid_nodes, max_findings=max_planes * 2)
+    )
     parts.append("")
     return "\n".join(parts)
+
+
+def _campaign_plane_row(plane: dict) -> tuple[str, list[dict]]:
+    plane_id = str(plane.get("id") or plane.get("title") or "?")
+    title = str(plane.get("title") or plane_id).replace("|", "/")
+    stage = str(plane.get("stage") or "posture")
+    red_ids = plane.get("red_ids") or []
+    blue_ids = plane.get("blue_ids") or []
+    row = f"| {title} | {stage} | {_finding_id_list(red_ids)} | {_finding_id_list(blue_ids)} |"
+    return row, _campaign_plane_nodes(red_ids, blue_ids)
+
+
+def _finding_id_list(finding_ids: list[object]) -> str:
+    return ", ".join(f"`{item}`" for item in finding_ids[:3]) or " - "
+
+
+def _campaign_plane_nodes(red_ids: list[object], blue_ids: list[object]) -> list[dict]:
+    return [
+        *(
+            _family_node(item, "rootstock-red", str(item).split(".")[-1])
+            for item in red_ids[:2]
+        ),
+        *(_family_node(item, "rootstock-blue", str(item)) for item in blue_ids[:2]),
+    ]
+
+
+def _family_node(finding_id: object, source: str, name: str) -> dict:
+    return {
+        "finding_id": finding_id,
+        "name": name,
+        "severity": "medium",
+        "source": source,
+    }
 
 
 def format_multi_plane_severity_board(
@@ -531,19 +537,21 @@ def format_multi_plane_severity_board(
         "| Sev | Side | ID | Title |",
         "|-----|------|----|-------|",
     ]
-    for f in sorted_f[:max_items]:
-        fid = str(f.get("finding_id") or f.get("id") or "?")
-        name = str(f.get("name") or f.get("title") or fid).replace("|", "/")
-        sev = str(f.get("severity") or "info")
-        src = str(f.get("source") or "").lower()
-        side = "red" if "red" in src or fid.startswith("rootstock.") else "blue"
-        if fid.startswith("harden.") or fid.startswith("sample."):
-            side = "blue"
-        parts.append(f"| {sev} | {side} | `{fid}` | {name} |")
+    parts.extend(_severity_board_row(finding) for finding in sorted_f[:max_items])
     parts.append("")
     parts.append(mermaid_family_findings_block(sorted_f[:max_items]))
     parts.append("")
     return "\n".join(parts)
+
+
+def _severity_board_row(finding: dict) -> str:
+    finding_id = _family_finding_id(finding)
+    name = str(finding.get("name") or finding.get("title") or finding_id).replace(
+        "|", "/"
+    )
+    severity = str(finding.get("severity") or "info")
+    side = "red" if is_red_family_finding(finding, finding_id, None) else "blue"
+    return f"| {severity} | {side} | `{finding_id}` | {name} |"
 
 
 def format_purple_engagement_matrix(
@@ -568,21 +576,34 @@ def format_purple_engagement_matrix(
         "|-------|-------|---------------|----------------|",
     ]
     findings = []
-    for p in pairs[:max_pairs]:
-        plane = str(p.get("plane") or p.get("title") or "?").replace("|", "/")
-        stage = str(p.get("stage") or "posture")
-        red = str(p.get("red_id") or "")
-        blue = str(p.get("blue_id") or "")
-        parts.append(f"| {plane} | {stage} | `{red}` | `{blue}` |")
-        if red:
-            findings.append({"finding_id": red, "name": red.split(".")[-1], "severity": "medium", "source": "rootstock-red"})
-        if blue:
-            findings.append({"finding_id": blue if blue.startswith("harden.") else f"harden.{blue}", "name": blue, "severity": "medium", "source": "rootstock-blue"})
+    for pair in pairs[:max_pairs]:
+        row, pair_findings = _engagement_pair_row(pair)
+        parts.append(row)
+        findings.extend(pair_findings)
     parts.append("")
     parts.append("### Engagement matrix diagram")
     parts.append(mermaid_family_findings_block(findings, max_findings=max_pairs * 2))
     parts.append("")
     return "\n".join(parts)
+
+
+def _engagement_pair_row(pair: dict) -> tuple[str, list[dict]]:
+    plane = str(pair.get("plane") or pair.get("title") or "?").replace("|", "/")
+    stage = str(pair.get("stage") or "posture")
+    red = str(pair.get("red_id") or "")
+    blue = str(pair.get("blue_id") or "")
+    row = f"| {plane} | {stage} | `{red}` | `{blue}` |"
+    return row, _engagement_findings(red, blue)
+
+
+def _engagement_findings(red: str, blue: str) -> list[dict]:
+    findings = []
+    if red:
+        findings.append(_family_node(red, "rootstock-red", red.split(".")[-1]))
+    if blue:
+        finding_id = blue if blue.startswith("harden.") else f"harden.{blue}"
+        findings.append(_family_node(finding_id, "rootstock-blue", blue))
+    return findings
 
 
 def format_kill_chain_stage_timeline(
@@ -607,27 +628,35 @@ def format_kill_chain_stage_timeline(
         "timeline",
         f"    title {title}",
     ]
-    for s in stages[:max_stages]:
-        stage = str(s.get("stage") or s.get("name") or "stage")
-        label = str(s.get("label") or stage)
-        red_n = s.get("red_count", "")
-        blue_n = s.get("blue_count", "")
-        detail = label
-        if red_n != "" or blue_n != "":
-            detail = f"{label} (R:{red_n} B:{blue_n})"
-        parts.append(f"    {stage} : {detail}")
+    parts.extend(_timeline_mermaid_row(stage) for stage in stages[:max_stages])
     parts.append("```")
     parts.append("")
     parts.append("| Stage | Red findings | Blue controls | Notes |")
     parts.append("|-------|--------------|---------------|-------|")
-    for s in stages[:max_stages]:
-        stage = str(s.get("stage") or "?")
-        red_n = s.get("red_count", " - ")
-        blue_n = s.get("blue_count", " - ")
-        notes = str(s.get("label") or s.get("notes") or "").replace("|", "/")
-        parts.append(f"| {stage} | {red_n} | {blue_n} | {notes} |")
+    parts.extend(_timeline_table_row(stage) for stage in stages[:max_stages])
     parts.append("")
     return "\n".join(parts)
+
+
+def _timeline_mermaid_row(stage: dict) -> str:
+    name = str(stage.get("stage") or stage.get("name") or "stage")
+    label = str(stage.get("label") or name)
+    red_count = stage.get("red_count", "")
+    blue_count = stage.get("blue_count", "")
+    detail = (
+        f"{label} (R:{red_count} B:{blue_count})"
+        if red_count != "" or blue_count != ""
+        else label
+    )
+    return f"    {name} : {detail}"
+
+
+def _timeline_table_row(stage: dict) -> str:
+    name = str(stage.get("stage") or "?")
+    red_count = stage.get("red_count", " - ")
+    blue_count = stage.get("blue_count", " - ")
+    notes = str(stage.get("label") or stage.get("notes") or "").replace("|", "/")
+    return f"| {name} | {red_count} | {blue_count} | {notes} |"
 
 
 def format_fleet_campaign_dashboard(
@@ -653,21 +682,30 @@ def format_fleet_campaign_dashboard(
         "|----------|--------|------------|--------|-----------|",
     ]
     findings = []
-    for c in campaigns:
-        name = str(c.get("name") or "?")
-        themes = c.get("theme_count", " - ")
-        half = c.get("half_pairs", " - ")
-        stages = ", ".join(c.get("stages") or []) or " - "
-        highlight = str(c.get("highlight") or "").replace("|", "/")
-        parts.append(f"| {name} | {themes} | {half} | {stages} | {highlight} |")
-        findings.append({
-            "finding_id": f"campaign.{name}",
-            "name": name,
-            "severity": "high" if int(c.get("theme_count") or 0) >= 20 else "medium",
-            "source": "rootstock-red" if "Wave" in name else "rootstock-blue",
-        })
+    for campaign in campaigns:
+        row, finding = _fleet_campaign_row(campaign)
+        parts.append(row)
+        findings.append(finding)
     parts.append("")
     parts.append("### Fleet diagram")
-    parts.append(mermaid_family_findings_block(findings, max_findings=max(len(campaigns) * 2, 8)))
+    parts.append(
+        mermaid_family_findings_block(findings, max_findings=max(len(campaigns) * 2, 8))
+    )
     parts.append("")
     return "\n".join(parts)
+
+
+def _fleet_campaign_row(campaign: dict) -> tuple[str, dict]:
+    name = str(campaign.get("name") or "?")
+    themes = campaign.get("theme_count", " - ")
+    half_pairs = campaign.get("half_pairs", " - ")
+    stages = ", ".join(campaign.get("stages") or []) or " - "
+    highlight = str(campaign.get("highlight") or "").replace("|", "/")
+    row = f"| {name} | {themes} | {half_pairs} | {stages} | {highlight} |"
+    finding = {
+        "finding_id": f"campaign.{name}",
+        "name": name,
+        "severity": "high" if int(campaign.get("theme_count") or 0) >= 20 else "medium",
+        "source": "rootstock-red" if "Wave" in name else "rootstock-blue",
+    }
+    return row, finding

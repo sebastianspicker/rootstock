@@ -70,107 +70,83 @@ public struct KeychainMetaParser: ArtifactParser {
     }
 
     private func makeEvent(from item: [String: Any], rawRef: String, defaultUser: String?) -> EventEnvelope? {
-        // Strip any forbidden keys if a collector mistakenly included them
-        let sanitized = item.filter { key, _ in
-            !Self.forbiddenKeys.contains(key.lowercased().replacingOccurrences(of: "-", with: "_"))
-        }
-
-        let itemClass = stringish(sanitized["item_class"])
-            ?? stringish(sanitized["class"])
-            ?? stringish(sanitized["kSecClass"])
-            ?? ""
-        let label = stringish(sanitized["label"])
-            ?? stringish(sanitized["labl"])
-            ?? stringish(sanitized["service"])
-            ?? ""
-        let accessGroup = stringish(sanitized["access_group"])
-            ?? stringish(sanitized["agrp"])
-            ?? stringish(sanitized["accessGroup"])
-            ?? ""
-        // Account is username-like identity only - never a password field
-        let account = stringish(sanitized["account"])
-            ?? stringish(sanitized["acct"])
-            ?? stringish(sanitized["username"])
-            ?? stringish(sanitized["user"])
-            ?? ""
-        let mtime = stringish(sanitized["mtime"])
-            ?? stringish(sanitized["modification_date"])
-            ?? stringish(sanitized["modified"])
-            ?? stringish(sanitized["cdat"])
-            ?? ""
-
-        guard !itemClass.isEmpty || !label.isEmpty || !accessGroup.isEmpty || !account.isEmpty else {
-            return nil
-        }
-
-        var risk: [String] = []
-        if let tags = stringish(sanitized["risk_tags"]), !tags.isEmpty {
-            risk = tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        }
-
-        let lowerLabel = label.lowercased()
-        let lowerGroup = accessGroup.lowercased()
-        let lowerClass = itemClass.lowercased()
-
-        if lowerLabel.contains("evil") || lowerLabel.contains("implant") || lowerLabel.contains("backdoor") {
-            if !risk.contains("suspicious_label") { risk.append("suspicious_label") }
-        }
-        // Unexpected access groups (non-Apple, non-standard)
-        if !accessGroup.isEmpty
-            && !lowerGroup.hasPrefix("apple")
-            && !lowerGroup.hasPrefix("com.apple")
-            && (lowerGroup.contains("evil") || lowerGroup.contains("unknown")
-                || boolish(sanitized["unexpected_access_group"]) == true) {
-            if !risk.contains("unexpected_access_group") { risk.append("unexpected_access_group") }
-        }
-        // Generic password items in system-scoped keychains are interesting
-        let isGenericPassword = lowerClass.contains("generic")
-            || lowerClass == "genp"
-            || lowerClass.contains("internet")
-        let systemScope = rawRef.contains("/Library/Preferences/keychain")
-            && !rawRef.contains("/Users/")
-        if isGenericPassword && (systemScope || boolish(sanitized["system_keychain"]) == true) {
-            if !risk.contains("generic_password_in_system") { risk.append("generic_password_in_system") }
-        }
-
-        var fields: [String: String] = [
-            "keychain.item_class": itemClass,
-            "keychain.label": label,
-            "keychain.access_group": accessGroup,
-            "keychain.account": account,
-            "keychain.mtime": mtime,
-            FieldTaxonomy.eventType: "keychain.metadata",
-        ]
-        // Explicitly do NOT set any password/secret/key fields
-        if !risk.isEmpty {
-            fields["keychain.risk_tags"] = risk.joined(separator: ",")
-        }
-        let user = defaultUser ?? inferUser(from: rawRef)
-        if let user {
-            fields[FieldTaxonomy.userName] = user
-        }
-
-        var entities: [EntityID] = [
-            EntityID(kind: .auth, value: "keychain|\(itemClass)|\(label)|\(account)"),
-            .file(path: rawRef),
-        ]
-        if let user {
-            entities.append(.user(name: user))
-        }
-
-        let eventTime = parseDate(sanitized["mtime"] ?? sanitized["modification_date"] ?? sanitized["timestamp"])
-            ?? Date(timeIntervalSince1970: 0)
-
+        let record = KeychainMetadataRecord(item: item, rawRef: rawRef, defaultUser: defaultUser)
+        guard record.isMeaningful else { return nil }
         return EventEnvelope(
-            eventTime: eventTime,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "KEYCHAINMETA",
-            eventType: "keychain.metadata",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: rawRef,
-            confidence: 0.91
+            identity: EventEnvelope.Identity(
+                kind: "keychain.metadata",
+                label: "KEYCHAINMETA"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: parseDate(record.timestamp) ?? Date(timeIntervalSince1970: 0),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: record.entities,
+                properties: record.fields,
+                provenance: rawRef,
+                confidence: 0.91
+            )
         )
+    }
+
+    private struct KeychainMetadataRecord {
+        let itemClass: String
+        let label: String
+        let accessGroup: String
+        let account: String
+        let mtime: String
+        let timestamp: Any?
+        let user: String?
+        let rawRef: String
+        let riskTags: [String]
+
+        init(item: [String: Any], rawRef: String, defaultUser: String?) {
+            let sanitized = item.filter { key, _ in !KeychainMetaParser.forbiddenKeys.contains(key.lowercased().replacingOccurrences(of: "-", with: "_")) }
+            itemClass = Self.firstString(in: sanitized, keys: ["item_class", "class", "kSecClass"])
+            label = Self.firstString(in: sanitized, keys: ["label", "labl", "service"])
+            accessGroup = Self.firstString(in: sanitized, keys: ["access_group", "agrp", "accessGroup"])
+            account = Self.firstString(in: sanitized, keys: ["account", "acct", "username", "user"])
+            mtime = Self.firstString(in: sanitized, keys: ["mtime", "modification_date", "modified", "cdat"])
+            timestamp = sanitized["mtime"] ?? sanitized["modification_date"] ?? sanitized["timestamp"]
+            user = defaultUser ?? inferUser(from: rawRef)
+            self.rawRef = rawRef
+            riskTags = Self.riskTags(item: sanitized, itemClass: itemClass, label: label, accessGroup: accessGroup, rawRef: rawRef)
+        }
+
+        var isMeaningful: Bool { !itemClass.isEmpty || !label.isEmpty || !accessGroup.isEmpty || !account.isEmpty }
+        var fields: [String: String] {
+            var values: [String: String] = ["keychain.item_class": itemClass, "keychain.label": label, "keychain.access_group": accessGroup, "keychain.account": account, "keychain.mtime": mtime, FieldTaxonomy.eventType: "keychain.metadata"]
+            if !riskTags.isEmpty { values["keychain.risk_tags"] = riskTags.joined(separator: ",") }
+            if let user { values[FieldTaxonomy.userName] = user }
+            return values
+        }
+        var entities: [EntityID] {
+            var values: [EntityID] = [EntityID(kind: .auth, value: "keychain|\(itemClass)|\(label)|\(account)"), .file(path: rawRef)]
+            if let user { values.append(.user(name: user)) }
+            return values
+        }
+        private static func firstString(in item: [String: Any], keys: [String]) -> String { keys.lazy.compactMap { stringish(item[$0]) }.first ?? "" }
+        private static func riskTags(item: [String: Any], itemClass: String, label: String, accessGroup: String, rawRef: String) -> [String] {
+            var tags = stringish(item["risk_tags"])? .split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) } ?? []
+            append("suspicious_label", when: isSuspiciousLabel(label), to: &tags)
+            append("unexpected_access_group", when: isUnexpectedAccessGroup(accessGroup, item: item), to: &tags)
+            append("generic_password_in_system", when: isSystemGenericPassword(itemClass, rawRef: rawRef, item: item), to: &tags)
+            return tags
+        }
+        private static func isSuspiciousLabel(_ label: String) -> Bool { ["evil", "implant", "backdoor"].contains(where: label.lowercased().contains) }
+        private static func isUnexpectedAccessGroup(_ accessGroup: String, item: [String: Any]) -> Bool {
+            let group = accessGroup.lowercased()
+            let nonAppleGroup = !accessGroup.isEmpty && !group.hasPrefix("apple") && !group.hasPrefix("com.apple")
+            return nonAppleGroup && (group.contains("evil") || group.contains("unknown") || boolish(item["unexpected_access_group"]) == true)
+        }
+        private static func isSystemGenericPassword(_ itemClass: String, rawRef: String, item: [String: Any]) -> Bool {
+            let itemType = itemClass.lowercased()
+            let genericPassword = itemType.contains("generic") || itemType == "genp" || itemType.contains("internet")
+            let systemScope = rawRef.contains("/Library/Preferences/keychain") && !rawRef.contains("/Users/")
+            return genericPassword && (systemScope || boolish(item["system_keychain"]) == true)
+        }
+        private static func append(_ tag: String, when condition: Bool, to tags: inout [String]) { if condition && !tags.contains(tag) { tags.append(tag) } }
     }
 }

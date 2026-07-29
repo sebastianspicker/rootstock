@@ -20,50 +20,47 @@ public struct Wave10ResidualPairClusterCheck: Check {
 
     /// The four residual pair planes only (no amplifiers counted toward the ≥2 gate).
     private static func pairPlanes(state: CollectedState) -> [String] {
-        var planes: [String] = []
+        presentPlaneNames([
+            .init(name: "installer_design", isPresent: installerDesignPresent(state)),
+            .init(name: "archive_extractor", isPresent: archiveExtractorPresent(state)),
+            .init(name: "stealer_paths", isPresent: stealerPathsPresent(state)),
+            .init(name: "visibility_depth", isPresent: visibilityDepthPresent(state)),
+        ])
+    }
 
-        let pk = state.packageKitInstallerDesign
-        if pk?.designSurfacePresent == true
-            || ((pk?.installerServicePaths.count ?? 0) >= 1
-                && (pk?.receiptAndHistoryPaths.count ?? 0) >= 1)
-            || (pk?.installerServicePaths.count ?? 0) > 0
-            || (pk?.receiptAndHistoryPaths.count ?? 0) >= 1
-        {
-            planes.append("installer_design")
-        }
 
-        let aq = state.archiveQuarantineExtractor
-        if aq?.extractorSurfacePresent == true
-            || (aq?.thirdPartyExtractorPaths.count ?? 0) > 0
-            || (aq?.stockExtractorPaths.count ?? 0) >= 3
-        {
-            planes.append("archive_extractor")
-        }
+    private static func installerDesignPresent(_ state: CollectedState) -> Bool {
+        let packageKit = state.packageKitInstallerDesign
+        return packageKit?.designSurfacePresent == true
+            || (packageKit?.installerServicePaths.count ?? 0) > 0
+            || (packageKit?.receiptAndHistoryPaths.count ?? 0) >= 1
+    }
 
-        let sp = state.infoStealerPathPlane
-        let total =
-            (sp?.browserAdjacentPaths.count ?? 0)
-            + (sp?.messagingAndVaultPaths.count ?? 0)
-            + (sp?.walletAndSyncPaths.count ?? 0)
-        if sp?.collectionSurfacePresent == true
-            || total >= 3
-            || ((sp?.browserAdjacentPaths.count ?? 0) >= 1
-                && (sp?.messagingAndVaultPaths.count ?? 0) >= 1)
-        {
-            planes.append("stealer_paths")
-        }
+    private static func archiveExtractorPresent(_ state: CollectedState) -> Bool {
+        let archive = state.archiveQuarantineExtractor
+        return archive?.extractorSurfacePresent == true
+            || (archive?.thirdPartyExtractorPaths.count ?? 0) > 0
+            || (archive?.stockExtractorPaths.count ?? 0) >= 3
+    }
 
-        let vd = state.tccEsfVisibilityDepth
-        if vd?.visibilitySurfacePresent == true
-            || (vd?.tccDbPathHits.count ?? 0) > 0
-            || (vd?.visibilityToolPaths.count ?? 0) > 0
-            || vd?.visibilityDepth == "thin"
-            || vd?.visibilityDepth == "partial"
-        {
-            planes.append("visibility_depth")
-        }
+    private static func stealerPathsPresent(_ state: CollectedState) -> Bool {
+        let stealer = state.infoStealerPathPlane
+        let pathCount = (stealer?.browserAdjacentPaths.count ?? 0)
+            + (stealer?.messagingAndVaultPaths.count ?? 0)
+            + (stealer?.walletAndSyncPaths.count ?? 0)
+        return stealer?.collectionSurfacePresent == true
+            || pathCount >= 3
+            || ((stealer?.browserAdjacentPaths.count ?? 0) >= 1
+                && (stealer?.messagingAndVaultPaths.count ?? 0) >= 1)
+    }
 
-        return planes
+    private static func visibilityDepthPresent(_ state: CollectedState) -> Bool {
+        let visibility = state.tccEsfVisibilityDepth
+        return visibility?.visibilitySurfacePresent == true
+            || (visibility?.tccDbPathHits.count ?? 0) > 0
+            || (visibility?.visibilityToolPaths.count ?? 0) > 0
+            || visibility?.visibilityDepth == "thin"
+            || visibility?.visibilityDepth == "partial"
     }
 
     private static func amplifiers(state: CollectedState) -> [String] {
@@ -83,91 +80,71 @@ public struct Wave10ResidualPairClusterCheck: Check {
     private static func compoundFinding(planes: [String], state: CollectedState) -> Finding {
         let sorted = planes.sorted()
         let amps = amplifiers(state: state).sorted()
-        let severity: Severity
-        if sorted.contains("stealer_paths")
-            && sorted.contains("visibility_depth")
-            && amps.contains("fda")
-            && amps.contains("remote")
-        {
-            severity = .high
-        } else if sorted.count >= 3 || (sorted.count >= 2 && amps.count >= 2) {
-            severity = .medium
-        } else {
-            severity = .low
-        }
-
-        let stageHints = stageLabels(for: sorted, amps: amps)
-
         return Finding(
             id: "\(id).multi_plane",
-            title:
-                "Wave-10 residual-pair compound: \(sorted.count) planes "
-                + "(\(sorted.joined(separator: ", ")))",
-            severity: severity,
-            confidence: .low,
+            title: compoundTitle(planes: sorted),
+            severity: compoundSeverity(planes: sorted, amplifiers: amps),
             category: .misconfig,
-            evidence: [
-                Evidence(
-                    type: "planes",
-                    detail: "planes=\(sorted.joined(separator: "|")) count=\(sorted.count)"
-                ),
-                Evidence(
-                    type: "amplifiers",
-                    detail:
-                        amps.isEmpty
-                        ? "amplifiers=none"
-                        : "amplifiers=\(amps.joined(separator: "|")) count=\(amps.count)"
-                ),
-                Evidence(
-                    type: "stage_labels",
-                    detail: "stages=\(stageHints.joined(separator: "|")) (labels only - not auto-exploit)"
-                ),
-                Evidence(
-                    type: "host",
-                    detail:
-                        "host=\(state.host?.hostname ?? "unknown") "
-                        + "user=\(state.host?.username ?? "unknown")"
-                ),
-                Evidence(
-                    type: "honesty",
-                    detail:
-                        "Wave-10 residual-pair ranking is path-to-impact narrative for operators. "
-                        + "Rootstock Red does not build pkgs, craft Gatekeeper bypass archives, "
-                        + "dump stealer secrets, dump TCC.db, or strip quarantine."
-                ),
-            ],
-            attackTechniques: ["T1546", "T1553.001", "T1555", "T1562.001"],
-            remediation: [
-                "Prioritize hosts co-locating installer-design + stealer-paths + visibility-depth planes",
-                "Close remote access and harden package/archive workflows before lower-tier inventory",
-                "Use Wave-9 lab plans under ROE for purple validation of expected telemetry",
-                "OPSEC: treat multi-plane compounds as engagement narrative, not an exploit script",
-            ],
-            falsePositiveNotes:
-                "Developer workstations may legitimately co-locate many residual pair planes. "
-                + "Rank production hosts with remote/FDA amplifiers first.",
-            dryRunSafe: true,
-            opsecScore: 26,
-            esfExpected: ["OPEN", "EXEC", "READ"]
+            resolution: .init(
+                evidence: compoundEvidence(planes: sorted, amplifiers: amps, state: state),
+                attackTechniques: ["T1546", "T1553.001", "T1555", "T1562.001"],
+                remediation: compoundRemediation,
+                falsePositiveNotes: compoundFalsePositiveNotes
+            ),
+            runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 26, esfExpected: ["OPEN", "EXEC", "READ"])
         )
     }
 
+    private static func compoundSeverity(planes: [String], amplifiers: [String]) -> Severity {
+        if planes.contains("stealer_paths") && planes.contains("visibility_depth") && amplifiers.contains("fda") && amplifiers.contains("remote") { return .high }
+        return planes.count >= 3 || (planes.count >= 2 && amplifiers.count >= 2) ? .medium : .low
+    }
+
+    private static func compoundTitle(planes: [String]) -> String {
+        "Wave-10 residual-pair compound: \(planes.count) planes (\(planes.joined(separator: ", ")))"
+    }
+
+    private static func compoundEvidence(planes: [String], amplifiers: [String], state: CollectedState) -> [Evidence] {
+        let stages = stageLabels(for: planes, amps: amplifiers)
+        let amplifierDetail = amplifiers.isEmpty ? "amplifiers=none" : "amplifiers=\(amplifiers.joined(separator: "|")) count=\(amplifiers.count)"
+        return [
+            Evidence(type: "planes", detail: "planes=\(planes.joined(separator: "|")) count=\(planes.count)"),
+            Evidence(type: "amplifiers", detail: amplifierDetail),
+            Evidence(type: "stage_labels", detail: "stages=\(stages.joined(separator: "|")) (labels only - not auto-exploit)"),
+            Evidence(type: "host", detail: "host=\(state.host?.hostname ?? "unknown") user=\(state.host?.username ?? "unknown")"),
+            Evidence(type: "honesty", detail: "Wave-10 residual-pair ranking is path-to-impact narrative for operators. Rootstock Red does not build pkgs, craft Gatekeeper bypass archives, dump stealer secrets, dump TCC.db, or strip quarantine."),
+        ]
+    }
+
+    private static let compoundRemediation = [
+        "Prioritize hosts co-locating installer-design + stealer-paths + visibility-depth planes",
+        "Close remote access and harden package/archive workflows before lower-tier inventory",
+        "Use Wave-9 lab plans under ROE for purple validation of expected telemetry",
+        "OPSEC: treat multi-plane compounds as engagement narrative, not an exploit script",
+    ]
+
+    private static let compoundFalsePositiveNotes = "Developer workstations may legitimately co-locate many residual pair planes. Rank production hosts with remote/FDA amplifiers first."
+
+    private struct StageRule {
+        let label: String
+        let planes: Set<String>
+        let amplifiers: Set<String>
+    }
+
     private static func stageLabels(for planes: [String], amps: [String]) -> [String] {
-        var stages: [String] = []
-        if planes.contains("archive_extractor") || amps.contains("gk_off") {
-            stages.append("delivery_trust")
-        }
-        if planes.contains("installer_design") {
-            stages.append("persistence_design")
-        }
-        if planes.contains("stealer_paths") || amps.contains("fda") {
-            stages.append("collection_impact")
-        }
-        if planes.contains("visibility_depth") || amps.contains("sensor_gap") {
-            stages.append("detection_gap")
-        }
-        if amps.contains("remote") {
-            stages.append("lateral_path")
+        let rules = [
+            StageRule(label: "delivery_trust", planes: ["archive_extractor"], amplifiers: ["gk_off"]),
+            StageRule(label: "persistence_design", planes: ["installer_design"], amplifiers: []),
+            StageRule(label: "collection_impact", planes: ["stealer_paths"], amplifiers: ["fda"]),
+            StageRule(label: "detection_gap", planes: ["visibility_depth"], amplifiers: ["sensor_gap"]),
+            StageRule(label: "lateral_path", planes: [], amplifiers: ["remote"]),
+        ]
+        let presentPlanes = Set(planes)
+        let presentAmplifiers = Set(amps)
+        let stages = rules.compactMap { rule in
+            !presentPlanes.isDisjoint(with: rule.planes) || !presentAmplifiers.isDisjoint(with: rule.amplifiers)
+                ? rule.label
+                : nil
         }
         return stages.isEmpty ? ["posture_inventory"] : stages
     }

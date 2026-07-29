@@ -85,93 +85,79 @@ public struct WifiParser: ArtifactParser {
 
     private func parsePlist(at url: URL) -> [EventEnvelope] {
         guard let data = ArtifactIO.data(contentsOf: url) else { return [] }
-        var events: [EventEnvelope] = []
-
-        // Structure A: KnownNetworks dict of SSID -> network dict
-        if let dict = ArtifactIO.plistDict(from: data) {
-            if let known = dict["KnownNetworks"] as? [String: Any] {
-                for (key, value) in known {
-                    let net = value as? [String: Any] ?? [:]
-                    let ssid = stringValue(net["SSIDString"])
-                        ?? stringValue(net["SSID"])
-                        ?? stringValue(net["ssid"])
-                        ?? key
-                    guard !ssid.isEmpty else { continue }
-                    let security = stringValue(net["SecurityType"])
-                        ?? stringValue(net["security"])
-                        ?? stringValue(net["SecurityTypeString"])
-                        ?? ""
-                    let lastConnected = dateString(net["LastConnected"] ?? net["last_connected"])
-                    let hidden = boolString(net["Hidden"] ?? net["hidden"])
-                    events.append(makeEvent(
-                        ssid: ssid,
-                        security: security,
-                        lastConnected: lastConnected,
-                        hidden: hidden,
-                        sourceURL: url
-                    ))
-                }
-            }
-
-            // Structure B: top-level SSID keys that map to network dicts (simplified fixtures).
-            if events.isEmpty {
-                for (key, value) in dict {
-                    guard let net = value as? [String: Any] else { continue }
-                    // Heuristic: looks like a network entry if it has SecurityType / LastConnected / SSID.
-                    let hasNetKeys = net["SecurityType"] != nil
-                        || net["LastConnected"] != nil
-                        || net["SSIDString"] != nil
-                        || net["Hidden"] != nil
-                        || net["security"] != nil
-                    guard hasNetKeys else { continue }
-                    let ssid = stringValue(net["SSIDString"])
-                        ?? stringValue(net["SSID"])
-                        ?? stringValue(net["ssid"])
-                        ?? key
-                    guard !ssid.isEmpty else { continue }
-                    events.append(makeEvent(
-                        ssid: ssid,
-                        security: stringValue(net["SecurityType"]) ?? stringValue(net["security"]) ?? "",
-                        lastConnected: dateString(net["LastConnected"] ?? net["last_connected"]),
-                        hidden: boolString(net["Hidden"] ?? net["hidden"]),
-                        sourceURL: url
-                    ))
-                }
-            }
-
-            // Structure C: array of SSIDs under PreferredOrder or similar.
-            if events.isEmpty, let order = dict["PreferredOrder"] as? [String] {
-                for ssid in order where !ssid.isEmpty {
-                    events.append(makeEvent(
-                        ssid: ssid,
-                        security: "",
-                        lastConnected: "",
-                        hidden: "false",
-                        sourceURL: url
-                    ))
-                }
-            }
+        if let dictionary = ArtifactIO.plistDict(from: data) {
+            let dictionaryEvents = plistDictionaryEvents(dictionary, sourceURL: url)
+            if !dictionaryEvents.isEmpty { return dictionaryEvents }
         }
+        guard let networks = ArtifactIO.plistArray(from: data) else { return [] }
+        return networkArrayEvents(networks, sourceURL: url)
+    }
 
-        // Structure D: top-level array of network dicts.
-        if events.isEmpty, let arr = ArtifactIO.plistArray(from: data) {
-            for net in arr {
-                let ssid = stringValue(net["SSIDString"])
-                    ?? stringValue(net["SSID"])
-                    ?? stringValue(net["ssid"])
-                    ?? ""
-                guard !ssid.isEmpty else { continue }
-                events.append(makeEvent(
-                    ssid: ssid,
-                    security: stringValue(net["SecurityType"]) ?? stringValue(net["security"]) ?? "",
-                    lastConnected: dateString(net["LastConnected"] ?? net["last_connected"]),
-                    hidden: boolString(net["Hidden"] ?? net["hidden"]),
-                    sourceURL: url
-                ))
-            }
+    private func plistDictionaryEvents(_ dictionary: [String: Any], sourceURL: URL) -> [EventEnvelope] {
+        let knownNetworkEvents = knownNetworkEvents(dictionary, sourceURL: sourceURL)
+        if !knownNetworkEvents.isEmpty { return knownNetworkEvents }
+
+        let simplifiedNetworkEvents = simplifiedNetworkEvents(dictionary, sourceURL: sourceURL)
+        if !simplifiedNetworkEvents.isEmpty { return simplifiedNetworkEvents }
+
+        return preferredOrderEvents(dictionary, sourceURL: sourceURL)
+    }
+
+    private func knownNetworkEvents(_ dictionary: [String: Any], sourceURL: URL) -> [EventEnvelope] {
+        guard let networks = dictionary["KnownNetworks"] as? [String: Any] else { return [] }
+        return networks.compactMap { key, value in
+            guard let network = value as? [String: Any] else { return nil }
+            return networkEvent(network, fallbackSSID: key, sourceURL: sourceURL)
         }
+    }
 
-        return events
+    private func simplifiedNetworkEvents(_ dictionary: [String: Any], sourceURL: URL) -> [EventEnvelope] {
+        dictionary.compactMap { key, value in
+            guard let network = value as? [String: Any], isSimplifiedNetwork(network) else { return nil }
+            return networkEvent(network, fallbackSSID: key, sourceURL: sourceURL)
+        }
+    }
+
+    private func isSimplifiedNetwork(_ network: [String: Any]) -> Bool {
+        ["SecurityType", "LastConnected", "SSIDString", "Hidden", "security"]
+            .contains { network[$0] != nil }
+    }
+
+    private func preferredOrderEvents(_ dictionary: [String: Any], sourceURL: URL) -> [EventEnvelope] {
+        guard let order = dictionary["PreferredOrder"] as? [String] else { return [] }
+        return order.compactMap { ssid in
+            guard !ssid.isEmpty else { return nil }
+            return makeEvent(
+                ssid: ssid,
+                security: "",
+                lastConnected: "",
+                hidden: "false",
+                sourceURL: sourceURL
+            )
+        }
+    }
+
+    private func networkArrayEvents(_ networks: [[String: Any]], sourceURL: URL) -> [EventEnvelope] {
+        networks.compactMap { network in
+            networkEvent(network, fallbackSSID: "", sourceURL: sourceURL)
+        }
+    }
+
+    private func networkEvent(
+        _ network: [String: Any],
+        fallbackSSID: String,
+        sourceURL: URL
+    ) -> EventEnvelope? {
+        let ssid = stringValue(network["SSIDString"]) ?? stringValue(network["SSID"])
+            ?? stringValue(network["ssid"]) ?? fallbackSSID
+        guard !ssid.isEmpty else { return nil }
+        return makeEvent(
+            ssid: ssid,
+            security: stringValue(network["SecurityType"]) ?? stringValue(network["security"]) ?? "",
+            lastConnected: dateString(network["LastConnected"] ?? network["last_connected"]),
+            hidden: boolString(network["Hidden"] ?? network["hidden"]),
+            sourceURL: sourceURL
+        )
     }
 
     private func makeEvent(
@@ -186,15 +172,20 @@ public struct WifiParser: ArtifactParser {
         let eventTime = ISO8601DateFormatter().date(from: lastConnected) ?? mtime
 
         return EventEnvelope(
-            eventTime: eventTime,
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "WIFI",
-            eventType: "network.wifi_preferred",
-            entityRefs: [
+            identity: EventEnvelope.Identity(
+                kind: "network.wifi_preferred",
+                label: "WIFI"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: eventTime,
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [
                 EntityID(kind: .network, value: "ssid=\(ssid)"),
             ],
-            fields: [
+                properties: [
                 "wifi.ssid": ssid,
                 "wifi.security": security,
                 "wifi.last_connected": lastConnected,
@@ -203,8 +194,9 @@ public struct WifiParser: ArtifactParser {
                 "wifi.source_path": ArtifactRoot.pathKey(sourceURL),
                 FieldTaxonomy.eventType: "network.wifi_preferred",
             ],
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.93
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.93
+            )
         )
     }
 

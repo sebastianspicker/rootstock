@@ -12,34 +12,19 @@ public struct RecentItemsParser: ArtifactParser {
     public init() {}
 
     public func parse(source: ImageSource) throws -> [EventEnvelope] {
-        let root = ArtifactRoot(source: source)
-        var events: [EventEnvelope] = []
+        let candidates = ArtifactRoot(source: source).enumerate(matching: isRecentItemsFile)
+        let plistDirectories = Set(candidates.filter { $0.pathExtension == "plist" }.map { ArtifactRoot.pathKey($0.deletingLastPathComponent()) })
+        return candidates.flatMap { url in
+            guard url.pathExtension != "json" || !plistDirectories.contains(ArtifactRoot.pathKey(url.deletingLastPathComponent())) else { return [EventEnvelope]() }
+            return url.pathExtension == "json" ? parseJSON(url) : parsePlist(url)
+        }
+    }
 
-        let candidates = root.enumerate(matching: {
-            let name = $0.lastPathComponent
-            return name == "RecentDocuments.plist"
-                || name == "RecentDocuments.json"
-                || name.hasPrefix("com.apple.LSSharedFileList.RecentDocuments")
-                || (name.contains("Recent") && ($0.pathExtension == "plist" || $0.pathExtension == "json")
-                    && $0.path.contains("sharedfilelist"))
-        })
-        // Prefer .plist over companion .json in the same directory (avoid double-count).
-        var skipJSONDirs = Set<String>()
-        for url in candidates where url.pathExtension == "plist" {
-            skipJSONDirs.insert(ArtifactRoot.pathKey(url.deletingLastPathComponent()))
-        }
-        for url in candidates {
-            if url.pathExtension == "json",
-               skipJSONDirs.contains(ArtifactRoot.pathKey(url.deletingLastPathComponent())) {
-                continue
-            }
-            if url.pathExtension == "json" {
-                events.append(contentsOf: parseJSON(url))
-            } else {
-                events.append(contentsOf: parsePlist(url))
-            }
-        }
-        return events
+    private func isRecentItemsFile(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        if ["RecentDocuments.plist", "RecentDocuments.json"].contains(name) { return true }
+        if name.hasPrefix("com.apple.LSSharedFileList.RecentDocuments") { return true }
+        return name.contains("Recent") && ["plist", "json"].contains(url.pathExtension) && url.path.contains("sharedfilelist")
     }
 
     private func parsePlist(_ url: URL) -> [EventEnvelope] {
@@ -73,13 +58,18 @@ public struct RecentItemsParser: ArtifactParser {
             if !path.isEmpty { refs.append(.file(path: path)) }
             out.append(
                 EventEnvelope(
-                    eventTime: Date(timeIntervalSince1970: 0),
-                    collectedAt: Date(),
-                    source: .parser,
-                    sourcePlugin: "RECENTITEMS",
-                    eventType: "mru.document",
-                    entityRefs: refs,
-                    fields: [
+                    identity: EventEnvelope.Identity(
+                        kind: "mru.document",
+                        label: "RECENTITEMS"
+                    ),
+                    capture: EventEnvelope.Capture(
+                        source: .parser,
+                        eventTime: Date(timeIntervalSince1970: 0),
+                        collectedAt: Date()
+                    ),
+                    payload: EventEnvelope.Payload(
+                        entityRefs: refs,
+                        properties: [
                         "mru.name": name,
                         "mru.url": fileURL,
                         "mru.path": path,
@@ -88,8 +78,9 @@ public struct RecentItemsParser: ArtifactParser {
                         FieldTaxonomy.eventType: "mru.document",
                         FieldTaxonomy.userName: inferUser(from: sourceURL) ?? "",
                     ],
-                    rawRef: ArtifactRoot.pathKey(sourceURL),
-                    confidence: 0.88
+                        provenance: ArtifactRoot.pathKey(sourceURL),
+                        confidence: 0.88
+                    )
                 )
             )
         }

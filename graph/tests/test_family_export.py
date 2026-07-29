@@ -88,33 +88,31 @@ class FamilyExportTests(unittest.TestCase):
         self.assertIn("rs_BlueFinding", kinds)
         self.assertIn("rs_FamilyHost", kinds)
         self.assertNotIn("rs_CveFinding", kinds)
-        findings = [
-            node
-            for node in payload["graph"]["nodes"]
-            if node["kind"] == "rs_BlueFinding"
-        ]
+        findings = self._blue_findings(payload)
+        self._assert_blue_finding_properties(findings)
+        self._assert_blue_wave_11_findings(findings)
+        edge_kinds = {edge["kind"] for edge in payload["graph"]["edges"]}
+        self.assertIn("rs_BlueHasFinding", edge_kinds)
+
+    def _blue_findings(self, payload: dict) -> list[dict]:
+        return [node for node in payload["graph"]["nodes"] if node["kind"] == "rs_BlueFinding"]
+
+    def _assert_blue_finding_properties(self, findings: list[dict]) -> None:
         self.assertGreaterEqual(len(findings), 1)
         for node in findings:
             self.assertEqual(node["properties"]["source"], "rootstock-blue")
             self.assertTrue(node["properties"]["family_export"])
-        # Wave-11 multi-plane harden findings remain distinct blue kinds
+
+    def _assert_blue_wave_11_findings(self, findings: list[dict]) -> None:
         finding_ids = {
             node["properties"].get("finding_id") or node["properties"].get("id")
             for node in findings
         }
-        self.assertTrue(
-            any(
-                fid and "launchd_override_depth" in str(fid)
-                for fid in finding_ids
-            )
-            or any(
-                fid and "url_scheme_handler" in str(fid)
-                for fid in finding_ids
-            )
-            or len(findings) >= 1
+        has_wave_11_id = any(
+            fid and ("launchd_override_depth" in str(fid) or "url_scheme_handler" in str(fid))
+            for fid in finding_ids
         )
-        edge_kinds = {edge["kind"] for edge in payload["graph"]["edges"]}
-        self.assertIn("rs_BlueHasFinding", edge_kinds)
+        self.assertTrue(has_wave_11_id or len(findings) >= 1)
 
     def test_schema_version_mismatch_fails_closed(self) -> None:
         raw = json.loads(RED_FIXTURE.read_text(encoding="utf-8"))

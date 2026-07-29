@@ -21,18 +21,30 @@ final class FXTests: XCTestCase {
 
     func testTimelineMergeOrderAndEntities() {
         let a = EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 100),
-            source: .parser,
-            sourcePlugin: "TCC",
-            eventType: "tcc.access",
-            entityRefs: [EntityID(kind: .tcc, value: "cam|app")]
+            identity: EventEnvelope.Identity(
+                kind: "tcc.access",
+                label: "TCC"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: Date(timeIntervalSince1970: 100)
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [EntityID(kind: .tcc, value: "cam|app")]
+            )
         )
         let b = EventEnvelope(
-            eventTime: Date(timeIntervalSince1970: 50),
-            source: .es,
-            sourcePlugin: "eskit",
-            eventType: "NOTIFY_EXEC",
-            entityRefs: [.process(pid: 1, path: "/bin/zsh")]
+            identity: EventEnvelope.Identity(
+                kind: "NOTIFY_EXEC",
+                label: "eskit"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .es,
+                eventTime: Date(timeIntervalSince1970: 50)
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: [.process(pid: 1, path: "/bin/zsh")]
+            )
         )
         let merged = TimelineMerger.merge([a, b])
         XCTAssertEqual(merged.map(\.eventType), ["NOTIFY_EXEC", "tcc.access"])

@@ -69,24 +69,10 @@ public struct PrivescPathClusterCheck: Check {
         }
         guard !hits.isEmpty else { return nil }
 
-        return Finding(
-            id: "\(id).system_launchd_writable",
-            title: "Privesc cluster: user-writable system launchd paths (\(hits.count))",
-            severity: .high,
-            confidence: .medium,
-            category: .misconfig,
-            evidence: Array(hits.prefix(30)),
-            attackTechniques: ["T1068", "T1543.001", "T1222"],
-            remediation: [
+        return Finding(id: "\(id).system_launchd_writable", title: "Privesc cluster: user-writable system launchd paths (\(hits.count))", severity: .high, category: .misconfig, resolution: .init(evidence: Array(hits.prefix(30)), attackTechniques: ["T1068", "T1543.001", "T1222"], remediation: [
                 "Correct ownership to root:wheel and mode 644/755 on system LaunchAgents/Daemons",
                 "Investigate how paths became user-writable (installer bug, lab leftover, compromise)",
-            ],
-            falsePositiveNotes:
-                "Synthetic lab trees intentionally mark privileged names under temp dirs as writable",
-            dryRunSafe: true,
-            opsecScore: 26,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Synthetic lab trees intentionally mark privileged names under temp dirs as writable"), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 26, esfExpected: ["OPEN"]))
     }
 
     /// File sharing / remote access while protections weak - PEASS “easy win” cluster.
@@ -124,23 +110,10 @@ public struct PrivescPathClusterCheck: Check {
             evidence.append(Evidence(type: "context", detail: "assess process isRoot=true"))
         }
 
-        return Finding(
-            id: "\(id).dangerous_sharing",
-            title: "Privesc cluster: remote sharing enabled with weak protections/context",
-            severity: .medium,
-            confidence: .medium,
-            category: .network,
-            evidence: evidence,
-            attackTechniques: ["T1021", "T1021.002", "T1021.004", "T1562.001"],
-            remediation: [
+        return Finding(id: "\(id).dangerous_sharing", title: "Privesc cluster: remote sharing enabled with weak protections/context", severity: .medium, category: .network, resolution: .init(evidence: evidence, attackTechniques: ["T1021", "T1021.002", "T1021.004", "T1562.001"], remediation: [
                 "Disable unused sharing services; require VPN + strong auth if remote admin is needed",
                 "Re-enable SIP/Gatekeeper/FileVault per baseline",
-            ],
-            falsePositiveNotes: "Admin jump boxes may intentionally combine SSH with hardened controls",
-            dryRunSafe: true,
-            opsecScore: 18,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Admin jump boxes may intentionally combine SSH with hardened controls"), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN"]))
     }
 
     /// Running as root with additional weak signals - prioritize operator awareness.
@@ -152,13 +125,7 @@ public struct PrivescPathClusterCheck: Check {
         let weakProt = state.protections?.sipEnabled == false
         guard weakInject || weakProt || state.network?.remoteLoginSSH == true else { return nil }
 
-        return Finding(
-            id: "\(id).root_weak_posture",
-            title: "Privesc cluster: root assess context with weak host posture signals",
-            severity: .medium,
-            confidence: .high,
-            category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).root_weak_posture", title: "Privesc cluster: root assess context with weak host posture signals", severity: .medium, category: .misconfig, resolution: .init(evidence: [
                 Evidence(type: "host", detail: "isRoot=true username=\(state.host?.username ?? "?")"),
                 Evidence(
                     type: "signals",
@@ -166,17 +133,10 @@ public struct PrivescPathClusterCheck: Check {
                         "weakInject=\(weakInject) sipDisabled=\(weakProt) "
                         + "ssh=\((state.network?.remoteLoginSSH).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1068", "T1548", "T1078"],
-            remediation: [
+            ], attackTechniques: ["T1068", "T1548", "T1078"], remediation: [
                 "Prefer least-privilege assess where possible; document root runs in ROE",
                 "Harden inject surfaces and re-enable SIP on lab/prod baselines",
-            ],
-            falsePositiveNotes: "Authorized root lab runs are valid; finding is posture ranking, not malware",
-            dryRunSafe: true,
-            opsecScore: 15,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Authorized root lab runs are valid; finding is posture ranking, not malware"), runtime: .init(confidence: .high, dryRunSafe: true, opsecScore: 15, esfExpected: ["OPEN"]))
     }
 
 }

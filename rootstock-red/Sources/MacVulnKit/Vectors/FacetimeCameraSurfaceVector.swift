@@ -15,32 +15,21 @@ public struct FacetimeCameraSurfaceVector: Check {
         let note = state.collectorNotes["collect.facetime_camera_surface"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "facetime_camera_surface_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "facetime_camera_surface_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.facetimeAppPaths + s.avConferencePaths + s.facetimePrefPaths).prefix(10) {
-                evidence.append(Evidence(type: "facetime_camera_surface_path", path: path, detail: "FaceTime camera dual-use path"))
-            }
-            for n in s.notes.prefix(4) { evidence.append(Evidence(type: "facetime_camera_surface_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.facetimeAppPaths + s.avConferencePaths + s.facetimePrefPaths, type: "facetime_camera_surface_path", detail: "FaceTime camera dual-use path", limit: 10)
+            evidence += VectorEvidence.notes(s.notes, type: "facetime_camera_surface_note", limit: 4)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never activates camera/mic or dumps FaceTime call history contents."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "FaceTime camera dual-use with remote amplifier" : "FaceTime / camera pipeline dual-use surface",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1125", "T1123", "T1113"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "FaceTime camera dual-use with remote amplifier" : "FaceTime / camera pipeline dual-use surface", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1125", "T1123", "T1113"], remediation: [
                 "Inventory and baseline FaceTime camera dual-use paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never activates camera/mic or dumps FaceTime call history contents",
-            ],
-            falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

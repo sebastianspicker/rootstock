@@ -11,12 +11,10 @@ public struct CupsRemoteCompoundVector: Check {
         let a = s?.cupsDaemonPaths.count ?? 0
         let b = s?.ppdConfigPaths.count ?? 0
         guard a >= 1, b >= 1 || a >= 2 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
-        let sensorThin = state.esf?.clientPaths.isEmpty == true || state.securityProducts.filter(\.present).isEmpty
-        guard remote || fda || sensorThin || a + b >= 3 else { return [] }
+        let compound = RemoteCompoundSignals(state: state)
+        guard compound.hasAmplifier || a + b >= 3 else { return [] }
         var evidence: [Evidence] = [
-            Evidence(type: "cups_print_compound", detail: "a=\(a) b=\(b) remote=\(remote) fda=\(fda) sensorThin=\(sensorThin)"),
+            Evidence(type: "cups_print_compound", detail: "a=\(a) b=\(b) remote=\(compound.remote) fda=\(compound.fullDiskAccess) sensorThin=\(compound.sensorThin)"),
         ]
         if let s {
             for path in (s.cupsDaemonPaths + s.ppdConfigPaths).prefix(8) {
@@ -24,19 +22,11 @@ public struct CupsRemoteCompoundVector: Check {
             }
         }
         evidence.append(Evidence(type: "honesty", detail: "never submits print jobs or reconfigures CUPS remotely."))
-        let severity: Severity = (remote && fda) ? .high : ((remote || fda || sensorThin) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "CUPS printer dual-use × remote compound" : "CUPS printer dual-use × impact compound",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1040", "T1071", "T1204"],
-            remediation: [
+        let severity = compound.severity
+        return [Finding(id: Self.id, title: compound.remote ? "CUPS printer dual-use × remote compound" : "CUPS printer dual-use × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1040", "T1071", "T1204"], remediation: [
                 "Prioritize hosts co-locating CUPS printer dual-use with remote/FDA amplifiers",
                 "Use Wave-13 lab plans under ROE for purple validation",
                 "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-            ],
-            falsePositiveNotes: "Developer hosts may co-locate dual-use paths; rank production remote hosts first.",
-            dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"]
-        )]
+            ], falsePositiveNotes: "Developer hosts may co-locate dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"]))]
     }
 }

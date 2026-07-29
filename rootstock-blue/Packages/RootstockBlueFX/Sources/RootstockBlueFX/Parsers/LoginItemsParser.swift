@@ -19,23 +19,7 @@ public struct LoginItemsParser: ArtifactParser {
         var urls: [URL] = []
         var seen = PathDeduper()
 
-        for found in root.enumerate(matching: { url in
-            let name = url.lastPathComponent
-            let path = url.path
-            if name == "com.apple.LSSharedFileList.LoginItems.json"
-                || name == "com.apple.LSSharedFileList.LoginItems.sfl2.json"
-                || name == "LoginItems.json" {
-                return true
-            }
-            if path.contains("sharedfilelist") && name.lowercased().contains("loginitem") {
-                return true
-            }
-            if path.contains("backgroundtaskmanagementagent")
-                && (name.hasSuffix(".json") || name.hasSuffix(".plist") || name.hasSuffix(".btm")) {
-                return true
-            }
-            return false
-        }) {
+        for found in root.enumerate(matching: loginItemPathMatch) {
             if !seen.insert(found) { continue }
             ArtifactRoot.appendUnique(&urls, found)
         }
@@ -54,6 +38,21 @@ public struct LoginItemsParser: ArtifactParser {
             events.append(contentsOf: parseLoginItemsFile(at: url))
         }
         return events
+    }
+
+    private func loginItemPathMatch(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        let path = url.path
+        if name == "com.apple.LSSharedFileList.LoginItems.json"
+            || name == "com.apple.LSSharedFileList.LoginItems.sfl2.json"
+            || name == "LoginItems.json" { return true }
+        if path.contains("sharedfilelist") && name.lowercased().contains("loginitem") { return true }
+        return isBackgroundTaskPath(path: path, name: name)
+    }
+
+    private func isBackgroundTaskPath(path: String, name: String) -> Bool {
+        guard path.contains("backgroundtaskmanagementagent") else { return false }
+        return name.hasSuffix(".json") || name.hasSuffix(".plist") || name.hasSuffix(".btm")
     }
 
     private func parseLoginItemsFile(at url: URL) -> [EventEnvelope] {
@@ -137,28 +136,33 @@ public struct LoginItemsParser: ArtifactParser {
             fields["persistence.program"] = path
         }
 
-        var entities: [EntityID] = [
-            EntityID(kind: .persistence, value: "login_item|\(name.isEmpty ? path : name)"),
-        ]
-        if !path.isEmpty {
-            entities.append(.file(path: path))
-        }
-        entities.append(.file(path: ArtifactRoot.pathKey(sourceURL)))
-        if let user, !user.isEmpty {
-            entities.append(.user(name: user))
-        }
+        let entities = makeEntities(name: name, path: path, sourceURL: sourceURL, user: user)
 
         return EventEnvelope(
-            eventTime: fileMTime(sourceURL),
-            collectedAt: Date(),
-            source: .parser,
-            sourcePlugin: "LOGINITEMS",
-            eventType: "persistence.item",
-            entityRefs: entities,
-            fields: fields,
-            rawRef: ArtifactRoot.pathKey(sourceURL),
-            confidence: 0.94
+            identity: EventEnvelope.Identity(
+                kind: "persistence.item",
+                label: "LOGINITEMS"
+            ),
+            capture: EventEnvelope.Capture(
+                source: .parser,
+                eventTime: fileMTime(sourceURL),
+                collectedAt: Date()
+            ),
+            payload: EventEnvelope.Payload(
+                entityRefs: entities,
+                properties: fields,
+                provenance: ArtifactRoot.pathKey(sourceURL),
+                confidence: 0.94
+            )
         )
+    }
+
+    private func makeEntities(name: String, path: String, sourceURL: URL, user: String?) -> [EntityID] {
+        var entities: [EntityID] = [.init(kind: .persistence, value: "login_item|\(name.isEmpty ? path : name)")]
+        if !path.isEmpty { entities.append(.file(path: path)) }
+        entities.append(.file(path: ArtifactRoot.pathKey(sourceURL)))
+        if let user, !user.isEmpty { entities.append(.user(name: user)) }
+        return entities
     }
 
     private func boolString(_ any: Any?) -> String {

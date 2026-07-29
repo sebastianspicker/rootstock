@@ -12,29 +12,46 @@ public struct FileVaultEscrowPostureVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard Self.hasFileVaultSurface(state), Self.hasPathToImpact(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+
+    private static func hasFileVaultSurface(_ state: CollectedState) -> Bool {
         let fv = state.fileVaultEscrow
-        let protFV = state.protections?.fileVaultOn
-        let fileVaultOn = fv?.fileVaultOn ?? protFV
+        let fileVaultOn = fv?.fileVaultOn ?? state.protections?.fileVaultOn
+        let note = state.collectorNotes["collect.filevault_escrow"] != nil
+            || state.collectorNotes["collect.protections"] != nil
+        return fileVaultOn != nil
+            || (fv?.escrowPathHints.count ?? 0) > 0
+            || (fv?.institutionalEscrowHints.count ?? 0) > 0
+            || fv?.fdesetupPresent == true
+            || note
+    }
+
+    private static func hasPathToImpact(_ state: CollectedState) -> Bool {
+        let fv = state.fileVaultEscrow
+        return fv?.fileVaultOn ?? state.protections?.fileVaultOn == false
+            || remoteAccess(state)
+            || state.mdm?.enrolled == false
+            || (fv?.escrowPathHints.count ?? 0) > 0
+            || (fv?.institutionalEscrowHints.count ?? 0) > 0
+            || fv?.fdesetupPresent == true
+    }
+
+    private static func remoteAccess(_ state: CollectedState) -> Bool {
+        state.network?.remoteLoginSSH == true
+            || state.network?.screenSharingARD == true
+    }
+
+
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let fv = state.fileVaultEscrow
+        let fileVaultOn = fv?.fileVaultOn ?? state.protections?.fileVaultOn
         let escrow = fv?.escrowPathHints.count ?? 0
         let institutional = fv?.institutionalEscrowHints.count ?? 0
         let fdesetup = fv?.fdesetupPresent == true
-        let note = state.collectorNotes["collect.filevault_escrow"] != nil
-            || state.collectorNotes["collect.protections"] != nil
-
-        let surface = fileVaultOn != nil || escrow > 0 || institutional > 0 || fdesetup || note
-        guard surface else { return [] }
-
-        let remote =
-            state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
-        let unmanaged = state.mdm?.enrolled == false
-        let fvOff = fileVaultOn == false
-
-        // Path-to-impact: FV off, or escrow surface with remote/unmanaged, or institutional paths
-        guard fvOff || remote || unmanaged || escrow > 0 || institutional > 0 || fdesetup else {
-            return []
-        }
-
+        let remote = Self.remoteAccess(state)
         var evidence: [Evidence] = [
             Evidence(
                 type: "filevault_summary",
@@ -65,10 +82,19 @@ public struct FileVaultEscrowPostureVector: Check {
                     + "never provides offline unlock recipes. Paths and status class only."
             )
         )
+        return evidence
+    }
 
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let fv = state.fileVaultEscrow
+        let fileVaultOn = fv?.fileVaultOn ?? state.protections?.fileVaultOn
+        let escrow = fv?.escrowPathHints.count ?? 0
+        let institutional = fv?.institutionalEscrowHints.count ?? 0
+        let fvOff = fileVaultOn == false
+        let unmanaged = state.mdm?.enrolled == false
         let severity: Severity
         let title: String
-        if fvOff && remote {
+        if fvOff && remoteAccess(state) {
             severity = .high
             title = "FileVault off with remote access compound (disk confidentiality gap)"
         } else if fvOff {
@@ -81,30 +107,13 @@ public struct FileVaultEscrowPostureVector: Check {
             severity = .low
             title = "FileVault / recovery escrow posture surface"
         }
-
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: fvOff ? .medium : .low,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1552", "T1530"],
-                remediation: [
+        return Finding(id: Self.id, title: title, severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1552", "T1530"], remediation: [
                     "Enable FileVault on all portable and high-value endpoints via MDM",
                     "Escrow institutional recovery keys to approved MDM only; audit escrow coverage",
                     "Disable remote access on endpoints lacking volume encryption",
                     "OPSEC: Rootstock Red never extracts or displays recovery key material",
-                ],
-                falsePositiveNotes:
-                    "Escrow preference paths may exist without active institutional escrow. "
-                    + "Confirm FV status with authorized inventory tooling under ROE.",
-                dryRunSafe: true,
-                opsecScore: 14,
-                esfExpected: ["OPEN"]
-            ),
-        ]
+                ], falsePositiveNotes: "Escrow preference paths may exist without active institutional escrow. "
+                    + "Confirm FV status with authorized inventory tooling under ROE."), runtime: .init(confidence: fvOff ? .medium : .low, dryRunSafe: true, opsecScore: 14, esfExpected: ["OPEN"]))
     }
 
 }

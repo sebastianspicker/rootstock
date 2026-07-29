@@ -4,31 +4,38 @@ import {element} from "./runtime";
 import {displayKind, safeNodeColor} from "./model";
 import type {Controller} from "./runtime";
 
-export function renderMetadata(controller: Controller): void {
-  const metadata = controller.state.graph.payload.metadata ?? {};
-  const hostname = typeof metadata.hostname === "string" ? metadata.hostname : "";
-  const generatedAt = metadataTimestamp(metadata.generated_at);
+function renderMetadataSummary(controller: Controller, hostname: string, generatedAt: Date | null): void {
   controller.dom.metaInfo.textContent = hostname || "provenance unavailable";
-  controller.dom.snapshotTime.textContent = generatedAt ? displayTime(generatedAt) : "Not recorded";
+  controller.dom.snapshotTime.textContent = displayTimestamp(generatedAt);
   controller.dom.nodeCount.textContent = String(controller.state.graph.nodes.length);
   controller.dom.edgeCount.textContent = String(controller.state.graph.links.length);
+  controller.dom.provenanceSource.textContent = typeof controller.state.graph.payload.metadata?.source === "string"
+    ? controller.state.graph.payload.metadata.source
+    : hostname || "Unavailable";
+}
+
+function renderTimeline(controller: Controller, metadata: Record<string, unknown>, generatedAt: Date | null): void {
   controller.dom.timelineCollected.textContent = displayTimestamp(metadataTimestamp(metadata.collected_at));
   controller.dom.timelineImported.textContent = displayTimestamp(metadataTimestamp(metadata.imported_at));
   controller.dom.timelineDerived.textContent = displayTimestamp(metadataTimestamp(metadata.derived_at));
   controller.dom.timelineSnapshot.textContent = displayTimestamp(generatedAt);
-  controller.dom.provenanceSource.textContent = typeof metadata.source === "string" ? metadata.source : hostname || "Unavailable";
-  const recordedStages = [
-    metadata.collected_at,
-    metadata.imported_at,
-    metadata.derived_at,
-    metadata.generated_at,
-  ].filter((value) => metadataTimestamp(value) !== null).length;
-  controller.dom.provenanceStatus.textContent = recordedStages === 4
-    ? "Recorded"
-    : recordedStages > 0 ? "Partial" : "Unavailable";
-  controller.dom.provenanceStatus.dataset.state = recordedStages === 4
-    ? "recorded"
-    : recordedStages > 0 ? "partial" : "unavailable";
+}
+
+function renderProvenanceStatus(controller: Controller, metadata: Record<string, unknown>): void {
+  const recordedStages = ["collected_at", "imported_at", "derived_at", "generated_at"]
+    .filter((stage) => metadataTimestamp(metadata[stage]) !== null).length;
+  const status = recordedStages === 4 ? "Recorded" : recordedStages > 0 ? "Partial" : "Unavailable";
+  controller.dom.provenanceStatus.textContent = status;
+  controller.dom.provenanceStatus.dataset.state = status.toLowerCase();
+}
+
+export function renderMetadata(controller: Controller): void {
+  const metadata = controller.state.graph.payload.metadata ?? {};
+  const hostname = typeof metadata.hostname === "string" ? metadata.hostname : "";
+  const generatedAt = metadataTimestamp(metadata.generated_at);
+  renderMetadataSummary(controller, hostname, generatedAt);
+  renderTimeline(controller, metadata, generatedAt);
+  renderProvenanceStatus(controller, metadata);
 }
 
 export function metadataTimestamp(value: unknown): Date | null {

@@ -60,25 +60,11 @@ public struct DeliveryTrustClusterCheck: Check {
 
         guard !evidence.isEmpty else { return nil }
 
-        return Finding(
-            id: "\(id).quarantine_hits",
-            title: "Delivery-trust cluster: quarantine / download-delivery signals present",
-            severity: .low,
-            confidence: .medium,
-            category: .codesign,
-            evidence: Array(evidence.prefix(30)),
-            attackTechniques: ["T1553.001", "T1204.002", "T1105"],
-            remediation: [
+        return Finding(id: "\(id).quarantine_hits", title: "Delivery-trust cluster: quarantine / download-delivery signals present", severity: .low, category: .codesign, resolution: .init(evidence: Array(evidence.prefix(30)), attackTechniques: ["T1553.001", "T1204.002", "T1105"], remediation: [
                 "Inventory com.apple.quarantine xattrs on managed download paths via MDM",
                 "Do not mass-strip quarantine; prefer Gatekeeper + notarization policy",
                 "Correlate download provenance with allowlisted installers only",
-            ],
-            falsePositiveNotes:
-                "Legitimate user downloads commonly carry quarantine; this is surface inventory, not malware",
-            dryRunSafe: true,
-            opsecScore: 12,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Legitimate user downloads commonly carry quarantine; this is surface inventory, not malware"), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 12, esfExpected: ["OPEN"]))
     }
 
     /// Built-in XProtect definitions bundle path - inventory only (not a bypass check).
@@ -92,30 +78,16 @@ public struct DeliveryTrustClusterCheck: Check {
             ? "Delivery-trust cluster: XProtect.bundle present (built-in malware defs surface)"
             : "Delivery-trust cluster: XProtect.bundle path missing"
 
-        return Finding(
-            id: "\(id).xprotect_surface",
-            title: title,
-            severity: severity,
-            confidence: .high,
-            category: .securityProduct,
-            evidence: [
+        return Finding(id: "\(id).xprotect_surface", title: title, severity: severity, category: .securityProduct, resolution: .init(evidence: [
                 Evidence(
                     type: "xprotect",
                     path: path,
                     detail: "present=\(present) (path probe only - not an XProtect bypass)"
                 ),
-            ],
-            attackTechniques: ["T1518.001", "T1082"],
-            remediation: [
+            ], attackTechniques: ["T1518.001", "T1082"], remediation: [
                 "Confirm XProtect / XProtect Remediator updates via softwareupdate / MDM",
                 "Do not disable or replace Apple malware definitions on managed fleets",
-            ],
-            falsePositiveNotes:
-                "Some recovery / custom OS images may omit the standard XProtect.bundle path",
-            dryRunSafe: true,
-            opsecScore: 8,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Some recovery / custom OS images may omit the standard XProtect.bundle path"), runtime: .init(confidence: .high, dryRunSafe: true, opsecScore: 8, esfExpected: ["OPEN"]))
     }
 
     /// Gatekeeper disabled compounded with remote access (SSH / ARD).
@@ -126,13 +98,7 @@ public struct DeliveryTrustClusterCheck: Check {
             || state.network?.screenSharingARD == true
         guard remote else { return nil }
 
-        return Finding(
-            id: "\(id).gatekeeper_off_with_remote",
-            title: "Delivery-trust cluster: Gatekeeper off with remote access enabled",
-            severity: .high,
-            confidence: .medium,
-            category: .codesign,
-            evidence: [
+        return Finding(id: "\(id).gatekeeper_off_with_remote", title: "Delivery-trust cluster: Gatekeeper off with remote access enabled", severity: .high, category: .codesign, resolution: .init(evidence: [
                 Evidence(type: "gatekeeper", detail: "gatekeeperEnabled=false"),
                 Evidence(
                     type: "remote",
@@ -140,18 +106,11 @@ public struct DeliveryTrustClusterCheck: Check {
                         "ssh=\((state.network?.remoteLoginSSH).rootstockDescribe) "
                         + "ard=\((state.network?.screenSharingARD).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1553.001", "T1021", "T1021.004", "T1204.002"],
-            remediation: [
+            ], attackTechniques: ["T1553.001", "T1021", "T1021.004", "T1204.002"], remediation: [
                 "Re-enable Gatekeeper via MDM compliance",
                 "Disable unused Remote Login / Screen Sharing; require VPN + MFA for remote admin",
                 "Prioritize hosts that combine remote access with weakened trust-chain controls",
-            ],
-            falsePositiveNotes: "Isolated lab VMs may intentionally disable GK with remote console",
-            dryRunSafe: true,
-            opsecScore: 18,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Isolated lab VMs may intentionally disable GK with remote console"), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN"]))
     }
 
 }

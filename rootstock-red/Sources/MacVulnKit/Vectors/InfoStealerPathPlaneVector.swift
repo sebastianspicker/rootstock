@@ -12,6 +12,11 @@ public struct InfoStealerPathPlaneVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard hasSurface(state), hasInventory(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
         let sp = state.infoStealerPathPlane
         let browser = sp?.browserAdjacentPaths.count ?? 0
         let messaging = sp?.messagingAndVaultPaths.count ?? 0
@@ -19,10 +24,23 @@ public struct InfoStealerPathPlaneVector: Check {
         let total = browser + messaging + wallet
         let surface = sp?.collectionSurfacePresent == true || total >= 4
         let note = state.collectorNotes["collect.infostealer_path_plane"] != nil
+        return surface || note
+    }
 
-        guard surface || note else { return [] }
-        guard total >= 3 || (browser >= 1 && messaging >= 1) else { return [] }
+    private func hasInventory(_ state: CollectedState) -> Bool {
+        let sp = state.infoStealerPathPlane
+        let browser = sp?.browserAdjacentPaths.count ?? 0
+        let messaging = sp?.messagingAndVaultPaths.count ?? 0
+        let wallet = sp?.walletAndSyncPaths.count ?? 0
+        let total = browser + messaging + wallet
+        return total >= 3 || (browser >= 1 && messaging >= 1)
+    }
 
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let sp = state.infoStealerPathPlane
+        let browser = sp?.browserAdjacentPaths.count ?? 0
+        let messaging = sp?.messagingAndVaultPaths.count ?? 0
+        let wallet = sp?.walletAndSyncPaths.count ?? 0
         let fda = state.tcc?.fullDiskAccessLikely == true
         let remote =
             state.network?.remoteLoginSSH == true
@@ -56,6 +74,19 @@ public struct InfoStealerPathPlaneVector: Check {
             )
         )
 
+        return evidence
+    }
+
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let sp = state.infoStealerPathPlane
+        let browser = sp?.browserAdjacentPaths.count ?? 0
+        let messaging = sp?.messagingAndVaultPaths.count ?? 0
+        let wallet = sp?.walletAndSyncPaths.count ?? 0
+        let total = browser + messaging + wallet
+        let fda = state.tcc?.fullDiskAccessLikely == true
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let sensorThin = state.esf?.clientPaths.isEmpty == true
+            || state.securityProducts.filter(\.present).isEmpty
         let severity: Severity
         if fda && total >= 6 && (remote || sensorThin) {
             severity = .high
@@ -65,30 +96,14 @@ public struct InfoStealerPathPlaneVector: Check {
             severity = .low
         }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: fda
+        return Finding(id: Self.id, title: fda
                     ? "Info-stealer multi-app collection paths under likely Full Disk Access"
-                    : "Info-stealer multi-app collection path plane",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1555", "T1005", "T1539"],
-                remediation: [
+                    : "Info-stealer multi-app collection path plane", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1555", "T1005", "T1539"], remediation: [
                     "Limit Full Disk Access grants to approved security/backup agents only",
                     "Monitor multi-app data-store access patterns (browser + Mail/Messages + vault apps)",
                     "Prefer platform keychain/secure enclave patterns; educate users on stealer paste-run delivery",
                     "OPSEC: Rootstock Red does not harvest cookies, passwords, or wallet keys",
-                ],
-                falsePositiveNotes:
-                    "Browser, Mail, and Documents paths exist on typical Macs. Prioritize FDA + remote "
-                    + "+ multi-family path co-presence for stealer-class engagement narrative.",
-                dryRunSafe: true,
-                opsecScore: 25,
-                esfExpected: ["OPEN", "READ"]
-            ),
-        ]
+                ], falsePositiveNotes: "Browser, Mail, and Documents paths exist on typical Macs. Prioritize FDA + remote "
+                    + "+ multi-family path co-presence for stealer-class engagement narrative."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ"]))
     }
 }

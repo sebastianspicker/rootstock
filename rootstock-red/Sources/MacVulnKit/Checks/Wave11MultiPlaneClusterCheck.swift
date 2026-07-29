@@ -18,42 +18,43 @@ public struct Wave11MultiPlaneClusterCheck: Check {
     }
 
     private static func pairPlanes(state: CollectedState) -> [String] {
-        var planes: [String] = []
+        presentPlaneNames([
+            .init(name: "url_scheme_handler", isPresent: urlSchemeHandlerPresent(state)),
+            .init(name: "launchd_override_depth", isPresent: launchdOverridePresent(state)),
+            .init(name: "browser_extension_dualuse", isPresent: browserExtensionPresent(state)),
+            .init(name: "shortcuts_app_intents", isPresent: shortcutsAppIntentsPresent(state)),
+        ])
+    }
 
-        let uh = state.urlSchemeHandler
-        if uh?.handlerSurfacePresent == true
-            || (uh?.launchServicesPaths.count ?? 0) >= 1
-            || ((uh?.openerBinaryPaths.count ?? 0) >= 2 && (uh?.urlTypePlistPaths.count ?? 0) >= 1)
-        {
-            planes.append("url_scheme_handler")
-        }
 
-        let lo = state.launchdOverrideDepth
-        if lo?.overrideSurfacePresent == true
-            || (lo?.overridePlistPaths.count ?? 0) >= 1
-            || (lo?.securityDisabledHints.count ?? 0) >= 1
-        {
-            planes.append("launchd_override_depth")
-        }
+    private static func urlSchemeHandlerPresent(_ state: CollectedState) -> Bool {
+        let handler = state.urlSchemeHandler
+        return handler?.handlerSurfacePresent == true
+            || (handler?.launchServicesPaths.count ?? 0) >= 1
+            || ((handler?.openerBinaryPaths.count ?? 0) >= 2 && (handler?.urlTypePlistPaths.count ?? 0) >= 1)
+    }
 
-        let be = state.browserExtensionDualUse
-        let extTotal = (be?.chromiumExtensionPaths.count ?? 0) + (be?.safariExtensionPaths.count ?? 0)
-        if be?.extensionSurfacePresent == true
-            || extTotal >= 1
-            || (be?.preferencePaths.count ?? 0) >= 2
-        {
-            planes.append("browser_extension_dualuse")
-        }
+    private static func launchdOverridePresent(_ state: CollectedState) -> Bool {
+        let override = state.launchdOverrideDepth
+        return override?.overrideSurfacePresent == true
+            || (override?.overridePlistPaths.count ?? 0) >= 1
+            || (override?.securityDisabledHints.count ?? 0) >= 1
+    }
 
-        let sa = state.shortcutsAppIntents
-        if sa?.automationSurfacePresent == true
-            || (sa?.shortcutsAppPaths.count ?? 0) >= 1
-            || (sa?.appIntentsPaths.count ?? 0) >= 1
-        {
-            planes.append("shortcuts_app_intents")
-        }
+    private static func browserExtensionPresent(_ state: CollectedState) -> Bool {
+        let browserExtension = state.browserExtensionDualUse
+        let total = (browserExtension?.chromiumExtensionPaths.count ?? 0)
+            + (browserExtension?.safariExtensionPaths.count ?? 0)
+        return browserExtension?.extensionSurfacePresent == true
+            || total >= 1
+            || (browserExtension?.preferencePaths.count ?? 0) >= 2
+    }
 
-        return planes
+    private static func shortcutsAppIntentsPresent(_ state: CollectedState) -> Bool {
+        let shortcuts = state.shortcutsAppIntents
+        return shortcuts?.automationSurfacePresent == true
+            || (shortcuts?.shortcutsAppPaths.count ?? 0) >= 1
+            || (shortcuts?.appIntentsPaths.count ?? 0) >= 1
     }
 
     private static func amplifiers(state: CollectedState) -> [String] {
@@ -73,88 +74,62 @@ public struct Wave11MultiPlaneClusterCheck: Check {
     private static func compoundFinding(planes: [String], state: CollectedState) -> Finding {
         let sorted = planes.sorted()
         let amps = amplifiers(state: state).sorted()
-        let severity: Severity
-        if sorted.contains("launchd_override_depth")
-            && sorted.contains("browser_extension_dualuse")
-            && amps.contains("fda")
-            && amps.contains("remote")
-        {
-            severity = .high
-        } else if sorted.count >= 3 || (sorted.count >= 2 && amps.count >= 2) {
-            severity = .medium
-        } else {
-            severity = .low
-        }
-
-        let stageHints = stageLabels(for: sorted, amps: amps)
-
         return Finding(
             id: "\(id).multi_plane",
-            title:
-                "Wave-11 multi-plane compound: \(sorted.count) planes "
-                + "(\(sorted.joined(separator: ", ")))",
-            severity: severity,
-            confidence: .low,
+            title: "Wave-11 multi-plane compound: \(sorted.count) planes (\(sorted.joined(separator: ", ")))",
+            severity: compoundSeverity(planes: sorted, amplifiers: amps),
             category: .misconfig,
-            evidence: [
-                Evidence(
-                    type: "planes",
-                    detail: "planes=\(sorted.joined(separator: "|")) count=\(sorted.count)"
-                ),
-                Evidence(
-                    type: "amplifiers",
-                    detail:
-                        amps.isEmpty
-                        ? "amplifiers=none"
-                        : "amplifiers=\(amps.joined(separator: "|")) count=\(amps.count)"
-                ),
-                Evidence(
-                    type: "stage_labels",
-                    detail: "stages=\(stageHints.joined(separator: "|")) (labels only - not auto-exploit)"
-                ),
-                Evidence(
-                    type: "host",
-                    detail:
-                        "host=\(state.host?.hostname ?? "unknown") "
-                        + "user=\(state.host?.username ?? "unknown")"
-                ),
-                Evidence(
-                    type: "honesty",
-                    detail:
-                        "Wave-11 multi-plane ranking is path-to-impact narrative for operators. "
-                        + "Rootstock Red does not register URL schemes, disable launchd security jobs, "
-                        + "dump browser extension secrets, or run Shortcuts/App Intents."
-                ),
-            ],
-            attackTechniques: ["T1204", "T1562.001", "T1176", "T1059"],
-            remediation: [
-                "Prioritize hosts co-locating launchd-override + browser-extension + remote amplifiers",
-                "Close remote access and restore disabled security products before lower-tier inventory",
-                "Use Wave-11 lab plans under ROE for purple validation of expected telemetry",
-                "OPSEC: treat multi-plane compounds as engagement narrative, not an exploit script",
-            ],
-            falsePositiveNotes:
-                "Developer workstations may legitimately co-locate many Wave-11 planes. "
-                + "Rank production hosts with remote/FDA/SIP amplifiers first.",
-            dryRunSafe: true,
-            opsecScore: 28,
-            esfExpected: ["OPEN", "EXEC", "READ", "WRITE"]
+            resolution: .init(
+                evidence: compoundEvidence(planes: sorted, amplifiers: amps, state: state),
+                attackTechniques: ["T1204", "T1562.001", "T1176", "T1059"],
+                remediation: [
+                    "Prioritize hosts co-locating launchd-override + browser-extension + remote amplifiers",
+                    "Close remote access and restore disabled security products before lower-tier inventory",
+                    "Use Wave-11 lab plans under ROE for purple validation of expected telemetry",
+                    "OPSEC: treat multi-plane compounds as engagement narrative, not an exploit script",
+                ],
+                falsePositiveNotes: "Developer workstations may legitimately co-locate many Wave-11 planes. Rank production hosts with remote/FDA/SIP amplifiers first."
+            ),
+            runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ", "WRITE"])
         )
     }
 
+    private static func compoundSeverity(planes: [String], amplifiers: [String]) -> Severity {
+        if planes.contains("launchd_override_depth") && planes.contains("browser_extension_dualuse") && amplifiers.contains("fda") && amplifiers.contains("remote") { return .high }
+        return planes.count >= 3 || (planes.count >= 2 && amplifiers.count >= 2) ? .medium : .low
+    }
+
+    private static func compoundEvidence(planes: [String], amplifiers: [String], state: CollectedState) -> [Evidence] {
+        let stages = stageLabels(for: planes, amps: amplifiers)
+        let amplifierDetail = amplifiers.isEmpty ? "amplifiers=none" : "amplifiers=\(amplifiers.joined(separator: "|")) count=\(amplifiers.count)"
+        return [
+            Evidence(type: "planes", detail: "planes=\(planes.joined(separator: "|")) count=\(planes.count)"),
+            Evidence(type: "amplifiers", detail: amplifierDetail),
+            Evidence(type: "stage_labels", detail: "stages=\(stages.joined(separator: "|")) (labels only - not auto-exploit)"),
+            Evidence(type: "host", detail: "host=\(state.host?.hostname ?? "unknown") user=\(state.host?.username ?? "unknown")"),
+            Evidence(type: "honesty", detail: "Wave-11 multi-plane ranking is path-to-impact narrative for operators. Rootstock Red does not register URL schemes, disable launchd security jobs, dump browser extension secrets, or run Shortcuts/App Intents."),
+        ]
+    }
+
+    private struct StageRule {
+        let label: String
+        let planes: Set<String>
+        let amplifiers: Set<String>
+    }
+
     private static func stageLabels(for planes: [String], amps: [String]) -> [String] {
-        var stages: [String] = []
-        if planes.contains("url_scheme_handler") || amps.contains("gk_off") {
-            stages.append("delivery_handler")
-        }
-        if planes.contains("launchd_override_depth") || amps.contains("sensor_gap") {
-            stages.append("defense_evasion")
-        }
-        if planes.contains("browser_extension_dualuse") || amps.contains("fda") {
-            stages.append("collection_impact")
-        }
-        if planes.contains("shortcuts_app_intents") || amps.contains("remote") {
-            stages.append("automation_lateral")
+        let rules = [
+            StageRule(label: "delivery_handler", planes: ["url_scheme_handler"], amplifiers: ["gk_off"]),
+            StageRule(label: "defense_evasion", planes: ["launchd_override_depth"], amplifiers: ["sensor_gap"]),
+            StageRule(label: "collection_impact", planes: ["browser_extension_dualuse"], amplifiers: ["fda"]),
+            StageRule(label: "automation_lateral", planes: ["shortcuts_app_intents"], amplifiers: ["remote"]),
+        ]
+        let presentPlanes = Set(planes)
+        let presentAmplifiers = Set(amps)
+        let stages = rules.compactMap { rule in
+            !presentPlanes.isDisjoint(with: rule.planes) || !presentAmplifiers.isDisjoint(with: rule.amplifiers)
+                ? rule.label
+                : nil
         }
         return stages.isEmpty ? ["posture_inventory"] : stages
     }

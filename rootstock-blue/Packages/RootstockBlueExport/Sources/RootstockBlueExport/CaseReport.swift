@@ -2,6 +2,14 @@ import Foundation
 import RootstockBlueCore
 import RootstockBlueCase
 
+public struct CaseReportStatsCounts: Sendable {
+    public let events: Int
+    public let byPlugin: [(plugin: String, count: Int)]
+    public let byEventType: [(eventType: String, count: Int)]
+    public let entityReferences: Int
+    public let custodyLines: Int
+}
+
 /// Human-readable case report export for IR operators.
 /// Anchors output to case custody, timeline statistics, plugin breakdowns, and
 /// optional findings.
@@ -20,21 +28,17 @@ public enum CaseReport {
         public init(
             caseID: String,
             caseName: String,
-            eventCount: Int,
-            byPlugin: [(plugin: String, count: Int)],
-            byEventType: [(eventType: String, count: Int)],
-            entityRefCount: Int,
-            custodyLines: Int,
+            counts: CaseReportStatsCounts,
             findings: [Finding] = [],
             generatedAt: Date = Date()
         ) {
             self.caseID = caseID
             self.caseName = caseName
-            self.eventCount = eventCount
-            self.byPlugin = byPlugin
-            self.byEventType = byEventType
-            self.entityRefCount = entityRefCount
-            self.custodyLines = custodyLines
+            eventCount = counts.events
+            byPlugin = counts.byPlugin
+            byEventType = counts.byEventType
+            entityRefCount = counts.entityReferences
+            custodyLines = counts.custodyLines
             self.findings = findings
             self.generatedAt = generatedAt
         }
@@ -69,11 +73,13 @@ public enum CaseReport {
         return Stats(
             caseID: package.manifest.caseID.uuidString,
             caseName: package.manifest.name,
-            eventCount: events.count,
-            byPlugin: byPlugin,
-            byEventType: byType,
-            entityRefCount: entityCount,
-            custodyLines: custodyLines,
+            counts: .init(
+                events: events.count,
+                byPlugin: byPlugin,
+                byEventType: byType,
+                entityReferences: entityCount,
+                custodyLines: custodyLines
+            ),
             findings: findings
         )
     }
@@ -81,63 +87,48 @@ public enum CaseReport {
     /// Render a markdown IR case report (non-empty when case has events).
     public static func renderMarkdown(_ stats: Stats) -> String {
         let iso = ISO8601DateFormatter()
-        var md = ""
-        md += "# IR Case Report: \(stats.caseName)\n\n"
-        md += "- Generated: \(iso.string(from: stats.generatedAt))\n"
-        md += "- Case ID: `\(stats.caseID)`\n"
-        md += "- Timeline events: \(stats.eventCount)\n"
-        md += "- Entity references: \(stats.entityRefCount)\n"
-        md += "- Custody log entries: \(stats.custodyLines)\n"
-        md += "- Findings: \(stats.findings.count)\n\n"
+        return reportHeader(stats, iso: iso)
+            + eventTable(title: "Events by source plugin", emptyMessage: "_No events in case._", rows: stats.byPlugin.map { ($0.plugin, $0.count) })
+            + eventTable(title: "Events by type", emptyMessage: "_No event types._", rows: stats.byEventType.prefix(40).map { ($0.eventType, $0.count) })
+            + findingsSection(stats.findings)
+            + custodySection(stats.custodyLines)
+    }
 
-        md += "## Events by source plugin\n\n"
-        if stats.byPlugin.isEmpty {
-            md += "_No events in case._\n\n"
-        } else {
-            md += "| Plugin | Count |\n|--------|------:|\n"
-            for row in stats.byPlugin {
-                md += "| \(row.plugin) | \(row.count) |\n"
-            }
-            md += "\n"
+    private static func reportHeader(_ stats: Stats, iso: ISO8601DateFormatter) -> String {
+        "# IR Case Report: \(stats.caseName)\n\n"
+            + "- Generated: \(iso.string(from: stats.generatedAt))\n"
+            + "- Case ID: `\(stats.caseID)`\n"
+            + "- Timeline events: \(stats.eventCount)\n"
+            + "- Entity references: \(stats.entityRefCount)\n"
+            + "- Custody log entries: \(stats.custodyLines)\n"
+            + "- Findings: \(stats.findings.count)\n\n"
+    }
+
+    private static func eventTable(title: String, emptyMessage: String, rows: [(String, Int)]) -> String {
+        guard !rows.isEmpty else { return "## \(title)\n\n\(emptyMessage)\n\n" }
+        let body = rows.map { "| \($0.0) | \($0.1) |" }.joined(separator: "\n")
+        return "## \(title)\n\n| Item | Count |\n|------|------:|\n\(body)\n\n"
+    }
+
+    private static func findingsSection(_ findings: [Finding]) -> String {
+        guard !findings.isEmpty else { return "## Findings\n\n_No detection findings attached to this report._\n\n" }
+        return ["critical", "high", "medium", "low", "info"].reduce(into: "## Findings\n\n") { section, severity in
+            let group = findings.filter { $0.severity.lowercased() == severity }
+            guard !group.isEmpty else { return }
+            section += "### \(severity.uppercased()) (\(group.count))\n\n"
+            section += group.map(renderFinding).joined(separator: "\n") + "\n\n"
         }
+    }
 
-        md += "## Events by type\n\n"
-        if stats.byEventType.isEmpty {
-            md += "_No event types._\n\n"
-        } else {
-            md += "| Event type | Count |\n|------------|------:|\n"
-            for row in stats.byEventType.prefix(40) {
-                md += "| \(row.eventType) | \(row.count) |\n"
-            }
-            md += "\n"
-        }
+    private static func renderFinding(_ finding: Finding) -> String {
+        var text = "- [\(finding.severity)] `\(finding.ruleID)` - \(finding.title)"
+        if !finding.attackTechniques.isEmpty { text += "\n  - ATT&CK: \(finding.attackTechniques.joined(separator: ", "))" }
+        if !finding.evidenceSummary.isEmpty { text += "\n  - Evidence: \(finding.evidenceSummary)" }
+        return text
+    }
 
-        md += "## Findings\n\n"
-        if stats.findings.isEmpty {
-            md += "_No detection findings attached to this report._\n\n"
-        } else {
-            let order = ["critical", "high", "medium", "low", "info"]
-            for sev in order {
-                let group = stats.findings.filter { $0.severity.lowercased() == sev }
-                guard !group.isEmpty else { continue }
-                md += "### \(sev.uppercased()) (\(group.count))\n\n"
-                for f in group {
-                    md += "- [\(f.severity)] `\(f.ruleID)` - \(f.title)\n"
-                    if !f.attackTechniques.isEmpty {
-                        md += "  - ATT&CK: \(f.attackTechniques.joined(separator: ", "))\n"
-                    }
-                    if !f.evidenceSummary.isEmpty {
-                        md += "  - Evidence: \(f.evidenceSummary)\n"
-                    }
-                }
-                md += "\n"
-            }
-        }
-
-        md += "## Custody\n\n"
-        md += "Chain-of-custody has \(stats.custodyLines) logged action(s). "
-        md += "Verify hashes with `rootstock-blue case verify`.\n"
-        return md
+    private static func custodySection(_ lineCount: Int) -> String {
+        "## Custody\n\nChain-of-custody has \(lineCount) logged action(s). Verify hashes with `rootstock-blue case verify`.\n"
     }
 
     /// Write report to disk and update case custody/hashes.

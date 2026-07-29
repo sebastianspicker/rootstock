@@ -15,32 +15,21 @@ public struct AutomatorWorkflowVector: Check {
         let note = state.collectorNotes["collect.automator_workflow"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "automator_workflow_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "automator_workflow_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.automatorAppPaths + s.workflowSamplePaths + s.actionLibraryPaths).prefix(12) {
-                evidence.append(Evidence(type: "automator_workflow_path", path: path, detail: "Automator workflow delivery path"))
-            }
-            for n in s.notes.prefix(5) { evidence.append(Evidence(type: "automator_workflow_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.automatorAppPaths + s.workflowSamplePaths + s.actionLibraryPaths, type: "automator_workflow_path", detail: "Automator workflow delivery path", limit: 12)
+            evidence += VectorEvidence.notes(s.notes, type: "automator_workflow_note", limit: 5)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never executes Automator workflows or plants malicious .workflow bundles."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "Automator workflow delivery with remote amplifier" : "Automator workflow delivery residual",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1059", "T1204", "T1546"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "Automator workflow delivery with remote amplifier" : "Automator workflow delivery residual", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1059", "T1204", "T1546"], remediation: [
                 "Inventory and baseline Automator workflow delivery paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never executes Automator workflows or plants malicious .workflow bundles",
-            ],
-            falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

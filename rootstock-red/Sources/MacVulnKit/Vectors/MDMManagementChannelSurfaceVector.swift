@@ -16,17 +16,32 @@ public struct MDMManagementChannelSurfaceVector: Check {
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
         guard let mdm = state.mdm else { return [] }
-
         let enrolled = mdm.enrolled == true
         let vendors = !mdm.vendorHints.isEmpty
         let pppc = mdm.pppcPolicyPresent == true
         let managedPrefs = !mdm.managedPreferenceNames.isEmpty
-        // Optional supporting signals (do not alone fire without one of the primary four).
         let profiles = (mdm.profileFileCount ?? 0) > 0 || mdm.profileStoreReadable == true
+        guard enrolled || vendors || pppc || managedPrefs else { return [] }
 
-        let primary = enrolled || vendors || pppc || managedPrefs
-        guard primary else { return [] }
+        let signalCount = primarySignalCount(
+            enrolled: enrolled, vendors: vendors, pppc: pppc, managedPrefs: managedPrefs
+        )
+        let evidence = evidence(for: state, profiles: profiles)
+        return [Self.finding(for: state, signalCount: signalCount, evidence: evidence)]
+    }
 
+
+    private func primarySignalCount(
+        enrolled: Bool,
+        vendors: Bool,
+        pppc: Bool,
+        managedPrefs: Bool
+    ) -> Int {
+        (enrolled ? 1 : 0) + (vendors ? 1 : 0) + (pppc ? 1 : 0) + (managedPrefs ? 1 : 0)
+    }
+
+    private func evidence(for state: CollectedState, profiles: Bool) -> [Evidence] {
+        guard let mdm = state.mdm else { return [] }
         var evidence: [Evidence] = [
             Evidence(
                 type: "mdm_summary",
@@ -55,12 +70,7 @@ public struct MDMManagementChannelSurfaceVector: Check {
             evidence.append(Evidence(type: "note", detail: note))
         }
         if profiles {
-            evidence.append(
-                Evidence(
-                    type: "profiles",
-                    detail: "configuration profile store / file signals present (inventory only)"
-                )
-            )
+            evidence.append(Evidence(type: "profiles", detail: "configuration profile store / file signals present (inventory only)"))
         }
         evidence.append(
             Evidence(
@@ -70,16 +80,27 @@ public struct MDMManagementChannelSurfaceVector: Check {
                     + "and does not mutate configuration profiles - channel surface ranking only"
             )
         )
+        return evidence
+    }
 
-        let signalCount =
-            (enrolled ? 1 : 0) + (vendors ? 1 : 0) + (pppc ? 1 : 0) + (managedPrefs ? 1 : 0)
+    private static func finding(
+        for state: CollectedState,
+        signalCount: Int,
+        evidence: [Evidence]
+    ) -> Finding {
+        let enrolled = state.mdm?.enrolled == true
+        let vendors = !(state.mdm?.vendorHints.isEmpty ?? true)
+        let pppc = state.mdm?.pppcPolicyPresent == true
+        let vendorLabel = state.mdm?.vendorHints.isEmpty == true
+            ? "enrolled"
+            : state.mdm?.vendorHints.prefix(2).joined(separator: ",") ?? "enrolled"
         let severity: Severity
         let title: String
         if enrolled && (vendors || pppc) {
             severity = .medium
             title =
                 "MDM management channel: enrolled with vendor/PPPC signals "
-                + "(\(mdm.vendorHints.isEmpty ? "enrolled" : mdm.vendorHints.prefix(2).joined(separator: ",")))"
+                + "(\(vendorLabel))"
         } else if enrolled || signalCount >= 2 {
             severity = .medium
             title = "MDM management channel surface active (\(signalCount) primary signals)"
@@ -87,30 +108,13 @@ public struct MDMManagementChannelSurfaceVector: Check {
             severity = .low
             title = "MDM management channel indicators present (thin but non-empty)"
         }
-
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: enrolled || vendors ? .medium : .low,
-                category: .mdm,
-                evidence: evidence,
-                attackTechniques: ["T1072", "T1082", "T1484"],
-                remediation: [
+        return Finding(id: Self.id, title: title, severity: severity, category: .mdm, resolution: .init(evidence: evidence, attackTechniques: ["T1072", "T1082", "T1484"], remediation: [
                     "Harden MDM/UEM admin roles, break-glass accounts, and enrollment tokens",
                     "Monitor unauthorized profile install / PPPC grants / mass device actions",
                     "Scope management tools least-privilege; audit vendor agent binary integrity",
                     "OPSEC: Rootstock Red never performs Jamf script push or profile mutation in assess",
-                ],
-                falsePositiveNotes:
-                    "Enrolled fleet machines should fire this vector - it ranks the management "
-                    + "channel as an asset/attack surface, opposite of management_gap. Not a finding of misconfig alone.",
-                dryRunSafe: true,
-                opsecScore: 16,
-                esfExpected: ["OPEN"]
-            ),
-        ]
+                ], falsePositiveNotes: "Enrolled fleet machines should fire this vector - it ranks the management "
+                    + "channel as an asset/attack surface, opposite of management_gap. Not a finding of misconfig alone."), runtime: .init(confidence: enrolled || vendors ? .medium : .low, dryRunSafe: true, opsecScore: 16, esfExpected: ["OPEN"]))
     }
 
 

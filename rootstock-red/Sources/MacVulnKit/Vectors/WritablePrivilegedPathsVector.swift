@@ -14,86 +14,43 @@ public struct WritablePrivilegedPathsVector: Check {
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
         let candidates = Self.candidatePaths(from: state)
-        guard !candidates.isEmpty else { return [] }
-
-        var hits: [(path: String, kind: String, writable: Bool, reason: String)] = []
-        for item in candidates {
-            let pathWritable = FileManager.default.isWritableFile(atPath: item.path)
-            let parent = URL(fileURLWithPath: item.path).deletingLastPathComponent().path
-            let parentWritable = FileManager.default.isWritableFile(atPath: parent)
-            // Also treat explicit privesc probe hits from collector notes / synthetic flags.
-            let flagged = item.forceWritable || pathWritable || parentWritable
-            guard flagged else { continue }
-            let reason: String
-            if item.forceWritable {
-                reason = "collector_flagged_writable"
-            } else if pathWritable {
-                reason = "path_writable"
-            } else {
-                reason = "parent_writable"
-            }
-            hits.append((item.path, item.kind, true, reason))
-        }
-
+        let hits = Self.writableHits(from: candidates)
         guard !hits.isEmpty else { return [] }
+        return [Self.finding(for: hits, candidateCount: candidates.count, state: state)]
+    }
 
-        var evidence: [Evidence] = [
-            Evidence(
-                type: "summary",
-                detail:
-                    "privilegedCandidates=\(candidates.count) userWritableHits=\(hits.count) "
-                    + "(PEASS-class rule, API-first - no shell storm)"
-            ),
-        ]
-        for hit in hits.prefix(40) {
-            evidence.append(
-                Evidence(
-                    type: "writable_privileged_path",
-                    path: hit.path,
-                    detail: "kind=\(hit.kind) reason=\(hit.reason)"
-                )
-            )
-        }
-        if state.protections?.sipEnabled == true {
-            evidence.append(
-                Evidence(
-                    type: "sip_honesty",
-                    detail:
-                        "SIP enabled - many /System paths remain immutable even if mis-reported; "
-                        + "focus remediations on /Library user-writable locations"
-                )
-            )
-        } else if state.protections?.sipEnabled == false {
-            evidence.append(
-                Evidence(
-                    type: "sip_off",
-                    detail: "SIP disabled compounds writable privileged paths into higher impact"
-                )
-            )
-        }
 
-        let highKinds = hits.filter {
-            $0.kind.contains("daemon") || $0.kind.contains("helper") || $0.kind.contains("sygext")
-        }
-        let severity: Severity
-        if state.protections?.sipEnabled == false && !highKinds.isEmpty {
-            severity = .critical
-        } else if !highKinds.isEmpty {
-            severity = .high
-        } else {
-            severity = .medium
-        }
+    private struct WritablePathHit {
+        let path: String
+        let kind: String
+        let reason: String
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title:
-                    "Privilege-escalation vector: user-writable privileged paths "
-                    + "(\(hits.count))",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
+    private static func writableHits(from candidates: [Candidate]) -> [WritablePathHit] {
+        candidates.compactMap { candidate in
+            let pathWritable = FileManager.default.isWritableFile(atPath: candidate.path)
+            let parent = URL(fileURLWithPath: candidate.path).deletingLastPathComponent().path
+            let parentWritable = FileManager.default.isWritableFile(atPath: parent)
+            guard candidate.forceWritable || pathWritable || parentWritable else { return nil }
+            let reason = candidate.forceWritable
+                ? "collector_flagged_writable"
+                : pathWritable ? "path_writable" : "parent_writable"
+            return WritablePathHit(path: candidate.path, kind: candidate.kind, reason: reason)
+        }
+    }
+
+    private static func finding(
+        for hits: [WritablePathHit],
+        candidateCount: Int,
+        state: CollectedState
+    ) -> Finding {
+        Finding(
+            id: Self.id,
+            title: "Privilege-escalation vector: user-writable privileged paths (\(hits.count))",
+            severity: severity(for: hits, state: state),
+            category: .misconfig,
+            resolution: .init(
+                evidence: evidence(for: hits, candidateCount: candidateCount, state: state),
                 attackTechniques: ["T1068", "T1222", "T1543.001", "T1543.004", "T1574"],
                 remediation: [
                     "Fix ownership/permissions on writable LaunchDaemons, helpers, and system agents",
@@ -101,14 +58,36 @@ public struct WritablePrivilegedPathsVector: Check {
                     "Re-enable SIP if disabled; validate with csrutil status via MDM inventory",
                     "OPSEC: assess uses FileManager writability checks only - no PEASS shell recursion",
                 ],
-                falsePositiveNotes:
-                    "Lab temp trees may simulate privileged path names. On stock SIP-on hosts, true "
-                    + "writable system LaunchDaemons are rare; verify before emergency change control.",
-                dryRunSafe: true,
-                opsecScore: 28,
-                esfExpected: ["OPEN"]
+                falsePositiveNotes: "Lab temp trees may simulate privileged path names. On stock SIP-on hosts, true writable system LaunchDaemons are rare; verify before emergency change control."
             ),
-        ]
+            runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN"])
+        )
+    }
+
+    private static func evidence(
+        for hits: [WritablePathHit],
+        candidateCount: Int,
+        state: CollectedState
+    ) -> [Evidence] {
+        var result = [Evidence(
+            type: "summary",
+            detail: "privilegedCandidates=\(candidateCount) userWritableHits=\(hits.count) (PEASS-class rule, API-first - no shell storm)"
+        )]
+        result += hits.prefix(40).map {
+            Evidence(type: "writable_privileged_path", path: $0.path, detail: "kind=\($0.kind) reason=\($0.reason)")
+        }
+        if state.protections?.sipEnabled == true {
+            result.append(Evidence(type: "sip_honesty", detail: "SIP enabled - many /System paths remain immutable even if mis-reported; focus remediations on /Library user-writable locations"))
+        } else if state.protections?.sipEnabled == false {
+            result.append(Evidence(type: "sip_off", detail: "SIP disabled compounds writable privileged paths into higher impact"))
+        }
+        return result
+    }
+
+    private static func severity(for hits: [WritablePathHit], state: CollectedState) -> Severity {
+        let highImpact = hits.contains { $0.kind.contains("daemon") || $0.kind.contains("helper") || $0.kind.contains("sygext") }
+        if state.protections?.sipEnabled == false && highImpact { return .critical }
+        return highImpact ? .high : .medium
     }
 
     // MARK: - Candidates
@@ -121,39 +100,33 @@ public struct WritablePrivilegedPathsVector: Check {
     }
 
     static func candidatePaths(from state: CollectedState) -> [Candidate] {
-        var out: [Candidate] = []
+        let candidates = launchCandidates(from: state) + collectorNoteCandidates(from: state.collectorNotes)
+        var seen = Set<String>()
+        return candidates.filter { seen.insert($0.path).inserted }
+    }
 
-        for agent in state.systemLaunchAgents {
-            out.append(Candidate(path: agent.path, kind: "system_launch_agent", forceWritable: false))
-        }
-        for daemon in state.launchDaemons {
-            out.append(Candidate(path: daemon.path, kind: "launch_daemon", forceWritable: false))
-        }
-        for helper in state.privilegedHelperTools {
-            out.append(Candidate(path: helper, kind: "privileged_helper", forceWritable: false))
-        }
-        for ext in state.systemExtensionPaths {
-            out.append(Candidate(path: ext, kind: "system_extension", forceWritable: false))
-        }
+    private static func launchCandidates(from state: CollectedState) -> [Candidate] {
+        state.systemLaunchAgents.map { Candidate(path: $0.path, kind: "system_launch_agent", forceWritable: false) }
+            + state.launchDaemons.map { Candidate(path: $0.path, kind: "launch_daemon", forceWritable: false) }
+            + state.privilegedHelperTools.map { Candidate(path: $0, kind: "privileged_helper", forceWritable: false) }
+            + state.systemExtensionPaths.map { Candidate(path: $0, kind: "system_extension", forceWritable: false) }
+    }
 
-        // Collector notes convention: privesc.writable_path=/abs/path or privesc.writable_paths=p1|p2
-        for (key, value) in state.collectorNotes {
-            let lower = key.lowercased()
-            guard lower.contains("privesc") && lower.contains("writable") else { continue }
-            if value.contains("|") {
-                for part in value.split(separator: "|") {
-                    let p = String(part).trimmingCharacters(in: .whitespaces)
-                    if !p.isEmpty {
-                        out.append(Candidate(path: p, kind: "collector_note_writable", forceWritable: true))
-                    }
-                }
-            } else if value.hasPrefix("/") {
-                out.append(Candidate(path: value, kind: "collector_note_writable", forceWritable: true))
+    private static func collectorNoteCandidates(from notes: [String: String]) -> [Candidate] {
+        notes.flatMap { (key, value) -> [Candidate] in
+            let lowercasedKey = key.lowercased()
+            guard lowercasedKey.contains("privesc"), lowercasedKey.contains("writable") else { return [] }
+            return candidates(fromCollectorNoteValue: value)
+        }
+    }
+
+    private static func candidates(fromCollectorNoteValue value: String) -> [Candidate] {
+        if value.contains("|") {
+            return value.split(separator: "|").compactMap { part in
+                let path = String(part).trimmingCharacters(in: .whitespaces)
+                return path.isEmpty ? nil : Candidate(path: path, kind: "collector_note_writable", forceWritable: true)
             }
         }
-
-        // Deduplicate by path.
-        var seen = Set<String>()
-        return out.filter { seen.insert($0.path).inserted }
+        return value.hasPrefix("/") ? [Candidate(path: value, kind: "collector_note_writable", forceWritable: true)] : []
     }
 }

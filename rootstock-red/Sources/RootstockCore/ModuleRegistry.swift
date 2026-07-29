@@ -79,16 +79,7 @@ public enum CheckRunner {
                 findings.append(contentsOf: result)
             } catch {
                 findings.append(
-                    Finding(
-                        id: "rootstock.check.error.\(type(of: check).id)",
-                        title: "Check failed: \(type(of: check).id)",
-                        severity: .info,
-                        confidence: .low,
-                        category: .other,
-                        evidence: [Evidence(type: "error", detail: error.localizedDescription)],
-                        dryRunSafe: true,
-                        opsecScore: 0
-                    )
+                    Finding(id: "rootstock.check.error.\(type(of: check).id)", title: "Check failed: \(type(of: check).id)", severity: .info, category: .other, resolution: .init(evidence: [Evidence(type: "error", detail: error.localizedDescription)]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 0))
                 )
             }
         }

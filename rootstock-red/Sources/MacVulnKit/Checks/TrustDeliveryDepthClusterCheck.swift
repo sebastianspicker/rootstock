@@ -28,27 +28,15 @@ public struct TrustDeliveryDepthClusterCheck: Check {
         let inject = state.injectabilityHits.contains { !$0.riskFlags.isEmpty }
         guard (apps > 0 || risk > 0) && (weak || inject) else { return nil }
 
-        return Finding(
-            id: "\(id).thick_client_weak_codesign",
-            title: "Trust-delivery cluster: thick-client surface with weak codesign/inject compound",
-            severity: (risk > 0 && inject) ? .medium : .low,
-            confidence: .low,
-            category: .sandbox,
-            evidence: [
+        return Finding(id: "\(id).thick_client_weak_codesign", title: "Trust-delivery cluster: thick-client surface with weak codesign/inject compound", severity: (risk > 0 && inject) ? .medium : .low, category: .sandbox, resolution: .init(evidence: [
                 Evidence(
                     type: "sandbox",
                     detail: "appSamples=\(apps) riskPaths=\(risk) weakCodesign=\(weak) inject=\(inject)"
                 ),
-            ],
-            attackTechniques: ["T1553", "T1055"],
-            remediation: [
+            ], attackTechniques: ["T1553", "T1055"], remediation: [
                 "Ship production clients with Hardened Runtime and without get-task-allow",
                 "Prefer sandboxed distribution channels for enterprise software",
-            ],
-            dryRunSafe: true,
-            opsecScore: 18,
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN"]))
     }
 
     private static func notarizationWithGKGap(state: CollectedState) -> Finding? {
@@ -58,31 +46,19 @@ public struct TrustDeliveryDepthClusterCheck: Check {
         let gkOff = state.protections?.gatekeeperEnabled == false
         guard (tools > 0 || delivery > 0 || note) && (gkOff || delivery > 0) else { return nil }
 
-        return Finding(
-            id: "\(id).notarization_gk_gap",
-            title: gkOff
+        return Finding(id: "\(id).notarization_gk_gap", title: gkOff
                 ? "Trust-delivery cluster: notarization surface with Gatekeeper disabled"
-                : "Trust-delivery cluster: delivery artifacts without strong notarization posture signals",
-            severity: gkOff ? .medium : .low,
-            confidence: .low,
-            category: .codesign,
-            evidence: [
+                : "Trust-delivery cluster: delivery artifacts without strong notarization posture signals", severity: gkOff ? .medium : .low, category: .codesign, resolution: .init(evidence: [
                 Evidence(
                     type: "notarization",
                     detail:
                         "tools=\(tools) deliveryHints=\(delivery) "
                         + "gatekeeperEnabled=\((state.protections?.gatekeeperEnabled).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1553.001", "T1204.002"],
-            remediation: [
+            ], attackTechniques: ["T1553.001", "T1204.002"], remediation: [
                 "Re-enable Gatekeeper; require notarized software on managed fleets",
                 "Clear unexpected installer artifacts from Downloads on high-value hosts",
-            ],
-            dryRunSafe: true,
-            opsecScore: 16,
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 16, esfExpected: ["OPEN"]))
     }
 
     private static func deliveryArtifactCompound(state: CollectedState) -> Finding? {
@@ -93,27 +69,15 @@ public struct TrustDeliveryDepthClusterCheck: Check {
         let unsigned = state.codesignSamples.filter { $0.signed == false }.count
         guard delivery > 0 && (remote || unsigned > 0) else { return nil }
 
-        return Finding(
-            id: "\(id).delivery_remote_compound",
-            title: "Trust-delivery cluster: delivery artifacts compound with remote access or unsigned samples",
-            severity: remote && unsigned > 0 ? .medium : .low,
-            confidence: .low,
-            category: .codesign,
-            evidence: [
+        return Finding(id: "\(id).delivery_remote_compound", title: "Trust-delivery cluster: delivery artifacts compound with remote access or unsigned samples", severity: remote && unsigned > 0 ? .medium : .low, category: .codesign, resolution: .init(evidence: [
                 Evidence(
                     type: "compound",
                     detail: "deliveryHints=\(delivery) unsigned=\(unsigned) remote=\(remote)"
                 ),
-            ],
-            attackTechniques: ["T1204.002", "T1021"],
-            remediation: [
+            ], attackTechniques: ["T1204.002", "T1021"], remediation: [
                 "Harden remote access on hosts used for software staging",
                 "Enforce code-signing policy for tools installed outside MDM",
-            ],
-            dryRunSafe: true,
-            opsecScore: 17,
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 17, esfExpected: ["OPEN"]))
     }
 
 }

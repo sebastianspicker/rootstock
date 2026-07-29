@@ -58,23 +58,10 @@ public struct IdentityEDRClusterCheck: Check {
             evidence.append(Evidence(type: "sso_path", path: path, detail: "SSO path"))
         }
 
-        return Finding(
-            id: "\(id).sso_without_hardening",
-            title: "Identity/EDR cluster: directory/SSO join without strong MDM/PPPC signals",
-            severity: .medium,
-            confidence: .medium,
-            category: .auth,
-            evidence: evidence,
-            attackTechniques: ["T1078.002", "T1550", "T1082"],
-            remediation: [
+        return Finding(id: "\(id).sso_without_hardening", title: "Identity/EDR cluster: directory/SSO join without strong MDM/PPPC signals", severity: .medium, category: .auth, resolution: .init(evidence: evidence, attackTechniques: ["T1078.002", "T1550", "T1082"], remediation: [
                 "Enroll identity-joined hosts; deploy PPPC for approved tools only",
                 "Correlate Platform SSO/AD with MDM compliance baselines",
-            ],
-            falsePositiveNotes: "Path heuristics may miss some UEM products",
-            dryRunSafe: true,
-            opsecScore: 16,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Path heuristics may miss some UEM products"), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 16, esfExpected: ["OPEN"]))
     }
 
     /// No security-product path hits while remote access is indicated.
@@ -89,13 +76,7 @@ public struct IdentityEDRClusterCheck: Check {
             || state.network?.screenSharingARD == true
         guard remote else { return nil }
 
-        return Finding(
-            id: "\(id).no_edr_with_remote",
-            title: "Identity/EDR cluster: no EDR path hits with remote access enabled",
-            severity: .medium,
-            confidence: .low,
-            category: .securityProduct,
-            evidence: [
+        return Finding(id: "\(id).no_edr_with_remote", title: "Identity/EDR cluster: no EDR path hits with remote access enabled", severity: .medium, category: .securityProduct, resolution: .init(evidence: [
                 Evidence(
                     type: "edr",
                     detail: "securityProductsPresent=0 catalog=\(state.securityProducts.count)"
@@ -110,17 +91,10 @@ public struct IdentityEDRClusterCheck: Check {
                     type: "honesty",
                     detail: "Path probes miss many agents - confirm via MDM before treating as fact"
                 ),
-            ],
-            attackTechniques: ["T1518.001", "T1021", "T1562.001"],
-            remediation: [
+            ], attackTechniques: ["T1518.001", "T1021", "T1562.001"], remediation: [
                 "Prioritize EDR coverage on remotely accessible hosts",
                 "Disable unused Remote Login / Screen Sharing",
-            ],
-            falsePositiveNotes: "EDR may exist as system extension without catalog path hits",
-            dryRunSafe: true,
-            opsecScore: 14,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "EDR may exist as system extension without catalog path hits"), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 14, esfExpected: ["OPEN"]))
     }
 
     /// AD + Kerberos with high-value local cred/browser surface.
@@ -134,13 +108,7 @@ public struct IdentityEDRClusterCheck: Check {
             || state.browserMeta.contains(where: \.exists)
         guard highValue else { return nil }
 
-        return Finding(
-            id: "\(id).ad_kerberos_high_value",
-            title: "Identity/EDR cluster: AD/Kerberos signals with local high-value data paths",
-            severity: .medium,
-            confidence: .medium,
-            category: .auth,
-            evidence: [
+        return Finding(id: "\(id).ad_kerberos_high_value", title: "Identity/EDR cluster: AD/Kerberos signals with local high-value data paths", severity: .medium, category: .auth, resolution: .init(evidence: [
                 Evidence(
                     type: "identity",
                     detail:
@@ -154,17 +122,10 @@ public struct IdentityEDRClusterCheck: Check {
                         + "browserMetaPresent=\(state.browserMeta.filter(\.exists).count) "
                         + "(metadata only - no secret dump)"
                 ),
-            ],
-            attackTechniques: ["T1558", "T1552", "T1005", "T1078.002"],
-            remediation: [
+            ], attackTechniques: ["T1558", "T1552", "T1005", "T1078.002"], remediation: [
                 "Harden local secret file permissions; prefer SSO over long-lived keys",
                 "Do not dump tickets from assess tooling - use SOC telemetry for abuse detection",
-            ],
-            falsePositiveNotes: "Developer machines often combine Kerberos conf with cloud CLI keys",
-            dryRunSafe: true,
-            opsecScore: 18,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Developer machines often combine Kerberos conf with cloud CLI keys"), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN"]))
     }
 
 }

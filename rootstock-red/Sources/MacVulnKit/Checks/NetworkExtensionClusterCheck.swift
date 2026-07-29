@@ -39,13 +39,7 @@ public struct NetworkExtensionClusterCheck: Check {
             || state.network?.screenSharingARD == true
         guard filters == 0 && apps == 0 && remote else { return nil }
 
-        return Finding(
-            id: "\(id).no_filter_with_remote",
-            title: "NE cluster: no content-filter inventory with remote access enabled",
-            severity: .medium,
-            confidence: .low,
-            category: .network,
-            evidence: [
+        return Finding(id: "\(id).no_filter_with_remote", title: "NE cluster: no content-filter inventory with remote access enabled", severity: .medium, category: .network, resolution: .init(evidence: [
                 Evidence(type: "filter", detail: "contentFilterHints=0 neApps=0"),
                 Evidence(
                     type: "remote",
@@ -53,17 +47,10 @@ public struct NetworkExtensionClusterCheck: Check {
                         "ssh=\((state.network?.remoteLoginSSH).rootstockDescribe) "
                         + "ard=\((state.network?.screenSharingARD).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1562.004", "T1021"],
-            remediation: [
+            ], attackTechniques: ["T1562.004", "T1021"], remediation: [
                 "Deploy content-filter / host firewall agents on SSH/ARD-enabled hosts",
                 "Disable unused remote services",
-            ],
-            falsePositiveNotes: "Path probes miss many commercial filters",
-            dryRunSafe: true,
-            opsecScore: 14,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Path probes miss many commercial filters"), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 14, esfExpected: ["OPEN"]))
     }
 
     private static func vpnOnlyNoContentFilter(state: CollectedState) -> Finding? {
@@ -71,29 +58,17 @@ public struct NetworkExtensionClusterCheck: Check {
         let filters = enterpriseFilterCount(state)
         guard vpn >= 1 && filters == 0 else { return nil }
 
-        return Finding(
-            id: "\(id).vpn_only_no_content_filter",
-            title: "NE cluster: VPN config paths present without content-filter hints",
-            severity: .low,
-            confidence: .low,
-            category: .network,
-            evidence: [
+        return Finding(id: "\(id).vpn_only_no_content_filter", title: "NE cluster: VPN config paths present without content-filter hints", severity: .low, category: .network, resolution: .init(evidence: [
                 Evidence(type: "vpn", detail: "vpnConfigPaths=\(vpn)"),
                 Evidence(type: "filter", detail: "contentFilterHints=0"),
                 Evidence(
                     type: "paths",
                     detail: (state.networkExtension?.vpnConfigPaths ?? []).prefix(6).joined(separator: ",")
                 ),
-            ],
-            attackTechniques: ["T1090", "T1562.004"],
-            remediation: [
+            ], attackTechniques: ["T1090", "T1562.004"], remediation: [
                 "Pair corporate VPN with approved content-filter / DNS security where policy requires",
                 "Inventory packet-tunnel providers for shadow IT tunnels",
-            ],
-            dryRunSafe: true,
-            opsecScore: 12,
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 12, esfExpected: ["OPEN"]))
     }
 
     private static func frameworkWithoutApps(state: CollectedState) -> Finding? {
@@ -106,13 +81,7 @@ public struct NetworkExtensionClusterCheck: Check {
             || state.credPaths.contains(where: \.exists)
         guard apps == 0 && filters == 0 && highValue else { return nil }
 
-        return Finding(
-            id: "\(id).framework_without_apps",
-            title: "NE cluster: NetworkExtension framework present without filter apps on high-value host",
-            severity: .low,
-            confidence: .low,
-            category: .network,
-            evidence: [
+        return Finding(id: "\(id).framework_without_apps", title: "NE cluster: NetworkExtension framework present without filter apps on high-value host", severity: .low, category: .network, resolution: .init(evidence: [
                 Evidence(type: "ne", detail: "frameworkPresent=true neApps=0 contentFilterHints=0"),
                 Evidence(
                     type: "high_value",
@@ -120,16 +89,9 @@ public struct NetworkExtensionClusterCheck: Check {
                         "adBound=\((state.identity?.adBound).rootstockDescribe) "
                         + "platformSSO=\((state.identity?.platformSSO).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1518", "T1082"],
-            remediation: [
+            ], attackTechniques: ["T1518", "T1082"], remediation: [
                 "Confirm enterprise network-filter enrollment on identity-joined hosts",
-            ],
-            falsePositiveNotes: "Framework presence is expected on modern macOS even without third-party filters",
-            dryRunSafe: true,
-            opsecScore: 10,
-            esfExpected: ["OPEN"]
-        )
+            ], falsePositiveNotes: "Framework presence is expected on modern macOS even without third-party filters"), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 10, esfExpected: ["OPEN"]))
     }
 
 }

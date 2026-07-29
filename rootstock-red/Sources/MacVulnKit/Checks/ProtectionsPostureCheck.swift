@@ -50,25 +50,12 @@ public struct ProtectionsPostureCheck: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: confidence,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1562.001", "T1082"],
-                remediation: [
+            Finding(id: Self.id, title: title, severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1562.001", "T1082"], remediation: [
                     "Confirm SIP, Gatekeeper, and FileVault via MDM compliance / admin tooling",
                     "Assess mode avoids csrutil/spctl shell storms by default",
-                ],
-                falsePositiveNotes: knownDisabled.isEmpty
+                ], falsePositiveNotes: knownDisabled.isEmpty
                     ? "Unknown values are not proof of disabled protections"
-                    : "Verify disabled flags with privileged host tooling before remediating",
-                dryRunSafe: true,
-                opsecScore: 10,
-                esfExpected: []
-            ),
+                    : "Verify disabled flags with privileged host tooling before remediating"), runtime: .init(confidence: confidence, dryRunSafe: true, opsecScore: 10, esfExpected: [])),
         ]
     }
 

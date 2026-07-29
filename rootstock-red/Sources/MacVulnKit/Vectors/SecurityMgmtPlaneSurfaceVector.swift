@@ -12,15 +12,32 @@ public struct SecurityMgmtPlaneSurfaceVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard hasSurface(state), hasInventory(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
+        let mgmt = state.securityMgmtPlane
+        let cli = mgmt?.managementCLIPaths.count ?? 0
+        let helpers = mgmt?.privilegedHelperPaths.count ?? 0
+        let surface = mgmt?.managementPlanePresent == true || cli + helpers > 0
+        let note = state.collectorNotes["collect.security_mgmt_plane"] != nil
+        return surface || note
+    }
+
+    private func hasInventory(_ state: CollectedState) -> Bool {
         let mgmt = state.securityMgmtPlane
         let cli = mgmt?.managementCLIPaths.count ?? 0
         let helpers = mgmt?.privilegedHelperPaths.count ?? 0
         let unload = mgmt?.unloadAdjacentHints.count ?? 0
-        let surface = mgmt?.managementPlanePresent == true || cli + helpers > 0
-        let note = state.collectorNotes["collect.security_mgmt_plane"] != nil
+        return cli >= 1 || helpers >= 1 || unload >= 1
+    }
 
-        guard surface || note else { return [] }
-
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let mgmt = state.securityMgmtPlane
+        let cli = mgmt?.managementCLIPaths.count ?? 0
+        let helpers = mgmt?.privilegedHelperPaths.count ?? 0
+        let unload = mgmt?.unloadAdjacentHints.count ?? 0
         let productsPresent = state.securityProducts.contains(where: \.present)
         let sensorThin =
             state.esf?.clientPaths.isEmpty == true
@@ -30,9 +47,6 @@ public struct SecurityMgmtPlaneSurfaceVector: Check {
             state.network?.remoteLoginSSH == true
             || state.network?.screenSharingARD == true
         let sipOff = state.protections?.sipEnabled == false
-
-        // Path-to-impact: mgmt plane present with product/helper/unload adjacency
-        guard cli >= 1 || helpers >= 1 || unload >= 1 else { return [] }
 
         var evidence: [Evidence] = [
             Evidence(
@@ -60,6 +74,14 @@ public struct SecurityMgmtPlaneSurfaceVector: Check {
             )
         )
 
+        return evidence
+    }
+
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let helpers = state.securityMgmtPlane?.privilegedHelperPaths.count ?? 0
+        let productsPresent = state.securityProducts.contains(where: \.present)
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let sipOff = state.protections?.sipEnabled == false
         let severity: Severity
         if remote && (helpers >= 1 || sipOff) {
             severity = .medium
@@ -69,30 +91,14 @@ public struct SecurityMgmtPlaneSurfaceVector: Check {
             severity = .info
         }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: productsPresent
+        return Finding(id: Self.id, title: productsPresent
                     ? "Security-product management-plane surface (unload class inventory)"
-                    : "Security management-plane tooling surface (sysext/CLI class)",
-                severity: severity,
-                confidence: .low,
-                category: .securityProduct,
-                evidence: evidence,
-                attackTechniques: ["T1562.001", "T1543", "T1218"],
-                remediation: [
+                    : "Security management-plane tooling surface (sysext/CLI class)", severity: severity, category: .securityProduct, resolution: .init(evidence: evidence, attackTechniques: ["T1562.001", "T1543", "T1218"], remediation: [
                     "Lock down vendor uninstallers and management CLIs via MDM and least privilege",
                     "Monitor systemextensionsctl / launchctl / privileged-helper activity via EDR",
                     "Ensure tamper protection is enabled on enterprise security products",
                     "OPSEC: Rootstock Red documents management-plane class only - never unloads sensors",
-                ],
-                falsePositiveNotes:
-                    "systemextensionsctl and launchctl are stock tools. Prioritize hosts with "
-                    + "security-product helpers and remote access for defense-impairment narrative.",
-                dryRunSafe: true,
-                opsecScore: 28,
-                esfExpected: ["OPEN", "EXEC"]
-            ),
-        ]
+                ], falsePositiveNotes: "systemextensionsctl and launchctl are stock tools. Prioritize hosts with "
+                    + "security-product helpers and remote access for defense-impairment narrative."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC"]))
     }
 }

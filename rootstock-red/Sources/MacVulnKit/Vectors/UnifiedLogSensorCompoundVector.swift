@@ -46,26 +46,13 @@ public struct UnifiedLogSensorCompoundVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Unified log observation × remote compound"
-                    : "Unified log observation × impact compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1083", "T1005", "T1562"],
-                remediation: [
+                    : "Unified log observation × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1083", "T1005", "T1562"], remediation: [
                     "Prioritize hosts co-locating Unified log observation with remote/FDA amplifiers",
                     "Use Wave-12 lab plans under ROE for purple validation",
                     "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-                ],
-                falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first.",
-                dryRunSafe: true,
-                opsecScore: 27,
-                esfExpected: ["OPEN", "EXEC", "READ"]
-            ),
+                ], falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"])),
         ]
     }
 }

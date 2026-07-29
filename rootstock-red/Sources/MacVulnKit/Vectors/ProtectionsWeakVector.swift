@@ -9,109 +9,50 @@ public struct ProtectionsWeakVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
-        let p = state.protections
-        let sip = p?.sipEnabled
-        let gk = p?.gatekeeperEnabled
-        let fv = p?.fileVaultOn
+        let posture = Self.posture(from: state)
+        guard posture.shouldEmit else { return [] }
+        return [Self.finding(for: posture)]
+    }
 
-        let knownDisabled: [(name: String, technique: String)] = [
-            ("SIP", "T1562.001"),
-            ("Gatekeeper", "T1553.001"),
-            ("FileVault", "T1552"),
-        ].compactMap { name, tech in
-            let flag: Bool?
-            switch name {
-            case "SIP": flag = sip
-            case "Gatekeeper": flag = gk
-            case "FileVault": flag = fv
-            default: flag = nil
-            }
-            return flag == false ? (name, tech) : nil
-        }
+    private struct DisabledProtection { let name: String; let technique: String }
+    private struct ProtectionState { let name: String; let enabled: Bool?; let technique: String }
+    private struct Posture {
+        let disabled: [DisabledProtection]
+        let allUnknown: Bool
+        let otherMisconfig: Bool
+        let evidence: [Evidence]
+        var shouldEmit: Bool { !disabled.isEmpty || (allUnknown && otherMisconfig) }
+    }
 
-        let allUnknown = sip == nil && gk == nil && fv == nil
-        let isRoot = state.host?.isRoot == true
-        let otherMisconfig =
-            isRoot
-            || state.injectabilityHits.contains { !$0.riskFlags.isEmpty }
-            || !state.dylibRiskHits.filter { !$0.weakDylibs.isEmpty }.isEmpty
-            || state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
+    private static func posture(from state: CollectedState) -> Posture {
+        let protections = state.protections
+        let sip = protections?.sipEnabled
+        let gatekeeper = protections?.gatekeeperEnabled
+        let fileVault = protections?.fileVaultOn
+        let disabled = disabledProtections(sip: sip, gatekeeper: gatekeeper, fileVault: fileVault)
+        let otherMisconfig = hasOtherMisconfiguration(in: state)
+        var evidence = protections?.notes.prefix(10).map { Evidence(type: "note", detail: $0) } ?? []
+        evidence += [Evidence(type: "sip", detail: "sipEnabled=\(sip.rootstockDescribe)"), Evidence(type: "gatekeeper", detail: "gatekeeperEnabled=\(gatekeeper.rootstockDescribe)"), Evidence(type: "filevault", detail: "fileVaultOn=\(fileVault.rootstockDescribe)")]
+        if state.host?.isRoot == true { evidence.append(Evidence(type: "context", detail: "process isRoot=true - elevated assess context")) }
+        if otherMisconfig && disabled.isEmpty { evidence.append(Evidence(type: "path_to_impact", detail: "Protections unknown/uncollected while other misconfig signals exist (inject surface, weak dylibs, remote access, or root context)")) }
+        return Posture(disabled: disabled, allUnknown: sip == nil && gatekeeper == nil && fileVault == nil, otherMisconfig: otherMisconfig, evidence: evidence)
+    }
 
-        // Only emit when weak, or unknown+supporting misconfig path-to-impact.
-        guard !knownDisabled.isEmpty || (allUnknown && otherMisconfig) || (p == nil && otherMisconfig) else {
-            return []
-        }
+    private static func disabledProtections(sip: Bool?, gatekeeper: Bool?, fileVault: Bool?) -> [DisabledProtection] {
+        [ProtectionState(name: "SIP", enabled: sip, technique: "T1562.001"), ProtectionState(name: "Gatekeeper", enabled: gatekeeper, technique: "T1553.001"), ProtectionState(name: "FileVault", enabled: fileVault, technique: "T1552")].compactMap { $0.enabled == false ? DisabledProtection(name: $0.name, technique: $0.technique) : nil }
+    }
 
-        var evidence: [Evidence] = []
-        if let notes = p?.notes {
-            evidence.append(contentsOf: notes.prefix(10).map { Evidence(type: "note", detail: $0) })
-        }
-        evidence.append(Evidence(type: "sip", detail: "sipEnabled=\(sip.rootstockDescribe)"))
-        evidence.append(Evidence(type: "gatekeeper", detail: "gatekeeperEnabled=\(gk.rootstockDescribe)"))
-        evidence.append(Evidence(type: "filevault", detail: "fileVaultOn=\(fv.rootstockDescribe)"))
-        if isRoot {
-            evidence.append(
-                Evidence(type: "context", detail: "process isRoot=true - elevated assess context")
-            )
-        }
-        if otherMisconfig && knownDisabled.isEmpty {
-            evidence.append(
-                Evidence(
-                    type: "path_to_impact",
-                    detail:
-                        "Protections unknown/uncollected while other misconfig signals exist "
-                        + "(inject surface, weak dylibs, remote access, or root context)"
-                )
-            )
-        }
+    private static func hasOtherMisconfiguration(in state: CollectedState) -> Bool {
+        state.host?.isRoot == true || state.injectabilityHits.contains { !$0.riskFlags.isEmpty } || !state.dylibRiskHits.filter({ !$0.weakDylibs.isEmpty }).isEmpty || state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+    }
 
-        let severity: Severity
-        let confidence: Confidence
-        let title: String
+    private static func finding(for posture: Posture) -> Finding {
+        let sipDisabled = posture.disabled.contains { $0.name == "SIP" }
+        let title = sipDisabled ? "Privilege-escalation surface: SIP disabled (high impact)" : posture.disabled.isEmpty ? "Protections posture unknown with supporting path-to-impact signals" : "Protections weak: \(posture.disabled.map(\.name).joined(separator: ", ")) disabled"
         var techniques = Set(["T1082", "T1562.001"])
-
-        if knownDisabled.contains(where: { $0.name == "SIP" }) {
-            severity = .high
-            confidence = .medium
-            title = "Privilege-escalation surface: SIP disabled (high impact)"
-            techniques.insert("T1548")
-        } else if !knownDisabled.isEmpty {
-            severity = .medium
-            confidence = .medium
-            let names = knownDisabled.map(\.name).joined(separator: ", ")
-            title = "Protections weak: \(names) disabled"
-            for item in knownDisabled {
-                techniques.insert(item.technique)
-            }
-        } else {
-            severity = .low
-            confidence = .low
-            title = "Protections posture unknown with supporting path-to-impact signals"
-        }
-
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: confidence,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: Array(techniques).sorted(),
-                remediation: [
-                    "Re-enable SIP (csrutil), Gatekeeper (spctl), and FileVault via MDM/compliance",
-                    "Treat disabled SIP as high-priority host integrity failure",
-                    "OPSEC: assessing protections via csrutil/spctl may itself be logged - prefer MDM inventory",
-                ],
-                falsePositiveNotes: knownDisabled.isEmpty
-                    ? "Unknown is not proof of disabled protections; corroborate with admin tooling"
-                    : "Verify disabled flags with privileged host tooling before remediating",
-                dryRunSafe: true,
-                opsecScore: 18,
-                esfExpected: ["OPEN"]
-            ),
-        ]
+        posture.disabled.forEach { techniques.insert($0.technique) }
+        if sipDisabled { techniques.insert("T1548") }
+        return Finding(id: Self.id, title: title, severity: sipDisabled ? .high : posture.disabled.isEmpty ? .low : .medium, category: .misconfig, resolution: .init(evidence: posture.evidence, attackTechniques: techniques.sorted(), remediation: ["Re-enable SIP (csrutil), Gatekeeper (spctl), and FileVault via MDM/compliance", "Treat disabled SIP as high-priority host integrity failure", "OPSEC: assessing protections via csrutil/spctl may itself be logged - prefer MDM inventory"], falsePositiveNotes: posture.disabled.isEmpty ? "Unknown is not proof of disabled protections; corroborate with admin tooling" : "Verify disabled flags with privileged host tooling before remediating"), runtime: .init(confidence: posture.disabled.isEmpty ? .low : .medium, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN"]))
     }
 
 }

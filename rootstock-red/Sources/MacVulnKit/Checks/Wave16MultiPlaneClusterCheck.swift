@@ -12,184 +12,53 @@ public struct Wave16MultiPlaneClusterCheck: Check {
         return [Self.compoundFinding(planes: planes, state: state)]
     }
     private static func pairPlanes(state: CollectedState) -> [String] {
-        var planes: [String] = []
+        communicationPlanes(state) + appDataPlanes(state) + servicePlanes(state) + cloudPlanes(state)
+    }
 
-        let _airplay_receiver_surface = state.airplayReceiverSurface
-        if _airplay_receiver_surface?.airplaySurfacePresent == true
-            || ((_airplay_receiver_surface?.airplayDaemonPaths.count ?? 0) >= 1)
-            || ((_airplay_receiver_surface?.airplayPrefPaths.count ?? 0) >= 1) {
-            planes.append("airplay_receiver_surface")
-        }
 
-        let _handoff_clipboard_depth = state.handoffClipboardDepth
-        if _handoff_clipboard_depth?.handoffSurfacePresent == true
-            || ((_handoff_clipboard_depth?.handoffFrameworkPaths.count ?? 0) >= 1)
-            || ((_handoff_clipboard_depth?.clipboardPathHits.count ?? 0) >= 1) {
-            planes.append("handoff_clipboard_depth")
-        }
+    private static func communicationPlanes(_ state: CollectedState) -> [String] {
+        presentPlaneNames([
+            .init(name: "airplay_receiver_surface", isPresent: hasPlaneSurface(state.airplayReceiverSurface, isPresent: { $0.airplaySurfacePresent }, primaryCount: { $0.airplayDaemonPaths.count }, secondaryCount: { $0.airplayPrefPaths.count })),
+            .init(name: "handoff_clipboard_depth", isPresent: hasPlaneSurface(state.handoffClipboardDepth, isPresent: { $0.handoffSurfacePresent }, primaryCount: { $0.handoffFrameworkPaths.count }, secondaryCount: { $0.clipboardPathHits.count })),
+            .init(name: "imessage_path_plane", isPresent: hasPlaneSurface(state.imessagePathPlane, isPresent: { $0.imessageSurfacePresent }, primaryCount: { $0.messagesAppPaths.count }, secondaryCount: { $0.messagesDbPaths.count })),
+            .init(name: "facetime_camera_surface", isPresent: hasPlaneSurface(state.facetimeCameraSurface, isPresent: { $0.facetimeSurfacePresent }, primaryCount: { $0.facetimeAppPaths.count }, secondaryCount: { $0.avConferencePaths.count })),
+            .init(name: "finder_sync_extension", isPresent: hasPlaneSurface(state.finderSyncExtension, isPresent: { $0.finderSyncSurfacePresent }, primaryCount: { $0.finderSyncFrameworkPaths.count }, secondaryCount: { $0.appScriptPaths.count })),
+            .init(name: "fileprovider_domain", isPresent: hasPlaneSurface(state.fileproviderDomain, isPresent: { $0.fileProviderSurfacePresent }, primaryCount: { $0.fileProviderFrameworkPaths.count }, secondaryCount: { $0.cloudStoragePaths.count })),
+        ])
+    }
 
-        let _imessage_path_plane = state.imessagePathPlane
-        if _imessage_path_plane?.imessageSurfacePresent == true
-            || ((_imessage_path_plane?.messagesAppPaths.count ?? 0) >= 1)
-            || ((_imessage_path_plane?.messagesDbPaths.count ?? 0) >= 1) {
-            planes.append("imessage_path_plane")
-        }
+    private static func appDataPlanes(_ state: CollectedState) -> [String] {
+        presentPlaneNames([
+            .init(name: "notification_center_depth", isPresent: hasPlaneSurface(state.notificationCenterDepth, isPresent: { $0.notificationSurfacePresent }, primaryCount: { $0.notificationFrameworkPaths.count }, secondaryCount: { $0.notificationStorePaths.count })),
+            .init(name: "siri_suggestions_plane", isPresent: hasPlaneSurface(state.siriSuggestionsPlane, isPresent: { $0.siriSurfacePresent }, primaryCount: { $0.siriFrameworkPaths.count }, secondaryCount: { $0.suggestionsStorePaths.count })),
+            .init(name: "spotlight_importer_depth", isPresent: hasPlaneSurface(state.spotlightImporterDepth, isPresent: { $0.spotlightImporterSurfacePresent }, primaryCount: { $0.metadataToolPaths.count }, secondaryCount: { $0.spotlightImporterPaths.count })),
+            .init(name: "contacts_path_plane", isPresent: hasPlaneSurface(state.contactsPathPlane, isPresent: { $0.contactsSurfacePresent }, primaryCount: { $0.contactsAppPaths.count }, secondaryCount: { $0.addressBookPaths.count })),
+            .init(name: "calendar_server_path", isPresent: hasPlaneSurface(state.calendarServerPath, isPresent: { $0.caldavSurfacePresent }, primaryCount: { $0.caldavFrameworkPaths.count }, secondaryCount: { $0.calendarsStorePaths.count })),
+            .init(name: "reminders_cloud_path", isPresent: hasPlaneSurface(state.remindersCloudPath, isPresent: { $0.remindersCloudSurfacePresent }, primaryCount: { $0.remindersAppPaths.count }, secondaryCount: { $0.remindersStorePaths.count })),
+        ])
+    }
 
-        let _facetime_camera_surface = state.facetimeCameraSurface
-        if _facetime_camera_surface?.facetimeSurfacePresent == true
-            || ((_facetime_camera_surface?.facetimeAppPaths.count ?? 0) >= 1)
-            || ((_facetime_camera_surface?.avConferencePaths.count ?? 0) >= 1) {
-            planes.append("facetime_camera_surface")
-        }
+    private static func servicePlanes(_ state: CollectedState) -> [String] {
+        presentPlaneNames([
+            .init(name: "maps_location_path", isPresent: hasPlaneSurface(state.mapsLocationPath, isPresent: { $0.mapsLocationSurfacePresent }, primaryCount: { $0.mapsAppPaths.count }, secondaryCount: { $0.mapsCachePaths.count })),
+            .init(name: "weather_widget_path", isPresent: hasPlaneSurface(state.weatherWidgetPath, isPresent: { $0.weatherSurfacePresent }, primaryCount: { $0.weatherAppPaths.count }, secondaryCount: { $0.weatherContainerPaths.count })),
+            .init(name: "music_library_path", isPresent: hasPlaneSurface(state.musicLibraryPath, isPresent: { $0.musicSurfacePresent }, primaryCount: { $0.musicAppPaths.count }, secondaryCount: { $0.musicLibraryPaths.count })),
+            .init(name: "books_path_plane", isPresent: hasPlaneSurface(state.booksPathPlane, isPresent: { $0.booksSurfacePresent }, primaryCount: { $0.booksAppPaths.count }, secondaryCount: { $0.booksContainerPaths.count })),
+            .init(name: "podcasts_path_plane", isPresent: hasPlaneSurface(state.podcastsPathPlane, isPresent: { $0.podcastsSurfacePresent }, primaryCount: { $0.podcastsAppPaths.count }, secondaryCount: { $0.podcastsStorePaths.count })),
+            .init(name: "tv_app_path_plane", isPresent: hasPlaneSurface(state.tvAppPathPlane, isPresent: { $0.tvSurfacePresent }, primaryCount: { $0.tvAppPaths.count }, secondaryCount: { $0.tvContainerPaths.count })),
+        ])
+    }
 
-        let _finder_sync_extension = state.finderSyncExtension
-        if _finder_sync_extension?.finderSyncSurfacePresent == true
-            || ((_finder_sync_extension?.finderSyncFrameworkPaths.count ?? 0) >= 1)
-            || ((_finder_sync_extension?.appScriptPaths.count ?? 0) >= 1) {
-            planes.append("finder_sync_extension")
-        }
-
-        let _fileprovider_domain = state.fileproviderDomain
-        if _fileprovider_domain?.fileProviderSurfacePresent == true
-            || ((_fileprovider_domain?.fileProviderFrameworkPaths.count ?? 0) >= 1)
-            || ((_fileprovider_domain?.cloudStoragePaths.count ?? 0) >= 1) {
-            planes.append("fileprovider_domain")
-        }
-
-        let _notification_center_depth = state.notificationCenterDepth
-        if _notification_center_depth?.notificationSurfacePresent == true
-            || ((_notification_center_depth?.notificationFrameworkPaths.count ?? 0) >= 1)
-            || ((_notification_center_depth?.notificationStorePaths.count ?? 0) >= 1) {
-            planes.append("notification_center_depth")
-        }
-
-        let _siri_suggestions_plane = state.siriSuggestionsPlane
-        if _siri_suggestions_plane?.siriSurfacePresent == true
-            || ((_siri_suggestions_plane?.siriFrameworkPaths.count ?? 0) >= 1)
-            || ((_siri_suggestions_plane?.suggestionsStorePaths.count ?? 0) >= 1) {
-            planes.append("siri_suggestions_plane")
-        }
-
-        let _spotlight_importer_depth = state.spotlightImporterDepth
-        if _spotlight_importer_depth?.spotlightImporterSurfacePresent == true
-            || ((_spotlight_importer_depth?.metadataToolPaths.count ?? 0) >= 1)
-            || ((_spotlight_importer_depth?.spotlightImporterPaths.count ?? 0) >= 1) {
-            planes.append("spotlight_importer_depth")
-        }
-
-        let _contacts_path_plane = state.contactsPathPlane
-        if _contacts_path_plane?.contactsSurfacePresent == true
-            || ((_contacts_path_plane?.contactsAppPaths.count ?? 0) >= 1)
-            || ((_contacts_path_plane?.addressBookPaths.count ?? 0) >= 1) {
-            planes.append("contacts_path_plane")
-        }
-
-        let _calendar_server_path = state.calendarServerPath
-        if _calendar_server_path?.caldavSurfacePresent == true
-            || ((_calendar_server_path?.caldavFrameworkPaths.count ?? 0) >= 1)
-            || ((_calendar_server_path?.calendarsStorePaths.count ?? 0) >= 1) {
-            planes.append("calendar_server_path")
-        }
-
-        let _reminders_cloud_path = state.remindersCloudPath
-        if _reminders_cloud_path?.remindersCloudSurfacePresent == true
-            || ((_reminders_cloud_path?.remindersAppPaths.count ?? 0) >= 1)
-            || ((_reminders_cloud_path?.remindersStorePaths.count ?? 0) >= 1) {
-            planes.append("reminders_cloud_path")
-        }
-
-        let _maps_location_path = state.mapsLocationPath
-        if _maps_location_path?.mapsLocationSurfacePresent == true
-            || ((_maps_location_path?.mapsAppPaths.count ?? 0) >= 1)
-            || ((_maps_location_path?.mapsCachePaths.count ?? 0) >= 1) {
-            planes.append("maps_location_path")
-        }
-
-        let _weather_widget_path = state.weatherWidgetPath
-        if _weather_widget_path?.weatherSurfacePresent == true
-            || ((_weather_widget_path?.weatherAppPaths.count ?? 0) >= 1)
-            || ((_weather_widget_path?.weatherContainerPaths.count ?? 0) >= 1) {
-            planes.append("weather_widget_path")
-        }
-
-        let _music_library_path = state.musicLibraryPath
-        if _music_library_path?.musicSurfacePresent == true
-            || ((_music_library_path?.musicAppPaths.count ?? 0) >= 1)
-            || ((_music_library_path?.musicLibraryPaths.count ?? 0) >= 1) {
-            planes.append("music_library_path")
-        }
-
-        let _books_path_plane = state.booksPathPlane
-        if _books_path_plane?.booksSurfacePresent == true
-            || ((_books_path_plane?.booksAppPaths.count ?? 0) >= 1)
-            || ((_books_path_plane?.booksContainerPaths.count ?? 0) >= 1) {
-            planes.append("books_path_plane")
-        }
-
-        let _podcasts_path_plane = state.podcastsPathPlane
-        if _podcasts_path_plane?.podcastsSurfacePresent == true
-            || ((_podcasts_path_plane?.podcastsAppPaths.count ?? 0) >= 1)
-            || ((_podcasts_path_plane?.podcastsStorePaths.count ?? 0) >= 1) {
-            planes.append("podcasts_path_plane")
-        }
-
-        let _tv_app_path_plane = state.tvAppPathPlane
-        if _tv_app_path_plane?.tvSurfacePresent == true
-            || ((_tv_app_path_plane?.tvAppPaths.count ?? 0) >= 1)
-            || ((_tv_app_path_plane?.tvContainerPaths.count ?? 0) >= 1) {
-            planes.append("tv_app_path_plane")
-        }
-
-        let _homekit_path_plane = state.homekitPathPlane
-        if _homekit_path_plane?.homekitSurfacePresent == true
-            || ((_homekit_path_plane?.homeAppPaths.count ?? 0) >= 1)
-            || ((_homekit_path_plane?.homeKitStorePaths.count ?? 0) >= 1) {
-            planes.append("homekit_path_plane")
-        }
-
-        let _health_path_plane = state.healthPathPlane
-        if _health_path_plane?.healthSurfacePresent == true
-            || ((_health_path_plane?.healthAppPaths.count ?? 0) >= 1)
-            || ((_health_path_plane?.healthStorePaths.count ?? 0) >= 1) {
-            planes.append("health_path_plane")
-        }
-
-        let _wallet_pass_path = state.walletPassPath
-        if _wallet_pass_path?.walletSurfacePresent == true
-            || ((_wallet_pass_path?.walletAppPaths.count ?? 0) >= 1)
-            || ((_wallet_pass_path?.passesStorePaths.count ?? 0) >= 1) {
-            planes.append("wallet_pass_path")
-        }
-
-        let _findmy_path_plane = state.findmyPathPlane
-        if _findmy_path_plane?.findmySurfacePresent == true
-            || ((_findmy_path_plane?.findMyAppPaths.count ?? 0) >= 1)
-            || ((_findmy_path_plane?.findMyCachePaths.count ?? 0) >= 1) {
-            planes.append("findmy_path_plane")
-        }
-
-        let _shortcuts_icloud_sync = state.shortcutsIcloudSync
-        if _shortcuts_icloud_sync?.shortcutsIcloudSurfacePresent == true
-            || ((_shortcuts_icloud_sync?.shortcutsAppPaths.count ?? 0) >= 1)
-            || ((_shortcuts_icloud_sync?.shortcutsDbPaths.count ?? 0) >= 1) {
-            planes.append("shortcuts_icloud_sync")
-        }
-
-        let _devicemanagement_profile = state.devicemanagementProfile
-        if _devicemanagement_profile?.deviceMgmtSurfacePresent == true
-            || ((_devicemanagement_profile?.profilesToolPaths.count ?? 0) >= 1)
-            || ((_devicemanagement_profile?.managedPrefPaths.count ?? 0) >= 1) {
-            planes.append("devicemanagement_profile")
-        }
-
-        let _softwareupdate_catalog = state.softwareupdateCatalog
-        if _softwareupdate_catalog?.softwareUpdateSurfacePresent == true
-            || ((_softwareupdate_catalog?.softwareUpdateToolPaths.count ?? 0) >= 1)
-            || ((_softwareupdate_catalog?.softwareUpdatePrefPaths.count ?? 0) >= 1) {
-            planes.append("softwareupdate_catalog")
-        }
-
-        return planes
+    private static func cloudPlanes(_ state: CollectedState) -> [String] {
+        presentPlaneNames([
+            .init(name: "homekit_path_plane", isPresent: hasPlaneSurface(state.homekitPathPlane, isPresent: { $0.homekitSurfacePresent }, primaryCount: { $0.homeAppPaths.count }, secondaryCount: { $0.homeKitStorePaths.count })),
+            .init(name: "health_path_plane", isPresent: hasPlaneSurface(state.healthPathPlane, isPresent: { $0.healthSurfacePresent }, primaryCount: { $0.healthAppPaths.count }, secondaryCount: { $0.healthStorePaths.count })),
+            .init(name: "wallet_pass_path", isPresent: hasPlaneSurface(state.walletPassPath, isPresent: { $0.walletSurfacePresent }, primaryCount: { $0.walletAppPaths.count }, secondaryCount: { $0.passesStorePaths.count })),
+            .init(name: "findmy_path_plane", isPresent: hasPlaneSurface(state.findmyPathPlane, isPresent: { $0.findmySurfacePresent }, primaryCount: { $0.findMyAppPaths.count }, secondaryCount: { $0.findMyCachePaths.count })),
+            .init(name: "shortcuts_icloud_sync", isPresent: hasPlaneSurface(state.shortcutsIcloudSync, isPresent: { $0.shortcutsIcloudSurfacePresent }, primaryCount: { $0.shortcutsAppPaths.count }, secondaryCount: { $0.shortcutsDbPaths.count })),
+            .init(name: "devicemanagement_profile", isPresent: hasPlaneSurface(state.devicemanagementProfile, isPresent: { $0.deviceMgmtSurfacePresent }, primaryCount: { $0.profilesToolPaths.count }, secondaryCount: { $0.managedPrefPaths.count })),
+            .init(name: "softwareupdate_catalog", isPresent: hasPlaneSurface(state.softwareupdateCatalog, isPresent: { $0.softwareUpdateSurfacePresent }, primaryCount: { $0.softwareUpdateToolPaths.count }, secondaryCount: { $0.softwareUpdatePrefPaths.count })),
+        ])
     }
     private static func amplifiers(state: CollectedState) -> [String] {
         var amps: [String] = []
@@ -206,26 +75,17 @@ public struct Wave16MultiPlaneClusterCheck: Check {
         let amps = amplifiers(state: state).sorted()
         let severity: Severity = (sorted.count >= 6 && amps.contains("remote") && amps.contains("fda")) ? .high
             : ((sorted.count >= 3 || (sorted.count >= 2 && amps.count >= 2)) ? .medium : .low)
-        return Finding(
-            id: "\(id).multi_plane",
-            title: "Wave-16 multi-plane compound: \(sorted.count) planes (\(sorted.joined(separator: ", ")))",
-            severity: severity, confidence: .low, category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).multi_plane", title: "Wave-16 multi-plane compound: \(sorted.count) planes (\(sorted.joined(separator: ", ")))", severity: severity, category: .misconfig, resolution: .init(evidence: [
                 Evidence(type: "planes", detail: "planes=\(sorted.joined(separator: "|")) count=\(sorted.count)"),
                 Evidence(type: "amplifiers", detail: amps.isEmpty ? "amplifiers=none" : "amplifiers=\(amps.joined(separator: "|")) count=\(amps.count)"),
                 Evidence(type: "stage_labels", detail: "stages=collection|privacy|mdm|media|automation (labels only - not auto-exploit)"),
                 Evidence(type: "host", detail: "host=\(state.host?.hostname ?? "unknown") user=\(state.host?.username ?? "unknown")"),
                 Evidence(type: "honesty", detail: "Wave-16 multi-plane ranking is path-to-impact narrative across 25 planes / 50 red|blue half-pairs. Rootstock Red does not dump app contents, location, Health/Wallet secrets, install MDM profiles, or rewrite Software Update catalogs."),
-            ],
-            attackTechniques: ["T1005", "T1083", "T1213", "T1484", "T1072", "T1115"],
-            remediation: [
+            ], attackTechniques: ["T1005", "T1083", "T1213", "T1484", "T1072", "T1115"], remediation: [
                 "Prioritize hosts co-locating multiple Wave-16 planes with remote/FDA amplifiers",
                 "Close remote access before deep dual-use inventory",
                 "Use Wave-16 lab plans under ROE for purple validation",
                 "OPSEC: multi-plane compounds are engagement narrative, not exploit scripts",
-            ],
-            falsePositiveNotes: "Consumer Macs co-locate many first-party app path planes. Rank production remote hosts with FDA amplifiers first.",
-            dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ"]
-        )
+            ], falsePositiveNotes: "Consumer Macs co-locate many first-party app path planes. Rank production remote hosts with FDA amplifiers first."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ"]))
     }
 }

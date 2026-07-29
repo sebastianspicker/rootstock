@@ -12,31 +12,42 @@ public struct ContinuityAirDropSurfaceVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard shouldReport(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func shouldReport(_ state: CollectedState) -> Bool {
+        hasSurface(state) && hasImpact(state)
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
         let cont = state.continuityAirDrop
         let airdrop = cont?.airdropPrefPaths.count ?? 0
         let continuity = cont?.continuityFrameworkPaths.count ?? 0
         let nearby = cont?.nearbyShareHints.count ?? 0
-        let surface = cont?.proximitySurfacePresent == true || airdrop + continuity + nearby > 0
-        let note = state.collectorNotes["collect.continuity_airdrop"] != nil
+        return cont?.proximitySurfacePresent == true || airdrop + continuity + nearby > 0
+            || state.collectorNotes["collect.continuity_airdrop"] != nil
+    }
 
-        guard surface || note else { return [] }
-
+    private func hasImpact(_ state: CollectedState) -> Bool {
+        let cont = state.continuityAirDrop
+        let airdrop = cont?.airdropPrefPaths.count ?? 0
+        let continuity = cont?.continuityFrameworkPaths.count ?? 0
         let fda = state.tcc?.fullDiskAccessLikely == true
-        let sensitive =
-            state.browserMeta.contains(where: \.exists)
-            || state.credPaths.contains(where: \.exists)
-        let remote =
-            state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
-        let axSignals = state.tcc?.domainSignals.contains {
-            $0.lowercased().contains("screen") || $0.lowercased().contains("accessib")
-        } ?? false
+        let sensitive = state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists)
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let axSignals = state.tcc?.domainSignals.contains { $0.lowercased().contains("screen") || $0.lowercased().contains("accessib") } ?? false
+        return fda || sensitive || remote || axSignals || airdrop + continuity >= 2
+    }
 
-        // Path-to-impact: proximity surface + (sensitive session OR FDA OR remote OR AX)
-        guard fda || sensitive || remote || axSignals || (airdrop + continuity >= 2) else {
-            return []
-        }
-
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let cont = state.continuityAirDrop
+        let airdrop = cont?.airdropPrefPaths.count ?? 0
+        let continuity = cont?.continuityFrameworkPaths.count ?? 0
+        let nearby = cont?.nearbyShareHints.count ?? 0
+        let fda = state.tcc?.fullDiskAccessLikely == true
+        let sensitive = state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists)
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
         var evidence: [Evidence] = [
             Evidence(
                 type: "continuity_summary",
@@ -63,34 +74,21 @@ public struct ContinuityAirDropSurfaceVector: Check {
                     + "never builds proximity malware."
             )
         )
+        return evidence
+    }
 
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let fda = state.tcc?.fullDiskAccessLikely == true
+        let sensitive = state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists)
         let severity: Severity = (fda && sensitive) ? .medium : .low
-
-        return [
-            Finding(
-                id: Self.id,
-                title: sensitive
+        return Finding(id: Self.id, title: sensitive
                     ? "Continuity/AirDrop proximity surface near sensitive session path inventory"
-                    : "Continuity / AirDrop proximity transfer surface",
-                severity: severity,
-                confidence: .low,
-                category: .network,
-                evidence: evidence,
-                attackTechniques: ["T1091", "T1005", "T1011"],
-                remediation: [
+                    : "Continuity / AirDrop proximity transfer surface", severity: severity, category: .network, resolution: .init(evidence: evidence, attackTechniques: ["T1091", "T1005", "T1011"], remediation: [
                     "Restrict AirDrop to contacts-only or off on high-value endpoints via MDM",
                     "Disable Continuity features where policy forbids multi-device handoff",
                     "Physically secure endpoints with open proximity transfer",
                     "OPSEC: Rootstock Red does not exfil pasteboard or weaponize AirDrop",
-                ],
-                falsePositiveNotes:
-                    "Continuity frameworks are stock on modern macOS. Prioritize open-receive policy "
-                    + "compounds with high-value data paths when policy signals exist.",
-                dryRunSafe: true,
-                opsecScore: 15,
-                tccDomains: fda ? ["FullDiskAccess"] : [],
-                esfExpected: ["OPEN"]
-            ),
-        ]
+                ], falsePositiveNotes: "Continuity frameworks are stock on modern macOS. Prioritize open-receive policy "
+                    + "compounds with high-value data paths when policy signals exist."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 15, tccDomains: fda ? ["FullDiskAccess"] : [], esfExpected: ["OPEN"]))
     }
 }

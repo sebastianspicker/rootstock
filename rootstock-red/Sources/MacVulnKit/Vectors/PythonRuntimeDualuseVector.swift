@@ -15,32 +15,21 @@ public struct PythonRuntimeDualuseVector: Check {
         let note = state.collectorNotes["collect.python_runtime_dualuse"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "python_runtime_dualuse_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "python_runtime_dualuse_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.pythonBinaryPaths + s.sitePackagePaths + s.pythonFrameworkPaths).prefix(12) {
-                evidence.append(Evidence(type: "python_runtime_dualuse_path", path: path, detail: "Python runtime dual-use path"))
-            }
-            for n in s.notes.prefix(5) { evidence.append(Evidence(type: "python_runtime_dualuse_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.pythonBinaryPaths + s.sitePackagePaths + s.pythonFrameworkPaths, type: "python_runtime_dualuse_path", detail: "Python runtime dual-use path", limit: 12)
+            evidence += VectorEvidence.notes(s.notes, type: "python_runtime_dualuse_note", limit: 5)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never executes third-party Python payloads or drops malicious site-packages."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "Python runtime dual-use with remote amplifier" : "Python runtime dual-use residual surface",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1059.006", "T1059", "T1204"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "Python runtime dual-use with remote amplifier" : "Python runtime dual-use residual surface", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1059.006", "T1059", "T1204"], remediation: [
                 "Inventory and baseline Python runtime dual-use paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never executes third-party Python payloads or drops malicious site-packages",
-            ],
-            falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

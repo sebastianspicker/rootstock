@@ -13,98 +13,38 @@ public struct TCCPermissionGraphDepthVector: Check {
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
         guard let tcc = state.tcc else { return [] }
+        let profile = Self.signalProfile(tcc: tcc)
+        guard Self.shouldEmit(profile: profile, state: state) else { return [] }
+        return [Self.finding(profile: profile, tcc: tcc, state: state)]
+    }
+
+    private struct SignalProfile {
+        let signals: [String]
+        let fdaLikely: Bool
+        let automation: Bool
+        let screen: Bool
+        let filesFolders: Bool
+        var interestingCount: Int { [fdaLikely, automation, screen, filesFolders].filter { $0 }.count }
+        var domains: [String] { [fdaLikely ? "FullDiskAccess" : nil, automation ? "Automation" : nil, screen ? "ScreenCapture" : nil, filesFolders ? "FilesAndFolders" : nil].compactMap { $0 } }
+    }
+
+    private static func signalProfile(tcc: TCCState) -> SignalProfile {
         let signals = tcc.domainSignals
-        // Need multi-domain graph (not just FDA pivot - that is a separate vector).
-        guard signals.count >= 2 || state.collectorNotes["collect.tcc_permission_graph"] != nil else {
-            return []
-        }
+        return SignalProfile(signals: signals, fdaLikely: tcc.fullDiskAccessLikely == true || signals.contains { $0.localizedCaseInsensitiveContains("FullDiskAccess=likely") }, automation: signals.contains { $0.localizedCaseInsensitiveContains("Automation=osascript_present") }, screen: signals.contains { $0.localizedCaseInsensitiveContains("ScreenCapture=tool_present") || $0.localizedCaseInsensitiveContains("screen_recording=tool_present") }, filesFolders: signals.contains { $0.contains("FilesAndFolders=") && !$0.contains("none_listable") })
+    }
 
-        let joined = signals.joined(separator: ";")
-        let fdaLikely = tcc.fullDiskAccessLikely == true
-            || signals.contains { $0.localizedCaseInsensitiveContains("FullDiskAccess=likely") }
-        let automation = signals.contains { $0.localizedCaseInsensitiveContains("Automation=osascript_present") }
-        let screen = signals.contains {
-            $0.localizedCaseInsensitiveContains("ScreenCapture=tool_present")
-                || $0.localizedCaseInsensitiveContains("screen_recording=tool_present")
-        }
-        let filesFolders = signals.contains {
-            $0.contains("FilesAndFolders=") && !$0.contains("none_listable")
-        }
+    private static func shouldEmit(profile: SignalProfile, state: CollectedState) -> Bool {
+        let hasInventory = profile.signals.count >= 2 || state.collectorNotes["collect.tcc_permission_graph"] != nil
+        return hasInventory && (profile.interestingCount >= 2 || (profile.fdaLikely && !profile.signals.isEmpty) || profile.signals.count >= 4)
+    }
 
-        // Path-to-impact: require compound of ≥2 interesting domains or FDA+another.
-        let interestingCount =
-            (fdaLikely ? 1 : 0)
-            + (automation ? 1 : 0)
-            + (screen ? 1 : 0)
-            + (filesFolders ? 1 : 0)
-        guard interestingCount >= 2 || (fdaLikely && !signals.isEmpty) || signals.count >= 4 else {
-            return []
-        }
-
-        var evidence: [Evidence] = [
-            Evidence(type: "probe", detail: "method=\(tcc.probeMethod)"),
-            Evidence(type: "domain_graph", detail: joined.isEmpty ? "(from notes)" : joined),
-        ]
-        for sig in signals.prefix(16) {
-            evidence.append(Evidence(type: "domain_signal", detail: sig))
-        }
-        for note in tcc.notes.prefix(10) {
-            evidence.append(Evidence(type: "tcc_note", detail: note))
-        }
-        if state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists) {
-            evidence.append(
-                Evidence(
-                    type: "pivot_targets",
-                    detail:
-                        "browserMetaPresent=\(state.browserMeta.filter(\.exists).count) "
-                        + "credPathsPresent=\(state.credPaths.filter(\.exists).count) "
-                        + "(metadata only - no secret material)"
-                )
-            )
-        }
-
-        var domains: [String] = []
-        if fdaLikely { domains.append("FullDiskAccess") }
-        if automation { domains.append("Automation") }
-        if screen { domains.append("ScreenCapture") }
-        if filesFolders { domains.append("FilesAndFolders") }
-
-        let severity: Severity
-        let title: String
-        if fdaLikely && (automation || screen) {
-            severity = .high
-            title = "TCC graph depth: FDA plus Automation/Screen domain signals"
-        } else if interestingCount >= 3 {
-            severity = .medium
-            title = "TCC graph depth: multi-domain permission surface (\(interestingCount) domains)"
-        } else {
-            severity = .low
-            title = "TCC permission graph surface (\(signals.count) domain signals)"
-        }
-
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: .medium,
-                category: .tcc,
-                evidence: evidence,
-                attackTechniques: ["T1069", "T1005", "T1113", "T1059.002", "T1083"],
-                remediation: [
-                    "Review System Settings → Privacy & Security grants per domain (FDA, Automation, Screen, AX)",
-                    "Deploy PPPC profiles for enterprise allowlists; revoke unexpected grants",
-                    "Treat multi-domain grant combinations as higher impact than single booleans",
-                    "OPSEC: assess uses non-prompting probes only - never force TCC dialogs",
-                ],
-                falsePositiveNotes:
-                    "Domain signals are heuristics (tool presence / path listability), not live TCC.db grants. "
-                    + "MDM PPPC may grant outside user-visible settings.",
-                dryRunSafe: true,
-                opsecScore: fdaLikely ? 38 : 24,
-                tccDomains: domains.isEmpty ? ["FullDiskAccess"] : domains,
-                esfExpected: ["OPEN"]
-            ),
-        ]
+    private static func finding(profile: SignalProfile, tcc: TCCState, state: CollectedState) -> Finding {
+        var evidence = [Evidence(type: "probe", detail: "method=\(tcc.probeMethod)"), Evidence(type: "domain_graph", detail: profile.signals.isEmpty ? "(from notes)" : profile.signals.joined(separator: ";"))]
+        evidence += profile.signals.prefix(16).map { Evidence(type: "domain_signal", detail: $0) }
+        evidence += tcc.notes.prefix(10).map { Evidence(type: "tcc_note", detail: $0) }
+        if state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists) { evidence.append(Evidence(type: "pivot_targets", detail: "browserMetaPresent=\(state.browserMeta.filter(\.exists).count) credPathsPresent=\(state.credPaths.filter(\.exists).count) (metadata only - no secret material)")) }
+        let severity: Severity = profile.fdaLikely && (profile.automation || profile.screen) ? .high : profile.interestingCount >= 3 ? .medium : .low
+        let title = severity == .high ? "TCC graph depth: FDA plus Automation/Screen domain signals" : severity == .medium ? "TCC graph depth: multi-domain permission surface (\(profile.interestingCount) domains)" : "TCC permission graph surface (\(profile.signals.count) domain signals)"
+        return Finding(id: Self.id, title: title, severity: severity, category: .tcc, resolution: .init(evidence: evidence, attackTechniques: ["T1069", "T1005", "T1113", "T1059.002", "T1083"], remediation: ["Review System Settings → Privacy & Security grants per domain (FDA, Automation, Screen, AX)", "Deploy PPPC profiles for enterprise allowlists; revoke unexpected grants", "Treat multi-domain grant combinations as higher impact than single booleans", "OPSEC: assess uses non-prompting probes only - never force TCC dialogs"], falsePositiveNotes: "Domain signals are heuristics (tool presence / path listability), not live TCC.db grants. MDM PPPC may grant outside user-visible settings."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: profile.fdaLikely ? 38 : 24, tccDomains: profile.domains.isEmpty ? ["FullDiskAccess"] : profile.domains, esfExpected: ["OPEN"]))
     }
 }

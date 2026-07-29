@@ -56,24 +56,11 @@ public struct NetworkSharingPostureCheck: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: enabledServices.isEmpty ? .low : .medium,
-                category: .network,
-                evidence: evidence,
-                attackTechniques: ["T1021.002", "T1021.004", "T1021.001"],
-                remediation: [
+            Finding(id: Self.id, title: title, severity: severity, category: .network, resolution: .init(evidence: evidence, attackTechniques: ["T1021.002", "T1021.004", "T1021.001"], remediation: [
                     "Disable unused Remote Login, Screen Sharing, and File Sharing",
                     "Prefer MDM-enforced sharing posture and network segmentation",
                     "System LaunchDaemon plists often exist even when services are disabled",
-                ],
-                falsePositiveNotes: "Component/plist presence is not the same as service enabled/listening",
-                dryRunSafe: true,
-                opsecScore: 8,
-                esfExpected: []
-            ),
+                ], falsePositiveNotes: "Component/plist presence is not the same as service enabled/listening"), runtime: .init(confidence: enabledServices.isEmpty ? .low : .medium, dryRunSafe: true, opsecScore: 8, esfExpected: [])),
         ]
     }
 

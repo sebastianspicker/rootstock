@@ -12,39 +12,13 @@ public struct Wave13MultiPlaneClusterCheck: Check {
         return [Self.compoundFinding(planes: planes, state: state)]
     }
     private static func pairPlanes(state: CollectedState) -> [String] {
-        var planes: [String] = []
-
-        let calendar_reminders = state.calendarRemindersAutomation
-        if calendar_reminders?.automationSurfacePresent == true
-            || ((calendar_reminders?.calendarAppPaths.count ?? 0) >= 1)
-            || ((calendar_reminders?.remindersPaths.count ?? 0) >= 1)
-        { planes.append("calendar_reminders") }
-
-        let gk_assessment = state.gatekeeperAssessmentHistory
-        if gk_assessment?.assessmentSurfacePresent == true
-            || ((gk_assessment?.syspolicydPaths.count ?? 0) >= 1)
-            || ((gk_assessment?.assessmentDbPaths.count ?? 0) >= 1)
-        { planes.append("gk_assessment") }
-
-        let homebrew_pkg = state.homebrewPackageDualUse
-        if homebrew_pkg?.packageSurfacePresent == true
-            || ((homebrew_pkg?.brewBinaryPaths.count ?? 0) >= 1)
-            || ((homebrew_pkg?.cellarPaths.count ?? 0) >= 1)
-        { planes.append("homebrew_pkg") }
-
-        let cups_print = state.cupsPrintDualUse
-        if cups_print?.printSurfacePresent == true
-            || ((cups_print?.cupsDaemonPaths.count ?? 0) >= 1)
-            || ((cups_print?.ppdConfigPaths.count ?? 0) >= 1)
-        { planes.append("cups_print") }
-
-        let screencapture = state.screenCapturePrivacyDualUse
-        if screencapture?.captureSurfacePresent == true
-            || ((screencapture?.screencaptureToolPaths.count ?? 0) >= 1)
-            || ((screencapture?.screenCaptureKitPaths.count ?? 0) >= 1)
-        { planes.append("screencapture") }
-
-        return planes
+        presentPlaneNames([
+            .init(name: "calendar_reminders", isPresent: hasPlaneSurface(state.calendarRemindersAutomation, isPresent: { $0.automationSurfacePresent }, primaryCount: { $0.calendarAppPaths.count }, secondaryCount: { $0.remindersPaths.count })),
+            .init(name: "gk_assessment", isPresent: hasPlaneSurface(state.gatekeeperAssessmentHistory, isPresent: { $0.assessmentSurfacePresent }, primaryCount: { $0.syspolicydPaths.count }, secondaryCount: { $0.assessmentDbPaths.count })),
+            .init(name: "homebrew_pkg", isPresent: hasPlaneSurface(state.homebrewPackageDualUse, isPresent: { $0.packageSurfacePresent }, primaryCount: { $0.brewBinaryPaths.count }, secondaryCount: { $0.cellarPaths.count })),
+            .init(name: "cups_print", isPresent: hasPlaneSurface(state.cupsPrintDualUse, isPresent: { $0.printSurfacePresent }, primaryCount: { $0.cupsDaemonPaths.count }, secondaryCount: { $0.ppdConfigPaths.count })),
+            .init(name: "screencapture", isPresent: hasPlaneSurface(state.screenCapturePrivacyDualUse, isPresent: { $0.captureSurfacePresent }, primaryCount: { $0.screencaptureToolPaths.count }, secondaryCount: { $0.screenCaptureKitPaths.count })),
+        ])
     }
     private static func amplifiers(state: CollectedState) -> [String] {
         var amps: [String] = []
@@ -61,26 +35,17 @@ public struct Wave13MultiPlaneClusterCheck: Check {
         let amps = amplifiers(state: state).sorted()
         let severity: Severity = (sorted.count >= 4 && amps.contains("remote") && amps.contains("fda")) ? .high
             : ((sorted.count >= 3 || (sorted.count >= 2 && amps.count >= 2)) ? .medium : .low)
-        return Finding(
-            id: "\(id).multi_plane",
-            title: "Wave-13 multi-plane compound: \(sorted.count) planes (\(sorted.joined(separator: ", ")))",
-            severity: severity, confidence: .low, category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).multi_plane", title: "Wave-13 multi-plane compound: \(sorted.count) planes (\(sorted.joined(separator: ", ")))", severity: severity, category: .misconfig, resolution: .init(evidence: [
                 Evidence(type: "planes", detail: "planes=\(sorted.joined(separator: "|")) count=\(sorted.count)"),
                 Evidence(type: "amplifiers", detail: amps.isEmpty ? "amplifiers=none" : "amplifiers=\(amps.joined(separator: "|")) count=\(amps.count)"),
                 Evidence(type: "stage_labels", detail: "stages=automation|delivery_trust|dual_use|collection|print (labels only - not auto-exploit)"),
                 Evidence(type: "host", detail: "host=\(state.host?.hostname ?? "unknown") user=\(state.host?.username ?? "unknown")"),
                 Evidence(type: "honesty", detail: "Wave-13 multi-plane ranking is path-to-impact narrative. Rootstock Red does not capture screens, clear Gatekeeper history, install brew packages, reconfigure CUPS, or forge calendar invites."),
-            ],
-            attackTechniques: ["T1059", "T1553.001", "T1072", "T1113", "T1040"],
-            remediation: [
+            ], attackTechniques: ["T1059", "T1553.001", "T1072", "T1113", "T1040"], remediation: [
                 "Prioritize hosts co-locating multiple Wave-13 planes with remote/FDA amplifiers",
                 "Close remote access before deep dual-use inventory",
                 "Use Wave-13 lab plans under ROE for purple validation",
                 "OPSEC: multi-plane compounds are engagement narrative, not exploit scripts",
-            ],
-            falsePositiveNotes: "Developer workstations may co-locate many Wave-13 planes. Rank production remote hosts first.",
-            dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ"]
-        )
+            ], falsePositiveNotes: "Developer workstations may co-locate many Wave-13 planes. Rank production remote hosts first."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "EXEC", "READ"]))
     }
 }

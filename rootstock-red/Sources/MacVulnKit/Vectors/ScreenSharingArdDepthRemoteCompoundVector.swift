@@ -11,12 +11,10 @@ public struct ScreenSharingArdDepthRemoteCompoundVector: Check {
         let a = s?.screenSharingAppPaths.count ?? 0
         let b = s?.ardAgentPaths.count ?? 0
         guard a >= 1, b >= 1 || a >= 2 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
-        let sensorThin = state.esf?.clientPaths.isEmpty == true || state.securityProducts.filter(\.present).isEmpty
-        guard remote || fda || sensorThin || a + b >= 3 else { return [] }
+        let compound = RemoteCompoundSignals(state: state)
+        guard compound.hasAmplifier || a + b >= 3 else { return [] }
         var evidence: [Evidence] = [
-            Evidence(type: "screen_sharing_ard_depth_compound", detail: "a=\(a) b=\(b) remote=\(remote) fda=\(fda) sensorThin=\(sensorThin)"),
+            Evidence(type: "screen_sharing_ard_depth_compound", detail: "a=\(a) b=\(b) remote=\(compound.remote) fda=\(compound.fullDiskAccess) sensorThin=\(compound.sensorThin)"),
         ]
         if let s {
             for path in (s.screenSharingAppPaths + s.ardAgentPaths).prefix(8) {
@@ -24,19 +22,11 @@ public struct ScreenSharingArdDepthRemoteCompoundVector: Check {
             }
         }
         evidence.append(Evidence(type: "honesty", detail: "never enables Screen Sharing or ARD, never connects to remote desktops."))
-        let severity: Severity = (remote && fda) ? .high : ((remote || fda || sensorThin) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "Screen Sharing ARD depth × remote compound" : "Screen Sharing ARD depth × impact compound",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1021", "T1219", "T1133"],
-            remediation: [
+        let severity = compound.severity
+        return [Finding(id: Self.id, title: compound.remote ? "Screen Sharing ARD depth × remote compound" : "Screen Sharing ARD depth × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1021", "T1219", "T1133"], remediation: [
                 "Prioritize hosts co-locating Screen Sharing ARD depth with remote/FDA amplifiers",
                 "Use Wave-15 lab plans under ROE for purple validation",
                 "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-            ],
-            falsePositiveNotes: "Developer hosts may co-locate dual-use paths; rank production remote hosts first.",
-            dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"]
-        )]
+            ], falsePositiveNotes: "Developer hosts may co-locate dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"]))]
     }
 }

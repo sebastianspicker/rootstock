@@ -27,92 +27,111 @@ public struct BrowserSessionArtifactPivotVector: Check {
                 || kind.contains("cookie")
                 || kind.contains("login")
         }
-
-        // Prefer high-value kinds; fall back to any present browser DBs with size signal.
         let focus = highValue.isEmpty ? present : highValue
         guard !focus.isEmpty else { return [] }
 
-        var evidence: [Evidence] = [
-            Evidence(
-                type: "summary",
-                detail:
-                    "browserMetaPresent=\(present.count) highValueKinds=\(highValue.count) "
-                    + "(metadata only - no cookie/password row contents)"
-            ),
-        ]
+        let fda = state.tcc?.fullDiskAccessLikely == true
+        let presentation = Self.presentation(
+            presentCount: present.count,
+            highValueCount: highValue.count,
+            fda: fda
+        )
+        return [Self.finding(
+            evidence: evidence(for: state),
+            title: presentation.title,
+            severity: presentation.severity,
+            tccDomains: fda ? ["FullDiskAccess"] : []
+        )]
+    }
 
-        for entry in focus.prefix(30) {
-            var detail = "browser=\(entry.browser) kind=\(entry.kind)"
-            if let size = entry.sizeBytes {
-                detail += " sizeBytes=\(size)"
-            }
-            if let modified = entry.modifiedAt {
-                detail += " mtime=\(ISO8601DateFormatter().string(from: modified))"
-            }
-            evidence.append(
-                Evidence(type: "browser_artifact", path: entry.path, detail: detail)
-            )
+    private struct Presentation {
+        let title: String
+        let severity: Severity
+    }
+
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let present = state.browserMeta.filter(\.exists)
+        let highValue = present.filter { entry in
+            let kind = entry.kind.lowercased()
+            return Self.highValueKinds.contains(where: { kind.contains($0) })
+                || kind.contains("cookie")
+                || kind.contains("login")
         }
+        let focus = highValue.isEmpty ? present : highValue
+        var evidence = [Evidence(
+            type: "summary",
+            detail: "browserMetaPresent=\(present.count) highValueKinds=\(highValue.count) (metadata only - no cookie/password row contents)"
+        )]
+        for entry in focus.prefix(30) {
+            evidence.append(Evidence(
+                type: "browser_artifact",
+                path: entry.path,
+                detail: Self.artifactDetail(for: entry)
+            ))
+        }
+        evidence.append(contentsOf: compoundEvidence(for: state))
+        return evidence
+    }
 
-        // Compound with FDA / cred paths for stronger pivot narrative.
+    private func compoundEvidence(for state: CollectedState) -> [Evidence] {
+        var evidence: [Evidence] = []
         if state.tcc?.fullDiskAccessLikely == true {
-            evidence.append(
-                Evidence(
-                    type: "compound_fda",
-                    detail: "FDA likely - browser DB paths may be readable beyond sandbox defaults"
-                )
-            )
+            evidence.append(Evidence(
+                type: "compound_fda",
+                detail: "FDA likely - browser DB paths may be readable beyond sandbox defaults"
+            ))
         }
         let sshOrCloud = state.credPaths.filter {
-            $0.exists && ($0.kind == "ssh" || $0.kind == "aws" || $0.kind == "gcp" || $0.kind == "azure")
+            $0.exists && ["ssh", "aws", "gcp", "azure"].contains($0.kind)
         }
         if !sshOrCloud.isEmpty {
-            evidence.append(
-                Evidence(
-                    type: "compound_creds",
-                    detail: "cloud/ssh cred paths also present (\(sshOrCloud.count)) - multi-artifact pivot"
-                )
+            evidence.append(Evidence(
+                type: "compound_creds",
+                detail: "cloud/ssh cred paths also present (\(sshOrCloud.count)) - multi-artifact pivot"
+            ))
+        }
+        return evidence
+    }
+
+    private static func artifactDetail(for entry: BrowserMetaEntry) -> String {
+        var detail = "browser=\(entry.browser) kind=\(entry.kind)"
+        if let size = entry.sizeBytes { detail += " sizeBytes=\(size)" }
+        if let modified = entry.modifiedAt {
+            detail += " mtime=\(ISO8601DateFormatter().string(from: modified))"
+        }
+        return detail
+    }
+
+    private static func presentation(presentCount: Int, highValueCount: Int, fda: Bool) -> Presentation {
+        if highValueCount > 0 && fda {
+            return .init(
+                title: "Browser session pivot: high-value DBs present with FDA-likely context (\(highValueCount))",
+                severity: .medium
             )
         }
-
-        let severity: Severity
-        let title: String
-        if !highValue.isEmpty && state.tcc?.fullDiskAccessLikely == true {
-            severity = .medium
-            title =
-                "Browser session pivot: high-value DBs present with FDA-likely context "
-                + "(\(highValue.count))"
-        } else if !highValue.isEmpty {
-            severity = .medium
-            title = "Browser session artifact pivot surface (\(highValue.count) high-value DBs)"
-        } else {
-            severity = .low
-            title = "Browser profile artifact surface (\(present.count) paths present)"
+        if highValueCount > 0 {
+            return .init(
+                title: "Browser session artifact pivot surface (\(highValueCount) high-value DBs)",
+                severity: .medium
+            )
         }
+        return .init(
+            title: "Browser profile artifact surface (\(presentCount) paths present)",
+            severity: .low
+        )
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: .high,
-                category: .auth,
-                evidence: evidence,
-                attackTechniques: ["T1539", "T1555.003", "T1005", "T1083"],
-                remediation: [
-                    "Lock browser profiles; prefer OS keychain-backed passwords with device auth",
-                    "Clear stale session cookies on shared or high-risk hosts",
-                    "Do not grant FDA to untrusted tools that can read browser DB paths",
-                    "OPSEC: Rootstock Red assess never dumps cookies/passwords - path metadata only",
-                ],
-                falsePositiveNotes:
-                    "Browser cookie/login DB files exist on nearly all user hosts; finding is path-to-impact "
-                    + "surface, not proof of theft. App-Bound / sandboxing may still block access without FDA.",
-                dryRunSafe: true,
-                opsecScore: 24,
-                tccDomains: state.tcc?.fullDiskAccessLikely == true ? ["FullDiskAccess"] : [],
-                esfExpected: ["OPEN"]
-            ),
-        ]
+    private static func finding(
+        evidence: [Evidence],
+        title: String,
+        severity: Severity,
+        tccDomains: [String]
+    ) -> Finding {
+        Finding(id: Self.id, title: title, severity: severity, category: .auth, resolution: .init(evidence: evidence, attackTechniques: ["T1539", "T1555.003", "T1005", "T1083"], remediation: [
+                "Lock browser profiles; prefer OS keychain-backed passwords with device auth",
+                "Clear stale session cookies on shared or high-risk hosts",
+                "Do not grant FDA to untrusted tools that can read browser DB paths",
+                "OPSEC: Rootstock Red assess never dumps cookies/passwords - path metadata only",
+            ], falsePositiveNotes: "Browser cookie/login DB files exist on nearly all user hosts; finding is path-to-impact surface, not proof of theft. App-Bound / sandboxing may still block access without FDA."), runtime: .init(confidence: .high, dryRunSafe: true, opsecScore: 24, tccDomains: tccDomains, esfExpected: ["OPEN"]))
     }
 }

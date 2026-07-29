@@ -14,66 +14,29 @@ public struct UserWritableLaunchAgentsVector: Check {
         let agents = state.launchAgents
         guard !agents.isEmpty else { return [] }
 
-        let dirURL = Self.userLaunchAgentsDirectory(from: agents)
-        let writable = FileManager.default.isWritableFile(atPath: dirURL.path)
-        // User LaunchAgents under home are typically user-writable even if isWritableFile is flaky.
-        let likelyWritable =
-            writable
-            || dirURL.path.contains("/Users/")
-            || dirURL.path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path)
-
+        let directory = Self.userLaunchAgentsDirectory(from: agents)
+        let writable = FileManager.default.isWritableFile(atPath: directory.path)
+        let likelyWritable = writable
+            || directory.path.contains("/Users/")
+            || directory.path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path)
         guard likelyWritable else { return [] }
 
-        var evidence: [Evidence] = [
-            Evidence(
-                type: "launchagents_dir",
-                path: dirURL.path,
-                detail: "writable=\(writable) likelyWritable=\(likelyWritable) agents=\(agents.count)"
-            ),
-        ]
-        for agent in agents.prefix(20) {
-            evidence.append(
-                Evidence(
-                    type: "launchagent",
-                    path: agent.path,
-                    detail: agent.label ?? "unlabeled"
-                )
-            )
-        }
-        if let btm = state.loginItems {
-            evidence.append(
-                Evidence(
-                    type: "btm",
-                    path: btm.btmDirectoryPath,
-                    detail: "btmStorePresent=\(btm.btmStorePresent) - modern macOS may notify user of new background items"
-                )
-            )
-        } else if state.btmStorePresent != nil {
-            evidence.append(
-                Evidence(
-                    type: "btm",
-                    detail: "btmStorePresent=\(state.btmStorePresent ?? false) - BTM may surface new agents to the user"
-                )
-            )
-        } else {
-            evidence.append(
-                Evidence(
-                    type: "btm_honesty",
-                    detail:
-                        "On modern macOS (Ventura+), Background Task Management may notify the user "
-                        + "when new LaunchAgents/login items register - silent persistence is not guaranteed"
-                )
-            )
-        }
+        return [Self.finding(agents: agents, directory: directory, writable: writable, state: state)]
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: "Persistence vector: user LaunchAgents writable (\(agents.count) agents)",
-                severity: .medium,
-                confidence: .high,
-                category: .persist,
-                evidence: evidence,
+    private static func finding(
+        agents: [LaunchAgentEntry],
+        directory: URL,
+        writable: Bool,
+        state: CollectedState
+    ) -> Finding {
+        Finding(
+            id: Self.id,
+            title: "Persistence vector: user LaunchAgents writable (\(agents.count) agents)",
+            severity: .medium,
+            category: .persist,
+            resolution: .init(
+                evidence: evidence(agents: agents, directory: directory, writable: writable, state: state),
                 attackTechniques: ["T1543.001", "T1547.015"],
                 remediation: [
                     "Review unexpected LaunchAgents under ~/Library/LaunchAgents",
@@ -81,15 +44,48 @@ public struct UserWritableLaunchAgentsVector: Check {
                     "OPSEC: claiming silent LaunchAgent install is false on modern macOS - BTM/user prompts raise detection risk (high OPSEC cost)",
                     "Prefer signed, user-visible apps over ad-hoc agent drops in authorized labs only",
                 ],
-                falsePositiveNotes:
-                    "User-writable LaunchAgents is normal; vector requires malicious or unexpected agent content",
-                dryRunSafe: true,
-                // High: silent claim is false; registration is user-visible / BTM-notified on modern macOS.
-                opsecScore: 72,
-                tccDomains: [],
-                esfExpected: ["OPEN", "WRITE", "CREATE", "USER_PROMPT"]
+                falsePositiveNotes: "User-writable LaunchAgents is normal; vector requires malicious or unexpected agent content"
             ),
-        ]
+            runtime: .init(confidence: .high, dryRunSafe: true, opsecScore: 72, tccDomains: [], esfExpected: ["OPEN", "WRITE", "CREATE", "USER_PROMPT"])
+        )
+    }
+
+    private static func evidence(
+        agents: [LaunchAgentEntry],
+        directory: URL,
+        writable: Bool,
+        state: CollectedState
+    ) -> [Evidence] {
+        var result = [Evidence(
+            type: "launchagents_dir",
+            path: directory.path,
+            detail: "writable=\(writable) likelyWritable=true agents=\(agents.count)"
+        )]
+        result += agents.prefix(20).map {
+            Evidence(type: "launchagent", path: $0.path, detail: $0.label ?? "unlabeled")
+        }
+        result.append(btmEvidence(for: state))
+        return result
+    }
+
+    private static func btmEvidence(for state: CollectedState) -> Evidence {
+        if let btm = state.loginItems {
+            return Evidence(
+                type: "btm",
+                path: btm.btmDirectoryPath,
+                detail: "btmStorePresent=\(btm.btmStorePresent) - modern macOS may notify user of new background items"
+            )
+        }
+        if let btmStorePresent = state.btmStorePresent {
+            return Evidence(
+                type: "btm",
+                detail: "btmStorePresent=\(btmStorePresent) - BTM may surface new agents to the user"
+            )
+        }
+        return Evidence(
+            type: "btm_honesty",
+            detail: "On modern macOS (Ventura+), Background Task Management may notify the user when new LaunchAgents/login items register - silent persistence is not guaranteed"
+        )
     }
 
     private static func userLaunchAgentsDirectory(from agents: [LaunchAgentEntry]) -> URL {

@@ -26,13 +26,7 @@ public struct LocalDataProtectionClusterCheck: Check {
             || state.network?.screenSharingARD == true
         guard fvOn == false && remote else { return nil }
 
-        return Finding(
-            id: "\(id).fv_off_remote",
-            title: "Local data-protection cluster: FileVault off with remote access",
-            severity: .high,
-            confidence: .medium,
-            category: .misconfig,
-            evidence: [
+        return Finding(id: "\(id).fv_off_remote", title: "Local data-protection cluster: FileVault off with remote access", severity: .high, category: .misconfig, resolution: .init(evidence: [
                 Evidence(type: "fv", detail: "fileVaultOn=false"),
                 Evidence(
                     type: "remote",
@@ -40,16 +34,10 @@ public struct LocalDataProtectionClusterCheck: Check {
                         "ssh=\((state.network?.remoteLoginSSH).rootstockDescribe) "
                         + "ard=\((state.network?.screenSharingARD).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1021", "T1552"],
-            remediation: [
+            ], attackTechniques: ["T1021", "T1552"], remediation: [
                 "Enable FileVault before exposing SSH/ARD",
                 "Restrict remote access via MDM network policies",
-            ],
-            dryRunSafe: true,
-            opsecScore: 14,
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 14, esfExpected: ["OPEN"]))
     }
 
     private static func proximitySensitive(state: CollectedState) -> Finding? {
@@ -62,13 +50,7 @@ public struct LocalDataProtectionClusterCheck: Check {
             || state.tcc?.fullDiskAccessLikely == true
         guard surface && sensitive else { return nil }
 
-        return Finding(
-            id: "\(id).proximity_sensitive",
-            title: "Local data-protection cluster: proximity transfer surface near sensitive path inventory",
-            severity: .medium,
-            confidence: .low,
-            category: .network,
-            evidence: [
+        return Finding(id: "\(id).proximity_sensitive", title: "Local data-protection cluster: proximity transfer surface near sensitive path inventory", severity: .medium, category: .network, resolution: .init(evidence: [
                 Evidence(
                     type: "proximity",
                     detail:
@@ -82,17 +64,10 @@ public struct LocalDataProtectionClusterCheck: Check {
                         + "credPaths=\(state.credPaths.filter(\.exists).count) "
                         + "fda=\((state.tcc?.fullDiskAccessLikely).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1091", "T1005"],
-            remediation: [
+            ], attackTechniques: ["T1091", "T1005"], remediation: [
                 "Disable open AirDrop receive on high-value hosts",
                 "Minimize FDA grants; protect session artifact paths",
-            ],
-            dryRunSafe: true,
-            opsecScore: 15,
-            tccDomains: state.tcc?.fullDiskAccessLikely == true ? ["FullDiskAccess"] : [],
-            esfExpected: ["OPEN"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 15, tccDomains: state.tcc?.fullDiskAccessLikely == true ? ["FullDiskAccess"] : [], esfExpected: ["OPEN"]))
     }
 
     private static func virtWithWeakDisk(state: CollectedState) -> Finding? {
@@ -103,13 +78,7 @@ public struct LocalDataProtectionClusterCheck: Check {
         let sipOff = state.protections?.sipEnabled == false
         guard dual && (fvOn == false || sipOff) else { return nil }
 
-        return Finding(
-            id: "\(id).virt_weak_disk",
-            title: "Local data-protection cluster: virt/container dual-use with weak disk/SIP posture",
-            severity: .medium,
-            confidence: .low,
-            category: .lool,
-            evidence: [
+        return Finding(id: "\(id).virt_weak_disk", title: "Local data-protection cluster: virt/container dual-use with weak disk/SIP posture", severity: .medium, category: .lool, resolution: .init(evidence: [
                 Evidence(
                     type: "virt",
                     detail:
@@ -120,16 +89,10 @@ public struct LocalDataProtectionClusterCheck: Check {
                     type: "disk",
                     detail: "fileVaultOn=\(fvOn.rootstockDescribe) sipEnabled=\((state.protections?.sipEnabled).rootstockDescribe)"
                 ),
-            ],
-            attackTechniques: ["T1564", "T1610"],
-            remediation: [
+            ], attackTechniques: ["T1564", "T1610"], remediation: [
                 "Require FileVault on hosts with Docker/VM tooling",
                 "Keep SIP enabled; isolate nested-execution workstations",
-            ],
-            dryRunSafe: true,
-            opsecScore: 18,
-            esfExpected: ["OPEN", "EXEC"]
-        )
+            ]), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 18, esfExpected: ["OPEN", "EXEC"]))
     }
 
 }

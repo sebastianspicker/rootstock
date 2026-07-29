@@ -12,15 +12,24 @@ public struct VirtContainerDualUseVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard hasSurface(state), hasImpact(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
+        let virt = state.virtualizationContainers
+        let containers = virt?.containerToolPaths.count ?? 0
+        let hypervisors = virt?.hypervisorAppPaths.count ?? 0
+        let dual = virt?.dualUsePresent == true
+        let note = state.collectorNotes["collect.virtualization_containers"] != nil
+        return dual || containers > 0 || hypervisors > 0 || note
+    }
+
+    private func hasImpact(_ state: CollectedState) -> Bool {
         let virt = state.virtualizationContainers
         let containers = virt?.containerToolPaths.count ?? 0
         let hypervisors = virt?.hypervisorAppPaths.count ?? 0
         let frameworks = virt?.frameworkPaths.count ?? 0
-        let dual = virt?.dualUsePresent == true
-        let note = state.collectorNotes["collect.virtualization_containers"] != nil
-
-        guard dual || containers > 0 || hypervisors > 0 || note else { return [] }
-
         let remote =
             state.network?.remoteLoginSSH == true
             || state.network?.screenSharingARD == true
@@ -29,15 +38,19 @@ public struct VirtContainerDualUseVector: Check {
             || state.developerToolchain?.commandLineToolsPresent == true
             || !(state.developerToolchain?.dualUseBinaries.isEmpty ?? true)
         let weakProt = state.protections?.sipEnabled == false
+        return remote || dev || weakProt || containers + hypervisors >= 1 || frameworks > 0
+    }
 
-        // Path-to-impact: virt present + (remote OR dev OR SIP-off OR scale OR any dual-use tool)
-        let pathToImpact =
-            remote
-            || dev
-            || weakProt
-            || containers + hypervisors >= 1
-            || frameworks > 0
-        guard pathToImpact else { return [] }
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let virt = state.virtualizationContainers
+        let containers = virt?.containerToolPaths.count ?? 0
+        let hypervisors = virt?.hypervisorAppPaths.count ?? 0
+        let frameworks = virt?.frameworkPaths.count ?? 0
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let dev = state.developerToolchain?.xcodePresent == true
+            || state.developerToolchain?.commandLineToolsPresent == true
+            || !(state.developerToolchain?.dualUseBinaries.isEmpty ?? true)
+        let weakProt = state.protections?.sipEnabled == false
 
         var evidence: [Evidence] = [
             Evidence(
@@ -63,32 +76,22 @@ public struct VirtContainerDualUseVector: Check {
             )
         )
 
-        let severity: Severity =
-            (remote && (containers > 0 || hypervisors > 0)) ? .medium : .low
+        return evidence
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: remote
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let containers = state.virtualizationContainers?.containerToolPaths.count ?? 0
+        let hypervisors = state.virtualizationContainers?.hypervisorAppPaths.count ?? 0
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let severity: Severity = (remote && (containers > 0 || hypervisors > 0)) ? .medium : .low
+
+        return Finding(id: Self.id, title: remote
                     ? "Virtualization/container dual-use surface with remote access compound"
-                    : "Virtualization / container dual-use surface",
-                severity: severity,
-                confidence: .low,
-                category: .lool,
-                evidence: evidence,
-                attackTechniques: ["T1564", "T1202", "T1610", "T1059"],
-                remediation: [
+                    : "Virtualization / container dual-use surface", severity: severity, category: .lool, resolution: .init(evidence: evidence, attackTechniques: ["T1564", "T1202", "T1610", "T1059"], remediation: [
                     "Limit Docker/VM tooling on high-value production endpoints when not required",
                     "Monitor nested execution and virt helper daemons under EDR",
                     "Separate engineer virt workstations from tier-0 admin access",
                     "OPSEC: Rootstock Red does not deploy container C2 or hypervisor escapes",
-                ],
-                falsePositiveNotes:
-                    "Developer workstations commonly install Docker/UTM. Prioritize remote-access compounds.",
-                dryRunSafe: true,
-                opsecScore: 20,
-                esfExpected: ["OPEN", "EXEC"]
-            ),
-        ]
+                ], falsePositiveNotes: "Developer workstations commonly install Docker/UTM. Prioritize remote-access compounds."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 20, esfExpected: ["OPEN", "EXEC"]))
     }
 }

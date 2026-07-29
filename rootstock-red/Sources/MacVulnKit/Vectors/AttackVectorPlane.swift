@@ -204,190 +204,55 @@ public enum AttackVectorPlane {
     ]
 
     public static func allChecks() -> [any Check] {
+        baselineChecks()
+            + wave10Checks()
+            + wave12Checks()
+            + wave13Checks()
+            + wave14Checks()
+            + wave15Checks()
+            + wave16Checks()
+    }
+
+
+    private static func baselineChecks() -> [any Check] {
         [
-            ProtectionsWeakVector(),
-            UserWritableLaunchAgentsVector(),
-            LOLExecutionChainVector(),
-            InjectSurfaceVector(),
-            CredOrIdentityPivotVector(),
-            RemoteAccessSurfaceVector(),
-            TCCFDAPermissionPivotVector(),
-            PrivilegedHelperSygextVector(),
-            MDMManagementGapVector(),
-            BrowserSessionArtifactPivotVector(),
-            WritablePrivilegedPathsVector(),
-            XPCHelperAbuseSurfaceVector(),
-            PlatformSSOLateralVector(),
-            SecurityProductGapVector(),
-            SystemLaunchDaemonSurfaceVector(),
-            SMAppLoginItemHonestyVector(),
-            SudoersMisconfigSurfaceVector(),
-            PeriodicMaintenanceSurfaceVector(),
-            GatekeeperTrustGapVector(),
-            AutomationExecutionSurfaceVector(),
-            ElectronDevtoolsSurfaceVector(),
-            QuarantineXattrSurfaceVector(),
-            KeychainPathSurfaceVector(),
-            MDMManagementChannelSurfaceVector(),
-            ScreenAccessibilitySurfaceVector(),
-            SecurityCLIDualUseVector(),
-            ESFSensorGapVector(),
-            CVEPatchDebtSuggesterVector(),
-            TCCPermissionGraphDepthVector(),
-            XPCClientValidationSurfaceVector(),
-            LaunchConstraintInjectTruthVector(),
-            LOOBinDualUseMultiStageVector(),
-            NetworkExtensionFilterGapVector(),
-            AuthRightsPrivilegeSurfaceVector(),
-            DeveloperToolchainDualUseVector(),
-            TimeMachineSnapshotAccessVector(),
-            MobileconfigSideloadRiskVector(),
-            SandboxEntitlementThickClientVector(),
-            NotarizationStaplingGapVector(),
-            VirtContainerDualUseVector(),
-            ContinuityAirDropSurfaceVector(),
-            FileVaultEscrowPostureVector(),
-            ClickFixTerminalDeliveryVector(),
-            RemoteAppleEventsLateralVector(),
-            SpotlightAICacheAccessVector(),
-            SecurityMgmtPlaneSurfaceVector(),
-            ThirdPartyTCCInheritanceVector(),
-            SSHAgentKeyPathLateralVector(),
-            PackageKitInstallerDesignVector(),
-            ArchiveQuarantineExtractorVector(),
-            InfoStealerPathPlaneVector(),
-            TCCESFVisibilityDepthVector(),
-            MDMProfileParseDepthVector(),
-            // Wave-10 residual pair compounds.
-            PackageKitReceiptScriptCompoundVector(),
-            ExtractorQuarantineCompoundVector(),
-            StealerRemoteCompoundVector(),
-            VisibilitySensorCompoundVector(),
-            URLSchemeHandlerVector(),
-            LaunchdOverrideDepthVector(),
-            BrowserExtensionDualUseVector(),
-            ShortcutsAppIntentsVector(),
-            URLSchemeRemoteCompoundVector(),
-            LaunchdSecurityDisableCompoundVector(),
-            BrowserExtensionCollectionCompoundVector(),
-            ShortcutsLateralCompoundVector(),
-            // Wave-12 multi-plane.
-            WeblocInetlocDeliveryVector(),
-            WeblocRemoteCompoundVector(),
-            MailRulesAutomationVector(),
-            MailRulesScriptCompoundVector(),
-            UnifiedLogObservationVector(),
-            UnifiedLogSensorCompoundVector(),
-            DockPersistenceSurfaceVector(),
-            DockRemoteCompoundVector(),
-            OsascriptScptDeliveryVector(),
-            OsascriptRemoteCompoundVector(),
-            NetworkShareMountVector(),
-            NetworkShareRemoteCompoundVector(),
-            // Wave-13 multi-plane.
-            CalendarRemindersAutomationVector(),
-            CalendarRemoteCompoundVector(),
-            GatekeeperAssessmentHistoryVector(),
-            GatekeeperAssessmentRemoteCompoundVector(),
-            HomebrewPackageDualUseVector(),
-            HomebrewRemoteCompoundVector(),
-            CupsPrintDualUseVector(),
-            CupsRemoteCompoundVector(),
-            ScreenCapturePrivacyDualUseVector(),
-            ScreenCaptureFdaCompoundVector(),
-            // Wave-14 multi-plane.
-            AutomatorWorkflowVector(),
-            AutomatorWorkflowRemoteCompoundVector(),
-            IcloudDrivePathVector(),
-            IcloudDrivePathRemoteCompoundVector(),
-            BluetoothContinuityDepthVector(),
-            BluetoothContinuityDepthRemoteCompoundVector(),
-            FontValidationDualuseVector(),
-            FontValidationDualuseRemoteCompoundVector(),
-            QuicklookCacheDepthVector(),
-            QuicklookCacheDepthRemoteCompoundVector(),
-            DnsResolverDualuseVector(),
-            DnsResolverDualuseRemoteCompoundVector(),
-            LsQuarantineDbDepthVector(),
-            LsQuarantineDbDepthRemoteCompoundVector(),
-            PamAuthModuleVector(),
-            PamAuthModuleRemoteCompoundVector(),
-            CronAtJobDepthVector(),
-            CronAtJobDepthRemoteCompoundVector(),
-            NotesMetadataPlaneVector(),
-            NotesMetadataPlaneRemoteCompoundVector(),
-            // Wave-15 multi-plane.
-            PhotosLibraryPathVector(),
-            PhotosLibraryPathRemoteCompoundVector(),
-            VpnConfigDualuseVector(),
-            VpnConfigDualuseRemoteCompoundVector(),
-            SandboxContainerDepthVector(),
-            SandboxContainerDepthRemoteCompoundVector(),
-            XpcMachServiceDepthVector(),
-            XpcMachServiceDepthRemoteCompoundVector(),
-            TmLocalSnapshotDepthVector(),
-            TmLocalSnapshotDepthRemoteCompoundVector(),
-            EmondLegacyDepthVector(),
-            EmondLegacyDepthRemoteCompoundVector(),
-            ScreenSharingArdDepthVector(),
-            ScreenSharingArdDepthRemoteCompoundVector(),
-            KeychainAclPathVector(),
-            KeychainAclPathRemoteCompoundVector(),
-            PythonRuntimeDualuseVector(),
-            PythonRuntimeDualuseRemoteCompoundVector(),
-            ShellPluginManagerVector(),
-            ShellPluginManagerRemoteCompoundVector(),
-            // Wave-16 multi-plane.
-            AirplayReceiverSurfaceVector(),
-            AirplayReceiverSurfaceRemoteCompoundVector(),
-            HandoffClipboardDepthVector(),
-            HandoffClipboardDepthRemoteCompoundVector(),
-            ImessagePathPlaneVector(),
-            ImessagePathPlaneRemoteCompoundVector(),
-            FacetimeCameraSurfaceVector(),
-            FacetimeCameraSurfaceRemoteCompoundVector(),
-            FinderSyncExtensionVector(),
-            FinderSyncExtensionRemoteCompoundVector(),
-            FileproviderDomainVector(),
-            FileproviderDomainRemoteCompoundVector(),
-            NotificationCenterDepthVector(),
-            NotificationCenterDepthRemoteCompoundVector(),
-            SiriSuggestionsPlaneVector(),
-            SiriSuggestionsPlaneRemoteCompoundVector(),
-            SpotlightImporterDepthVector(),
-            SpotlightImporterDepthRemoteCompoundVector(),
-            ContactsPathPlaneVector(),
-            ContactsPathPlaneRemoteCompoundVector(),
-            CalendarServerPathVector(),
-            CalendarServerPathRemoteCompoundVector(),
-            RemindersCloudPathVector(),
-            RemindersCloudPathRemoteCompoundVector(),
-            MapsLocationPathVector(),
-            MapsLocationPathRemoteCompoundVector(),
-            WeatherWidgetPathVector(),
-            WeatherWidgetPathRemoteCompoundVector(),
-            MusicLibraryPathVector(),
-            MusicLibraryPathRemoteCompoundVector(),
-            BooksPathPlaneVector(),
-            BooksPathPlaneRemoteCompoundVector(),
-            PodcastsPathPlaneVector(),
-            PodcastsPathPlaneRemoteCompoundVector(),
-            TvAppPathPlaneVector(),
-            TvAppPathPlaneRemoteCompoundVector(),
-            HomekitPathPlaneVector(),
-            HomekitPathPlaneRemoteCompoundVector(),
-            HealthPathPlaneVector(),
-            HealthPathPlaneRemoteCompoundVector(),
-            WalletPassPathVector(),
-            WalletPassPathRemoteCompoundVector(),
-            FindmyPathPlaneVector(),
-            FindmyPathPlaneRemoteCompoundVector(),
-            ShortcutsIcloudSyncVector(),
-            ShortcutsIcloudSyncRemoteCompoundVector(),
-            DevicemanagementProfileVector(),
-            DevicemanagementProfileRemoteCompoundVector(),
-            SoftwareupdateCatalogVector(),
-            SoftwareupdateCatalogRemoteCompoundVector(),
+            ProtectionsWeakVector(), UserWritableLaunchAgentsVector(), LOLExecutionChainVector(), InjectSurfaceVector(), CredOrIdentityPivotVector(), RemoteAccessSurfaceVector(), TCCFDAPermissionPivotVector(), PrivilegedHelperSygextVector(), MDMManagementGapVector(), BrowserSessionArtifactPivotVector(), WritablePrivilegedPathsVector(), XPCHelperAbuseSurfaceVector(), PlatformSSOLateralVector(), SecurityProductGapVector(), SystemLaunchDaemonSurfaceVector(), SMAppLoginItemHonestyVector(), SudoersMisconfigSurfaceVector(), PeriodicMaintenanceSurfaceVector(), GatekeeperTrustGapVector(), AutomationExecutionSurfaceVector(), ElectronDevtoolsSurfaceVector(), QuarantineXattrSurfaceVector(), KeychainPathSurfaceVector(), MDMManagementChannelSurfaceVector(), ScreenAccessibilitySurfaceVector(), SecurityCLIDualUseVector(), ESFSensorGapVector(), CVEPatchDebtSuggesterVector(), TCCPermissionGraphDepthVector(), XPCClientValidationSurfaceVector(), LaunchConstraintInjectTruthVector(), LOOBinDualUseMultiStageVector(), NetworkExtensionFilterGapVector(), AuthRightsPrivilegeSurfaceVector(), DeveloperToolchainDualUseVector(), TimeMachineSnapshotAccessVector(), MobileconfigSideloadRiskVector(), SandboxEntitlementThickClientVector(), NotarizationStaplingGapVector(), VirtContainerDualUseVector(), ContinuityAirDropSurfaceVector(), FileVaultEscrowPostureVector(), ClickFixTerminalDeliveryVector(), RemoteAppleEventsLateralVector(), SpotlightAICacheAccessVector(), SecurityMgmtPlaneSurfaceVector(), ThirdPartyTCCInheritanceVector(), SSHAgentKeyPathLateralVector(), PackageKitInstallerDesignVector(), ArchiveQuarantineExtractorVector(), InfoStealerPathPlaneVector(), TCCESFVisibilityDepthVector(), MDMProfileParseDepthVector(),
+        ]
+    }
+
+    private static func wave10Checks() -> [any Check] {
+        [
+            PackageKitReceiptScriptCompoundVector(), ExtractorQuarantineCompoundVector(), StealerRemoteCompoundVector(), VisibilitySensorCompoundVector(), URLSchemeHandlerVector(), LaunchdOverrideDepthVector(), BrowserExtensionDualUseVector(), ShortcutsAppIntentsVector(), URLSchemeRemoteCompoundVector(), LaunchdSecurityDisableCompoundVector(), BrowserExtensionCollectionCompoundVector(), ShortcutsLateralCompoundVector(),
+        ]
+    }
+
+    private static func wave12Checks() -> [any Check] {
+        [
+            WeblocInetlocDeliveryVector(), WeblocRemoteCompoundVector(), MailRulesAutomationVector(), MailRulesScriptCompoundVector(), UnifiedLogObservationVector(), UnifiedLogSensorCompoundVector(), DockPersistenceSurfaceVector(), DockRemoteCompoundVector(), OsascriptScptDeliveryVector(), OsascriptRemoteCompoundVector(), NetworkShareMountVector(), NetworkShareRemoteCompoundVector(),
+        ]
+    }
+
+    private static func wave13Checks() -> [any Check] {
+        [
+            CalendarRemindersAutomationVector(), CalendarRemoteCompoundVector(), GatekeeperAssessmentHistoryVector(), GatekeeperAssessmentRemoteCompoundVector(), HomebrewPackageDualUseVector(), HomebrewRemoteCompoundVector(), CupsPrintDualUseVector(), CupsRemoteCompoundVector(), ScreenCapturePrivacyDualUseVector(), ScreenCaptureFdaCompoundVector(),
+        ]
+    }
+
+    private static func wave14Checks() -> [any Check] {
+        [
+            AutomatorWorkflowVector(), AutomatorWorkflowRemoteCompoundVector(), IcloudDrivePathVector(), IcloudDrivePathRemoteCompoundVector(), BluetoothContinuityDepthVector(), BluetoothContinuityDepthRemoteCompoundVector(), FontValidationDualuseVector(), FontValidationDualuseRemoteCompoundVector(), QuicklookCacheDepthVector(), QuicklookCacheDepthRemoteCompoundVector(), DnsResolverDualuseVector(), DnsResolverDualuseRemoteCompoundVector(), LsQuarantineDbDepthVector(), LsQuarantineDbDepthRemoteCompoundVector(), PamAuthModuleVector(), PamAuthModuleRemoteCompoundVector(), CronAtJobDepthVector(), CronAtJobDepthRemoteCompoundVector(), NotesMetadataPlaneVector(), NotesMetadataPlaneRemoteCompoundVector(),
+        ]
+    }
+
+    private static func wave15Checks() -> [any Check] {
+        [
+            PhotosLibraryPathVector(), PhotosLibraryPathRemoteCompoundVector(), VpnConfigDualuseVector(), VpnConfigDualuseRemoteCompoundVector(), SandboxContainerDepthVector(), SandboxContainerDepthRemoteCompoundVector(), XpcMachServiceDepthVector(), XpcMachServiceDepthRemoteCompoundVector(), TmLocalSnapshotDepthVector(), TmLocalSnapshotDepthRemoteCompoundVector(), EmondLegacyDepthVector(), EmondLegacyDepthRemoteCompoundVector(), ScreenSharingArdDepthVector(), ScreenSharingArdDepthRemoteCompoundVector(), KeychainAclPathVector(), KeychainAclPathRemoteCompoundVector(), PythonRuntimeDualuseVector(), PythonRuntimeDualuseRemoteCompoundVector(), ShellPluginManagerVector(), ShellPluginManagerRemoteCompoundVector(),
+        ]
+    }
+
+    private static func wave16Checks() -> [any Check] {
+        [
+            AirplayReceiverSurfaceVector(), AirplayReceiverSurfaceRemoteCompoundVector(), HandoffClipboardDepthVector(), HandoffClipboardDepthRemoteCompoundVector(), ImessagePathPlaneVector(), ImessagePathPlaneRemoteCompoundVector(), FacetimeCameraSurfaceVector(), FacetimeCameraSurfaceRemoteCompoundVector(), FinderSyncExtensionVector(), FinderSyncExtensionRemoteCompoundVector(), FileproviderDomainVector(), FileproviderDomainRemoteCompoundVector(), NotificationCenterDepthVector(), NotificationCenterDepthRemoteCompoundVector(), SiriSuggestionsPlaneVector(), SiriSuggestionsPlaneRemoteCompoundVector(), SpotlightImporterDepthVector(), SpotlightImporterDepthRemoteCompoundVector(), ContactsPathPlaneVector(), ContactsPathPlaneRemoteCompoundVector(), CalendarServerPathVector(), CalendarServerPathRemoteCompoundVector(), RemindersCloudPathVector(), RemindersCloudPathRemoteCompoundVector(), MapsLocationPathVector(), MapsLocationPathRemoteCompoundVector(), WeatherWidgetPathVector(), WeatherWidgetPathRemoteCompoundVector(), MusicLibraryPathVector(), MusicLibraryPathRemoteCompoundVector(), BooksPathPlaneVector(), BooksPathPlaneRemoteCompoundVector(), PodcastsPathPlaneVector(), PodcastsPathPlaneRemoteCompoundVector(), TvAppPathPlaneVector(), TvAppPathPlaneRemoteCompoundVector(), HomekitPathPlaneVector(), HomekitPathPlaneRemoteCompoundVector(), HealthPathPlaneVector(), HealthPathPlaneRemoteCompoundVector(), WalletPassPathVector(), WalletPassPathRemoteCompoundVector(), FindmyPathPlaneVector(), FindmyPathPlaneRemoteCompoundVector(), ShortcutsIcloudSyncVector(), ShortcutsIcloudSyncRemoteCompoundVector(), DevicemanagementProfileVector(), DevicemanagementProfileRemoteCompoundVector(), SoftwareupdateCatalogVector(), SoftwareupdateCatalogRemoteCompoundVector(),
         ]
     }
 }

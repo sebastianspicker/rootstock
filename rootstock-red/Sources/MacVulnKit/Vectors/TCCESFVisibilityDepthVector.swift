@@ -12,17 +12,33 @@ public struct TCCESFVisibilityDepthVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard hasSurface(state), hasInventory(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
+        let vd = state.tccEsfVisibilityDepth
+        let tcc = vd?.tccDbPathHits.count ?? 0
+        let tools = vd?.visibilityToolPaths.count ?? 0
+        let surface = vd?.visibilitySurfacePresent == true || tcc > 0 || tools > 0
+        let note = state.collectorNotes["collect.tcc_esf_visibility_depth"] != nil
+        return surface || note
+    }
+
+    private func hasInventory(_ state: CollectedState) -> Bool {
+        let vd = state.tccEsfVisibilityDepth
+        let tcc = vd?.tccDbPathHits.count ?? 0
+        let tools = vd?.visibilityToolPaths.count ?? 0
+        let prefs = vd?.privacyPrefPaths.count ?? 0
+        return tcc >= 1 || tools >= 1 || prefs >= 1
+    }
+
+    private func evidence(for state: CollectedState) -> [Evidence] {
         let vd = state.tccEsfVisibilityDepth
         let tcc = vd?.tccDbPathHits.count ?? 0
         let tools = vd?.visibilityToolPaths.count ?? 0
         let prefs = vd?.privacyPrefPaths.count ?? 0
         let depth = vd?.visibilityDepth ?? "unknown"
-        let surface = vd?.visibilitySurfacePresent == true || tcc > 0 || tools > 0
-        let note = state.collectorNotes["collect.tcc_esf_visibility_depth"] != nil
-
-        guard surface || note else { return [] }
-        guard tcc >= 1 || tools >= 1 || prefs >= 1 else { return [] }
-
         let sensorGap = state.esf?.clientPaths.isEmpty == true
         let fda = state.tcc?.fullDiskAccessLikely == true
         let remote =
@@ -54,7 +70,16 @@ public struct TCCESFVisibilityDepthVector: Check {
             )
         )
 
-        // Thin visibility with sensor gap is the interesting path-to-impact; strong visibility is lower severity.
+        return evidence
+    }
+
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let vd = state.tccEsfVisibilityDepth
+        let tools = vd?.visibilityToolPaths.count ?? 0
+        let depth = vd?.visibilityDepth ?? "unknown"
+        let sensorGap = state.esf?.clientPaths.isEmpty == true
+        let fda = state.tcc?.fullDiskAccessLikely == true
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
         let severity: Severity
         if (depth == "thin" || depth == "partial") && sensorGap && remote {
             severity = .high
@@ -66,30 +91,14 @@ public struct TCCESFVisibilityDepthVector: Check {
             severity = .low
         }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: depth == "thin" || depth == "partial"
+        return Finding(id: Self.id, title: depth == "thin" || depth == "partial"
                     ? "TCC/ESF visibility depth is \(depth) - detection-blind collection class"
-                    : "TCC/ESF visibility-depth posture (\(depth))",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1562.001", "T1083", "T1005"],
-                remediation: [
+                    : "TCC/ESF visibility-depth posture (\(depth))", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1562.001", "T1083", "T1005"], remediation: [
                     "Deploy Endpoint Security clients and ensure TCC/FDA grants for security products",
                     "Enable eslogger / Unified Logging pipelines under ROE for purple validation",
                     "Treat unreadable TCC paths as expected without FDA - do not dump rows",
                     "OPSEC: Rootstock Red does not dump TCC.db or unload sensors",
-                ],
-                falsePositiveNotes:
-                    "TCC.db is often unreadable without FDA. Prefer sensor-gap + thin tooling compounds "
-                    + "over single path misses on hardened hosts.",
-                dryRunSafe: true,
-                opsecScore: 22,
-                esfExpected: ["OPEN", "READ"]
-            ),
-        ]
+                ], falsePositiveNotes: "TCC.db is often unreadable without FDA. Prefer sensor-gap + thin tooling compounds "
+                    + "over single path misses on hardened hosts."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 22, esfExpected: ["OPEN", "READ"]))
     }
 }

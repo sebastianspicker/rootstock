@@ -46,26 +46,13 @@ public struct NetworkShareRemoteCompoundVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Network share mount × remote compound"
-                    : "Network share mount × impact compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1021.002", "T1135", "T1080"],
-                remediation: [
+                    : "Network share mount × impact compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1021.002", "T1135", "T1080"], remediation: [
                     "Prioritize hosts co-locating Network share mount with remote/FDA amplifiers",
                     "Use Wave-12 lab plans under ROE for purple validation",
                     "OPSEC: path-to-impact ranking only - not an auto-exploit chain",
-                ],
-                falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first.",
-                dryRunSafe: true,
-                opsecScore: 27,
-                esfExpected: ["OPEN", "EXEC", "READ"]
-            ),
+                ], falsePositiveNotes: "Developer hosts may co-locate many dual-use paths; rank production remote hosts first."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC", "READ"])),
         ]
     }
 }

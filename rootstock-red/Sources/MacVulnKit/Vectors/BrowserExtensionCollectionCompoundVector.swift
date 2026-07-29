@@ -50,26 +50,13 @@ public struct BrowserExtensionCollectionCompoundVector: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: fda
+            Finding(id: Self.id, title: fda
                     ? "Browser extension × collection-impact compound under FDA"
-                    : "Browser extension × multi-browser collection compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1176", "T1555.003", "T1005"],
-                remediation: [
+                    : "Browser extension × multi-browser collection compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1176", "T1555.003", "T1005"], remediation: [
                     "Treat extension roots + FDA as stealer-adjacent collection surface",
                     "Enforce extension allowlists; audit Secure Preferences changes",
                     "OPSEC: no secret export from browser profiles",
-                ],
-                falsePositiveNotes: "Multi-browser enterprises are common; prioritize FDA/remote amplifiers.",
-                dryRunSafe: true,
-                opsecScore: 28,
-                esfExpected: ["OPEN", "READ"]
-            ),
+                ], falsePositiveNotes: "Multi-browser enterprises are common; prioritize FDA/remote amplifiers."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 28, esfExpected: ["OPEN", "READ"])),
         ]
     }
 }

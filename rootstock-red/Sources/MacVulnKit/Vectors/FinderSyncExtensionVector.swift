@@ -15,32 +15,21 @@ public struct FinderSyncExtensionVector: Check {
         let note = state.collectorNotes["collect.finder_sync_extension"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "finder_sync_extension_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "finder_sync_extension_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.finderSyncFrameworkPaths + s.appScriptPaths + s.finderPrefPaths).prefix(10) {
-                evidence.append(Evidence(type: "finder_sync_extension_path", path: path, detail: "Finder Sync dual-use path"))
-            }
-            for n in s.notes.prefix(4) { evidence.append(Evidence(type: "finder_sync_extension_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.finderSyncFrameworkPaths + s.appScriptPaths + s.finderPrefPaths, type: "finder_sync_extension_path", detail: "Finder Sync dual-use path", limit: 10)
+            evidence += VectorEvidence.notes(s.notes, type: "finder_sync_extension_note", limit: 4)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never installs Finder Sync extensions or rewrites Finder preferences for abuse."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "Finder Sync dual-use with remote amplifier" : "Finder Sync extension dual-use surface",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1546", "T1176", "T1059"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "Finder Sync dual-use with remote amplifier" : "Finder Sync extension dual-use surface", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1546", "T1176", "T1059"], remediation: [
                 "Inventory and baseline Finder Sync dual-use paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never installs Finder Sync extensions or rewrites Finder preferences for abuse",
-            ],
-            falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

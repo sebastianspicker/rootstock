@@ -12,6 +12,15 @@ public struct SpotlightAICacheAccessVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard shouldReport(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func shouldReport(_ state: CollectedState) -> Bool {
+        hasSurface(state) && hasImpact(state)
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
         let sp = state.spotlightAICache
         let spotlight = sp?.spotlightPaths.count ?? 0
         let metadata = sp?.metadataFrameworkPaths.count ?? 0
@@ -19,19 +28,27 @@ public struct SpotlightAICacheAccessVector: Check {
         let surface = sp?.dataAccessSurfacePresent == true || spotlight + metadata + aiCache > 0
         let note = state.collectorNotes["collect.spotlight_ai_cache"] != nil
 
-        guard surface || note else { return [] }
+        return surface || note
+    }
 
+    private func hasImpact(_ state: CollectedState) -> Bool {
+        let sp = state.spotlightAICache
+        let spotlight = sp?.spotlightPaths.count ?? 0
+        let metadata = sp?.metadataFrameworkPaths.count ?? 0
         let fda = state.tcc?.fullDiskAccessLikely == true
-        let sensitive =
-            state.browserMeta.contains(where: \.exists)
-            || state.credPaths.contains(where: \.exists)
-        let remote =
-            state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
+        let sensitive = state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists)
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        return fda || sensitive || remote || spotlight + metadata >= 3
+    }
 
-        // Path-to-impact: index/cache surface + (FDA OR sensitive paths OR remote OR substantial inventory)
-        guard fda || sensitive || remote || (spotlight + metadata >= 3) else { return [] }
-
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let sp = state.spotlightAICache
+        let spotlight = sp?.spotlightPaths.count ?? 0
+        let metadata = sp?.metadataFrameworkPaths.count ?? 0
+        let aiCache = sp?.aiCachePathHints.count ?? 0
+        let fda = state.tcc?.fullDiskAccessLikely == true
+        let sensitive = state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists)
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
         var evidence: [Evidence] = [
             Evidence(
                 type: "spotlight_summary",
@@ -57,33 +74,22 @@ public struct SpotlightAICacheAccessVector: Check {
             )
         )
 
-        let severity: Severity = (fda && (sensitive || remote)) ? .medium : .low
+        return evidence
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: fda
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let fda = state.tcc?.fullDiskAccessLikely == true
+        let sensitive = state.browserMeta.contains(where: \.exists) || state.credPaths.contains(where: \.exists)
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
+        let severity: Severity = (fda && (sensitive || remote)) ? .medium : .low
+        return Finding(id: Self.id, title: fda
                     ? "Spotlight/AI-cache data-access class with Full Disk Access likely"
-                    : "Spotlight / mdworker / on-device AI-cache data-access surface",
-                severity: severity,
-                confidence: .low,
-                category: .auth,
-                evidence: evidence,
-                attackTechniques: ["T1005", "T1083", "T1213"],
-                remediation: [
+                    : "Spotlight / mdworker / on-device AI-cache data-access surface", severity: severity, category: .auth, resolution: .init(evidence: evidence, attackTechniques: ["T1005", "T1083", "T1213"], remediation: [
                     "Limit Full Disk Access grants to required security tools only",
                     "Review on-device AI / Intelligence cache policies for high-value hosts",
                     "Monitor mdfind/mdworker abuse patterns via EDR where applicable",
                     "OPSEC: Rootstock Red does not dump indexes or AI cache contents",
-                ],
-                falsePositiveNotes:
-                    "Spotlight and CoreSpotlight frameworks are stock. Prioritize FDA + sensitive "
-                    + "session path compounds for collection-impact narrative.",
-                dryRunSafe: true,
-                opsecScore: 20,
-                tccDomains: fda ? ["FullDiskAccess"] : [],
-                esfExpected: ["OPEN"]
-            ),
-        ]
+                ], falsePositiveNotes: "Spotlight and CoreSpotlight frameworks are stock. Prioritize FDA + sensitive "
+                    + "session path compounds for collection-impact narrative."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 20, tccDomains: fda ? ["FullDiskAccess"] : [], esfExpected: ["OPEN"]))
     }
 }

@@ -38,26 +38,13 @@ public struct ShortcutsLateralCompoundVector: Check {
 
         let severity: Severity = (remote && rae) ? .high : ((remote || rae) ? .medium : .low)
         return [
-            Finding(
-                id: Self.id,
-                title: remote
+            Finding(id: Self.id, title: remote
                     ? "Shortcuts / App Intents × remote lateral compound"
-                    : "Shortcuts / App Intents × automation lateral compound",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1059", "T1559", "T1021"],
-                remediation: [
+                    : "Shortcuts / App Intents × automation lateral compound", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1059", "T1559", "T1021"], remediation: [
                     "Review Shortcuts that invoke scripting/shell on hosts with remote access",
                     "Disable unused Remote Apple Events; constrain automations via MDM",
                     "OPSEC: path-to-impact ranking only",
-                ],
-                falsePositiveNotes: "Shortcuts on laptops with SSH is common for admins; rank unexpected shared automations.",
-                dryRunSafe: true,
-                opsecScore: 27,
-                esfExpected: ["OPEN", "EXEC"]
-            ),
+                ], falsePositiveNotes: "Shortcuts on laptops with SSH is common for admins; rank unexpected shared automations."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 27, esfExpected: ["OPEN", "EXEC"])),
         ]
     }
 }

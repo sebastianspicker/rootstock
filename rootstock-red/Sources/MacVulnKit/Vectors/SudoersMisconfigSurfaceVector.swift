@@ -20,108 +20,153 @@ public struct SudoersMisconfigSurfaceVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
-        let fm = FileManager.default
+        var signals = collectorSignals(in: state)
+        signals.merge(fileSystemSignals(using: FileManager.default))
+        signals.recordDropInWritability(using: FileManager.default)
+        guard signals.isPresent else { return [] }
+
+        var evidence = signals.evidence
+        evidence.append(contentsOf: dropInEvidence(for: signals.dropins))
+        evidence.append(contentsOf: readableFileEvidence(for: signals.readableFiles))
+        let outcome = severityAndTitle(for: signals, state: state)
+        evidence.append(contentsOf: writableEvidence(for: signals.writablePaths))
+        evidence.insert(summaryEvidence(for: signals, state: state), at: 0)
+        return [makeFinding(outcome: outcome, signals: signals, evidence: evidence)]
+    }
+
+    private struct SudoersSignals {
         var evidence: [Evidence] = []
         var readableFiles: [String] = []
-        var writableHits: [String] = []
-        var listedDropins: [String] = []
+        var writablePaths: [String] = []
+        var dropins: [String] = []
+        var collectorNotePresent = false
 
-        // Synthetic / collector-driven signals (tests + future collector).
-        if let note = state.collectorNotes["privesc.sudoers_signals"] {
-            evidence.append(Evidence(type: "collector_note", detail: note))
-            for part in note.split(separator: "|") {
-                let p = String(part).trimmingCharacters(in: .whitespaces)
-                if p.hasPrefix("readable:") {
-                    readableFiles.append(String(p.dropFirst("readable:".count)))
-                } else if p.hasPrefix("writable:") {
-                    writableHits.append(String(p.dropFirst("writable:".count)))
-                } else if p.hasPrefix("nopasswd_hint:") {
-                    evidence.append(
-                        Evidence(type: "nopasswd_hint", detail: String(p.dropFirst("nopasswd_hint:".count)))
-                    )
-                }
-            }
+        var isPresent: Bool {
+            !readableFiles.isEmpty || !writablePaths.isEmpty || !dropins.isEmpty || collectorNotePresent
         }
 
-        for path in Self.probePaths {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }
-            if isDir.boolValue {
-                if fm.isReadableFile(atPath: path) {
-                    evidence.append(Evidence(type: "sudoers_dir", path: path, detail: "readable=true"))
-                    if let kids = try? fm.contentsOfDirectory(atPath: path) {
-                        listedDropins.append(contentsOf: kids.prefix(20).map { "\(path)/\($0)" })
-                    }
-                }
-                if fm.isWritableFile(atPath: path) {
-                    writableHits.append(path)
-                }
-            } else {
-                if fm.isReadableFile(atPath: path) {
-                    readableFiles.append(path)
-                }
-                if fm.isWritableFile(atPath: path) {
-                    writableHits.append(path)
-                }
-            }
+        mutating func merge(_ other: SudoersSignals) {
+            evidence.append(contentsOf: other.evidence)
+            readableFiles.append(contentsOf: other.readableFiles)
+            writablePaths.append(contentsOf: other.writablePaths)
+            dropins.append(contentsOf: other.dropins)
+            collectorNotePresent = collectorNotePresent || other.collectorNotePresent
         }
 
-        for path in listedDropins.prefix(15) {
-            evidence.append(Evidence(type: "sudoers_dropin", path: path, detail: "drop-in present"))
-            if fm.isWritableFile(atPath: path) {
-                writableHits.append(path)
-            }
+        mutating func recordDropInWritability(using fileManager: FileManager) {
+            writablePaths.append(contentsOf: dropins.filter { fileManager.isWritableFile(atPath: $0) })
         }
-        for path in readableFiles.prefix(10) {
-            evidence.append(Evidence(type: "sudoers_file", path: path, detail: "readable=true (content not parsed for secrets)"))
-        }
+    }
 
-        let isRoot = state.host?.isRoot == true
-        let hasSignal =
-            !readableFiles.isEmpty
-            || !writableHits.isEmpty
-            || !listedDropins.isEmpty
-            || state.collectorNotes["privesc.sudoers_signals"] != nil
-        guard hasSignal else { return [] }
-
-        // Path-to-impact: writable is high; readable drop-ins with root/elevated context medium; else low inventory.
-        let severity: Severity
-        let title: String
-        if !writableHits.isEmpty {
-            severity = .critical
-            title = "Sudoers surface: user-writable sudoers path (\(writableHits.count))"
-            for path in writableHits.prefix(10) {
-                evidence.append(Evidence(type: "writable_sudoers", path: path, detail: "writable=true"))
-            }
-        } else if isRoot || state.protections?.sipEnabled == false {
-            severity = .medium
-            title = "Sudoers surface readable under elevated/weak-SIP context"
-        } else if !listedDropins.isEmpty || !readableFiles.isEmpty {
-            severity = .low
-            title = "Sudoers configuration surface present (readable paths - no content exploit)"
-        } else {
-            severity = .low
-            title = "Sudoers misconfig surface signals present"
-        }
-
-        evidence.insert(
-            Evidence(
-                type: "summary",
-                detail:
-                    "readableFiles=\(readableFiles.count) dropins=\(listedDropins.count) "
-                    + "writable=\(writableHits.count) isRoot=\(isRoot) "
-                    + "(assess only - no sudo -l storm, no CVE exploit delivery)"
-            ),
-            at: 0
+    private func collectorSignals(in state: CollectedState) -> SudoersSignals {
+        guard let note = state.collectorNotes["privesc.sudoers_signals"] else { return SudoersSignals() }
+        var signals = SudoersSignals(
+            evidence: [Evidence(type: "collector_note", detail: note)],
+            collectorNotePresent: true
         )
+        for part in note.split(separator: "|") {
+            recordCollectorSignal(String(part).trimmingCharacters(in: .whitespaces), into: &signals)
+        }
+        return signals
+    }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: writableHits.isEmpty ? .low : .medium,
-                category: .misconfig,
+    private func recordCollectorSignal(_ signal: String, into signals: inout SudoersSignals) {
+        if signal.hasPrefix("readable:") {
+            signals.readableFiles.append(String(signal.dropFirst("readable:".count)))
+            return
+        }
+        if signal.hasPrefix("writable:") {
+            signals.writablePaths.append(String(signal.dropFirst("writable:".count)))
+            return
+        }
+        if signal.hasPrefix("nopasswd_hint:") {
+            signals.evidence.append(
+                Evidence(type: "nopasswd_hint", detail: String(signal.dropFirst("nopasswd_hint:".count)))
+            )
+        }
+    }
+
+    private func fileSystemSignals(using fileManager: FileManager) -> SudoersSignals {
+        var signals = SudoersSignals()
+        for path in Self.probePaths {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else { continue }
+            if isDirectory.boolValue {
+                recordDirectorySignal(path, using: fileManager, into: &signals)
+            } else {
+                recordFileSignal(path, using: fileManager, into: &signals)
+            }
+        }
+        return signals
+    }
+
+    private func recordDirectorySignal(_ path: String, using fileManager: FileManager, into signals: inout SudoersSignals) {
+        if fileManager.isReadableFile(atPath: path) {
+            signals.evidence.append(Evidence(type: "sudoers_dir", path: path, detail: "readable=true"))
+            let children = (try? fileManager.contentsOfDirectory(atPath: path)) ?? []
+            signals.dropins.append(contentsOf: children.prefix(20).map { "\(path)/\($0)" })
+        }
+        if fileManager.isWritableFile(atPath: path) {
+            signals.writablePaths.append(path)
+        }
+    }
+
+    private func recordFileSignal(_ path: String, using fileManager: FileManager, into signals: inout SudoersSignals) {
+        if fileManager.isReadableFile(atPath: path) {
+            signals.readableFiles.append(path)
+        }
+        if fileManager.isWritableFile(atPath: path) {
+            signals.writablePaths.append(path)
+        }
+    }
+
+    private func dropInEvidence(for paths: [String]) -> [Evidence] {
+        paths.prefix(15).map { Evidence(type: "sudoers_dropin", path: $0, detail: "drop-in present") }
+    }
+
+    private func readableFileEvidence(for paths: [String]) -> [Evidence] {
+        paths.prefix(10).map {
+            Evidence(type: "sudoers_file", path: $0, detail: "readable=true (content not parsed for secrets)")
+        }
+    }
+
+    private func writableEvidence(for paths: [String]) -> [Evidence] {
+        paths.prefix(10).map { Evidence(type: "writable_sudoers", path: $0, detail: "writable=true") }
+    }
+
+    private func severityAndTitle(for signals: SudoersSignals, state: CollectedState) -> (severity: Severity, title: String) {
+        if !signals.writablePaths.isEmpty {
+            return (.critical, "Sudoers surface: user-writable sudoers path (\(signals.writablePaths.count))")
+        }
+        if state.host?.isRoot == true || state.protections?.sipEnabled == false {
+            return (.medium, "Sudoers surface readable under elevated/weak-SIP context")
+        }
+        if !signals.dropins.isEmpty || !signals.readableFiles.isEmpty {
+            return (.low, "Sudoers configuration surface present (readable paths - no content exploit)")
+        }
+        return (.low, "Sudoers misconfig surface signals present")
+    }
+
+    private func summaryEvidence(for signals: SudoersSignals, state: CollectedState) -> Evidence {
+        Evidence(
+            type: "summary",
+            detail: "readableFiles=\(signals.readableFiles.count) dropins=\(signals.dropins.count) "
+                + "writable=\(signals.writablePaths.count) isRoot=\(state.host?.isRoot == true) "
+                + "(assess only - no sudo -l storm, no CVE exploit delivery)"
+        )
+    }
+
+    private func makeFinding(
+        outcome: (severity: Severity, title: String),
+        signals: SudoersSignals,
+        evidence: [Evidence]
+    ) -> Finding {
+        Finding(
+            id: Self.id,
+            title: outcome.title,
+            severity: outcome.severity,
+            category: .misconfig,
+            resolution: .init(
                 evidence: evidence,
                 attackTechniques: ["T1548.003", "T1548", "T1068"],
                 remediation: [
@@ -130,13 +175,15 @@ public struct SudoersMisconfigSurfaceVector: Check {
                     "Prefer least-privilege group policies over broad admin sudo",
                     "OPSEC: Rootstock Red does not execute sudo exploits or dump sudo -l by default",
                 ],
-                falsePositiveNotes:
-                    "Readable sudoers is common on stock macOS; finding is surface + writability ranking, "
-                    + "not proof of a live privilege-escalation CVE. Content is not fully parsed.",
+                falsePositiveNotes: "Readable sudoers is common on stock macOS; finding is surface + writability ranking, "
+                    + "not proof of a live privilege-escalation CVE. Content is not fully parsed."
+            ),
+            runtime: .init(
+                confidence: signals.writablePaths.isEmpty ? .low : .medium,
                 dryRunSafe: true,
                 opsecScore: 18,
                 esfExpected: ["OPEN"]
-            ),
-        ]
+            )
+        )
     }
 }

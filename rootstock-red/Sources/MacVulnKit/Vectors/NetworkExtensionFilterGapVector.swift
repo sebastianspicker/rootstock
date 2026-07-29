@@ -12,38 +12,59 @@ public struct NetworkExtensionFilterGapVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
-        let ne = state.networkExtension
-        // Enterprise filter hints only - stock pf/ALF must never suppress gap (see collector).
-        let enterpriseFilters = (ne?.contentFilterHints ?? []).filter { hint in
-            let lower = hint.lowercased()
-            return !lower.contains("pf_conf")
-                && !lower.contains("pf_anchors")
-                && !lower.contains("/etc/pf.")
-                && !lower.contains("application_firewall")
-                && !lower.contains("com.apple.alf")
-        }
-        let filterHints = enterpriseFilters.count
-        let vpnPaths = ne?.vpnConfigPaths.count ?? 0
-        let neApps = ne?.neAppPaths.count ?? 0
-        let thinFilter = filterHints == 0 && neApps == 0
+        guard Self.hasThinFilter(state), Self.hasPathToImpact(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
 
-        let remote =
-            state.network?.remoteLoginSSH == true
+
+    private static func hasThinFilter(_ state: CollectedState) -> Bool {
+        let ne = state.networkExtension
+        return (ne?.contentFilterHints ?? []).filter(isEnterpriseFilterHint).isEmpty
+            && (ne?.neAppPaths.isEmpty ?? true)
+    }
+
+    private static func hasPathToImpact(_ state: CollectedState) -> Bool {
+        let vpnPaths = state.networkExtension?.vpnConfigPaths.count ?? 0
+        return remoteAccess(state)
+            || hasHighValueSurface(state)
+            || isGapNoted(in: state.collectorNotes)
+            || vpnPaths > 0
+    }
+
+    private static func remoteAccess(_ state: CollectedState) -> Bool {
+        state.network?.remoteLoginSSH == true
             || state.network?.screenSharingARD == true
-        let highValue =
-            state.credPaths.contains(where: \.exists)
+    }
+
+    private static func hasHighValueSurface(_ state: CollectedState) -> Bool {
+        state.credPaths.contains(where: \.exists)
             || state.identity?.platformSSO == true
             || state.identity?.adBound == true
+    }
 
-        let gapNote = state.collectorNotes["ne.filter_gap"] != nil
-            || state.collectorNotes["collect.network_extension"]?
-                .contains("contentFilter=0") == true
-            || state.collectorNotes["collect.network_extension"]?
-                .contains("filters=0") == true
 
-        let shouldFire = thinFilter && (remote || highValue || gapNote || vpnPaths > 0)
-        guard shouldFire else { return [] }
+    private static func isEnterpriseFilterHint(_ hint: String) -> Bool {
+        let lower = hint.lowercased()
+        return !lower.contains("pf_conf")
+            && !lower.contains("pf_anchors")
+            && !lower.contains("/etc/pf.")
+            && !lower.contains("application_firewall")
+            && !lower.contains("com.apple.alf")
+    }
 
+    private static func isGapNoted(in notes: [String: String]) -> Bool {
+        notes["ne.filter_gap"] != nil
+            || notes["collect.network_extension"]?.contains("contentFilter=0") == true
+            || notes["collect.network_extension"]?.contains("filters=0") == true
+    }
+
+    private func evidence(for state: CollectedState) -> [Evidence] {
+        let ne = state.networkExtension
+        let filterHints = (ne?.contentFilterHints ?? []).filter(Self.isEnterpriseFilterHint).count
+        let vpnPaths = ne?.vpnConfigPaths.count ?? 0
+        let neApps = ne?.neAppPaths.count ?? 0
+        let remote = Self.remoteAccess(state)
+        let highValue = Self.hasHighValueSurface(state)
         var evidence: [Evidence] = [
             Evidence(
                 type: "ne_summary",
@@ -61,6 +82,24 @@ public struct NetworkExtensionFilterGapVector: Check {
                 evidence.append(Evidence(type: "ne_path", path: path, detail: "NE-related path"))
             }
         }
+        appendCompoundEvidence(for: state, remote: remote, highValue: highValue, to: &evidence)
+        evidence.append(
+            Evidence(
+                type: "honesty",
+                detail:
+                    "Path probes miss MDM-deployed filters and in-kernel pf rules. "
+                    + "Thin inventory ≠ proof that network filtering is absent."
+            )
+        )
+        return evidence
+    }
+
+    private func appendCompoundEvidence(
+        for state: CollectedState,
+        remote: Bool,
+        highValue: Bool,
+        to evidence: inout [Evidence]
+    ) {
         if remote {
             evidence.append(
                 Evidence(
@@ -82,41 +121,19 @@ public struct NetworkExtensionFilterGapVector: Check {
                 )
             )
         }
-        evidence.append(
-            Evidence(
-                type: "honesty",
-                detail:
-                    "Path probes miss MDM-deployed filters and in-kernel pf rules. "
-                    + "Thin inventory ≠ proof that network filtering is absent."
-            )
-        )
+    }
 
-        let severity: Severity = (thinFilter && remote) ? .medium : .low
-
-        return [
-            Finding(
-                id: Self.id,
-                title: thinFilter && remote
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let remote = remoteAccess(state)
+        let severity: Severity = remote ? .medium : .low
+        return Finding(id: Self.id, title: remote
                     ? "NetworkExtension gap: thin content-filter inventory with remote access enabled"
-                    : "NetworkExtension / VPN / content-filter posture gap candidate",
-                severity: severity,
-                confidence: .low,
-                category: .network,
-                evidence: evidence,
-                attackTechniques: ["T1562.004", "T1090", "T1021"],
-                remediation: [
+                    : "NetworkExtension / VPN / content-filter posture gap candidate", severity: severity, category: .network, resolution: .init(evidence: evidence, attackTechniques: ["T1562.004", "T1090", "T1021"], remediation: [
                     "Deploy approved content-filter / NE clients via MDM on remotely accessible hosts",
                     "Inventory VPN and packet-tunnel providers against corporate allow-list",
                     "Purple: pair assess findings with expected NE/filter telemetry events",
                     "OPSEC: Rootstock Red never modifies NetworkExtension configuration",
-                ],
-                falsePositiveNotes:
-                    "Many enterprise filters install as system extensions under vendor paths not in the probe catalog.",
-                dryRunSafe: true,
-                opsecScore: 14,
-                esfExpected: ["OPEN", "NW_CONNECTION"]
-            ),
-        ]
+                ], falsePositiveNotes: "Many enterprise filters install as system extensions under vendor paths not in the probe catalog."), runtime: .init(confidence: .low, dryRunSafe: true, opsecScore: 14, esfExpected: ["OPEN", "NW_CONNECTION"]))
     }
 
 }

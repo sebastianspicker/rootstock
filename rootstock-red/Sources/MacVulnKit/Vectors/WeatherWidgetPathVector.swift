@@ -15,32 +15,21 @@ public struct WeatherWidgetPathVector: Check {
         let note = state.collectorNotes["collect.weather_widget_path"] != nil
         guard surface || note else { return [] }
         guard a >= 1 || b >= 1 else { return [] }
-        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
-        let fda = state.tcc?.fullDiskAccessLikely == true
+        let compound = RemoteCompoundSignals(state: state)
         var evidence: [Evidence] = [
-            Evidence(type: "weather_widget_path_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(remote) fda=\(fda)"),
+            Evidence(type: "weather_widget_path_summary", detail: "a=\(a) b=\(b) c=\(c) remote=\(compound.remote) fda=\(compound.fullDiskAccess)"),
         ]
         if let s {
-            for path in (s.weatherAppPaths + s.weatherContainerPaths + s.widgetServicePaths).prefix(10) {
-                evidence.append(Evidence(type: "weather_widget_path_path", path: path, detail: "Weather widget residual path"))
-            }
-            for n in s.notes.prefix(4) { evidence.append(Evidence(type: "weather_widget_path_note", detail: n)) }
+            evidence += VectorEvidence.paths(s.weatherAppPaths + s.weatherContainerPaths + s.widgetServicePaths, type: "weather_widget_path_path", detail: "Weather widget residual path", limit: 10)
+            evidence += VectorEvidence.notes(s.notes, type: "weather_widget_path_note", limit: 4)
         }
         evidence.append(Evidence(type: "honesty", detail: "Assess never dumps weather personalization data or widget timeline contents."))
-        let severity: Severity = (remote && fda && a + b >= 3) ? .high : ((remote || fda || a + b >= 2) ? .medium : .low)
-        return [Finding(
-            id: Self.id,
-            title: remote ? "Weather widget residual with remote amplifier" : "Weather / widget data residual plane",
-            severity: severity, confidence: .medium, category: .misconfig, evidence: evidence,
-            attackTechniques: ["T1005", "T1083", "T1518"],
-            remediation: [
+        let severity = compound.surfaceSeverity(pathPairCount: a + b)
+        return [Finding(id: Self.id, title: compound.remote ? "Weather widget residual with remote amplifier" : "Weather / widget data residual plane", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1005", "T1083", "T1518"], remediation: [
                 "Inventory and baseline Weather widget residual paths via MDM/EDR",
                 "Correlate unexpected co-presence with delivery timelines",
                 "Prioritize hosts with remote/FDA amplifiers",
                 "OPSEC: Rootstock Red never dumps weather personalization data or widget timeline contents",
-            ],
-            falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA.",
-            dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]
-        )]
+            ], falsePositiveNotes: "Stock paths often exist. Elevate multi-path co-presence with remote/FDA."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 25, esfExpected: ["OPEN", "READ", "EXEC"]))]
     }
 }

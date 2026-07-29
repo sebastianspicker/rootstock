@@ -12,23 +12,36 @@ public struct MDMProfileParseDepthVector: Check {
     public init() {}
 
     public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+        guard hasSurface(state), hasInventory(state) else { return [] }
+        return [Self.finding(for: state, evidence: evidence(for: state))]
+    }
+
+    private func hasSurface(_ state: CollectedState) -> Bool {
+        let mp = state.mdmProfileParseDepth
+        let examined = mp?.examinedProfilePaths.count ?? 0
+        let parsed = mp?.parsedProfileCount ?? 0
+        let surface = mp?.parseSurfacePresent == true || examined > 0 || parsed > 0
+        let note = state.collectorNotes["collect.mdm_profile_parse_depth"] != nil
+        return surface || note
+    }
+
+    private func hasInventory(_ state: CollectedState) -> Bool {
+        let mp = state.mdmProfileParseDepth
+        let parsed = mp?.parsedProfileCount ?? 0
+        let examined = mp?.examinedProfilePaths.count ?? 0
+        let unmanaged = state.mdm?.enrolled != true
+        let hasRootNote = mp?.notes.contains(where: { $0.hasPrefix("profile_root:") }) == true
+        return parsed >= 1 || examined >= 1 || (unmanaged && hasRootNote)
+    }
+
+    private func evidence(for state: CollectedState) -> [Evidence] {
         let mp = state.mdmProfileParseDepth
         let examined = mp?.examinedProfilePaths.count ?? 0
         let parsed = mp?.parsedProfileCount ?? 0
         let types = mp?.payloadTypes.count ?? 0
-        let surface = mp?.parseSurfacePresent == true || examined > 0 || parsed > 0
-        let note = state.collectorNotes["collect.mdm_profile_parse_depth"] != nil
-
-        guard surface || note else { return [] }
-
         let unmanaged = state.mdm?.enrolled != true
-        let hasRootNote = mp?.notes.contains(where: { $0.hasPrefix("profile_root:") }) == true
-        // Require real parse/examined profiles, or unmanaged host with profile store roots.
-        guard parsed >= 1 || examined >= 1 || (unmanaged && hasRootNote) else { return [] }
         let sideload = (state.configProfileSideload?.userMobileconfigPaths.count ?? 0) > 0
-        let remote =
-            state.network?.remoteLoginSSH == true
-            || state.network?.screenSharingARD == true
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
 
         var evidence: [Evidence] = [
             Evidence(
@@ -61,6 +74,15 @@ public struct MDMProfileParseDepthVector: Check {
             )
         )
 
+        return evidence
+    }
+
+    private static func finding(for state: CollectedState, evidence: [Evidence]) -> Finding {
+        let parsed = state.mdmProfileParseDepth?.parsedProfileCount ?? 0
+        let examined = state.mdmProfileParseDepth?.examinedProfilePaths.count ?? 0
+        let unmanaged = state.mdm?.enrolled != true
+        let sideload = (state.configProfileSideload?.userMobileconfigPaths.count ?? 0) > 0
+        let remote = state.network?.remoteLoginSSH == true || state.network?.screenSharingARD == true
         let severity: Severity
         if unmanaged && parsed >= 1 && (sideload || remote) {
             severity = .medium
@@ -70,30 +92,14 @@ public struct MDMProfileParseDepthVector: Check {
             severity = .info
         }
 
-        return [
-            Finding(
-                id: Self.id,
-                title: unmanaged && parsed >= 1
+        return Finding(id: Self.id, title: unmanaged && parsed >= 1
                     ? "Parseable mobileconfig profiles on unmanaged host"
-                    : "MDM profile shallow parse depth posture",
-                severity: severity,
-                confidence: .medium,
-                category: .misconfig,
-                evidence: evidence,
-                attackTechniques: ["T1556", "T1484"],
-                remediation: [
+                    : "MDM profile shallow parse depth posture", severity: severity, category: .misconfig, resolution: .init(evidence: evidence, attackTechniques: ["T1556", "T1484"], remediation: [
                     "Block user-installed configuration profiles via MDM where policy allows",
                     "Educate users against opening unsolicited .mobileconfig from email/web",
                     "Inventory PayloadTypes on engagement hosts; remove unexpected VPN/WiFi/PPPC profiles",
                     "OPSEC: Rootstock Red does not install profiles or dump secret payload values",
-                ],
-                falsePositiveNotes:
-                    "Managed fleets may legitimately host many profiles. Prioritize unmanaged hosts "
-                    + "with user-writable .mobileconfig files.",
-                dryRunSafe: true,
-                opsecScore: 16,
-                esfExpected: ["OPEN", "READ"]
-            ),
-        ]
+                ], falsePositiveNotes: "Managed fleets may legitimately host many profiles. Prioritize unmanaged hosts "
+                    + "with user-writable .mobileconfig files."), runtime: .init(confidence: .medium, dryRunSafe: true, opsecScore: 16, esfExpected: ["OPEN", "READ"]))
     }
 }

@@ -12,11 +12,23 @@ public struct KeychainPathSurfaceVector: Check {
 
     public init() {}
 
-    public func evaluate(state: CollectedState, context: EvaluationContext) async throws -> [Finding] {
+    public func evaluate(state: CollectedState, context: EvaluationContext) async throws
+        -> [Finding]
+    {
+        let paths = Self.keychainPaths(for: state)
+        let forced = state.collectorNotes["auth.keychain_paths"] != nil
+        guard !paths.present.isEmpty || forced else { return [] }
+        return [Self.finding(for: state, paths: paths, forced: forced)]
+    }
+
+    private typealias KeychainPath = (kind: String, path: String)
+
+    private static func keychainPaths(for state: CollectedState) -> (
+        present: [KeychainPath], forced: [String]
+    ) {
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.path
-
-        let candidates: [(kind: String, path: String)] = [
+        let candidates: [KeychainPath] = [
             ("login_keychain_db", "\(home)/Library/Keychains/login.keychain-db"),
             ("login_keychain_legacy", "\(home)/Library/Keychains/login.keychain"),
             ("metadata_keychain_db", "\(home)/Library/Keychains/metadata.keychain-db"),
@@ -25,15 +37,10 @@ public struct KeychainPathSurfaceVector: Check {
             ("user_keychains_dir", "\(home)/Library/Keychains"),
             ("system_keychains_dir", "/Library/Keychains"),
         ]
-
-        var present: [(kind: String, path: String)] = []
-        for item in candidates {
-            if fm.fileExists(atPath: item.path) {
-                present.append(item)
-            }
+        var present: [KeychainPath] = []
+        for item in candidates where fm.fileExists(atPath: item.path) {
+            present.append(item)
         }
-
-        // Collector force for tests / deeper collectors (pipe-separated paths).
         var forcedPaths: [String] = []
         if let note = state.collectorNotes["auth.keychain_paths"] {
             for part in note.split(separator: "|") {
@@ -45,99 +52,89 @@ public struct KeychainPathSurfaceVector: Check {
                 }
             }
         }
+        return (present, forcedPaths)
+    }
 
-        let forced = state.collectorNotes["auth.keychain_paths"] != nil
-        guard !present.isEmpty || forced else { return [] }
+    private static func finding(
+        for state: CollectedState,
+        paths: (present: [KeychainPath], forced: [String]),
+        forced: Bool
+    ) -> Finding {
+        let dbHits = databasePaths(in: paths.present)
+        let credCompound = state.credPaths.contains(where: \.exists)
+        let presentation = Self.presentation(dbHits: dbHits, credCompound: credCompound)
+        return Finding(id: Self.id, title: presentation.title, severity: presentation.severity, category: .auth, resolution: .init(evidence: evidence(
+                paths: paths, databasePaths: dbHits, forced: forced, credCompound: credCompound), attackTechniques: ["T1555.001", "T1555", "T1003"], remediation: [
+                "Protect user sessions; require device unlock for keychain access where policy allows",
+                "Prefer hardware-backed credentials / SSO over long-lived keychain secrets when possible",
+                "Monitor anomalous security(1) dump / find-generic-password process trees via EDR",
+                "OPSEC: assess never dumps secrets - path presence only; do not run dump-keychain in RT assess",
+            ], falsePositiveNotes: "login.keychain-db and System.keychain exist on nearly every Mac. Finding is "
+                + "path-to-impact ranking for authorized RT, not proof of compromise."), runtime: .init(confidence: dbHits.isEmpty ? .low : .medium, dryRunSafe: true, opsecScore: 14, esfExpected: ["OPEN"]))
+    }
 
-        // High-value DB files (not just the directory shell).
-        let dbHits = present.filter {
-            $0.path.hasSuffix(".keychain-db")
-                || $0.path.hasSuffix(".keychain")
+    private static func databasePaths(in paths: [KeychainPath]) -> [KeychainPath] {
+        paths.filter {
+            $0.path.hasSuffix(".keychain-db") || $0.path.hasSuffix(".keychain")
                 || $0.kind == "collector_note"
         }
+    }
 
-        var evidence: [Evidence] = [
+    private static func evidence(
+        paths: (present: [KeychainPath], forced: [String]),
+        databasePaths: [KeychainPath],
+        forced: Bool,
+        credCompound: Bool
+    ) -> [Evidence] {
+        var evidence = [
             Evidence(
                 type: "summary",
                 detail:
-                    "keychainPathsPresent=\(present.count) dbLike=\(dbHits.count) forced=\(forced) "
-                    + "(path presence only - no secret material, no dump-keychain)"
-            ),
+                    "keychainPathsPresent=\(paths.present.count) dbLike=\(databasePaths.count) forced=\(forced) "
+                    + "(path presence only - no secret material, no dump-keychain)")
         ]
-        for item in present.prefix(20) {
-            evidence.append(
-                Evidence(
-                    type: "keychain_path",
-                    path: item.path,
-                    detail: "kind=\(item.kind) exists=true (metadata only)"
-                )
-            )
+        evidence += paths.present.prefix(20).map {
+            Evidence(
+                type: "keychain_path", path: $0.path,
+                detail: "kind=\($0.kind) exists=true (metadata only)")
         }
-        if !forcedPaths.isEmpty {
+        if !paths.forced.isEmpty {
             evidence.append(
                 Evidence(
                     type: "collector_note",
-                    detail: "auth.keychain_paths=\(forcedPaths.prefix(10).joined(separator: "|"))"
-                )
+                    detail: "auth.keychain_paths=\(paths.forced.prefix(10).joined(separator: "|"))")
             )
         }
         evidence.append(
             Evidence(
                 type: "opsec_honesty",
-                detail:
-                    "Rootstock Red assess never dumps keychain secrets, never runs "
-                    + "`security dump-keychain` / find-generic-password extraction in this vector"
-            )
-        )
-
-        // Compound with other auth pivots for ranking (not required to fire).
-        let credCompound = state.credPaths.contains(where: \.exists)
+                detail: "Rootstock Red assess never dumps keychain secrets, never runs "
+                    + "`security dump-keychain` / find-generic-password extraction in this vector"))
         if credCompound {
             evidence.append(
                 Evidence(
                     type: "auth_compound",
                     detail:
-                        "cred path surface also present - keychain + file-cred dual store "
-                        + "(still metadata-only)"
-                )
+                        "cred path surface also present - keychain + file-cred dual store (still metadata-only)"
+                ))
+        }
+        return evidence
+    }
+
+    private static func presentation(dbHits: [KeychainPath], credCompound: Bool) -> (
+        severity: Severity, title: String
+    ) {
+        if !dbHits.isEmpty && credCompound {
+            return (
+                .medium, "Keychain path surface: DB files + credential-path pivot (\(dbHits.count))"
             )
         }
-
-        let severity: Severity
-        let title: String
-        if !dbHits.isEmpty && credCompound {
-            severity = .medium
-            title = "Keychain path surface: DB files + credential-path pivot (\(dbHits.count))"
-        } else if !dbHits.isEmpty {
-            severity = .low
-            title = "Keychain path surface: login/system keychain DB paths present (\(dbHits.count))"
-        } else {
-            severity = .low
-            title = "Keychain directory surface present (path inventory only)"
+        if !dbHits.isEmpty {
+            return (
+                .low,
+                "Keychain path surface: login/system keychain DB paths present (\(dbHits.count))"
+            )
         }
-
-        return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: severity,
-                confidence: dbHits.isEmpty ? .low : .medium,
-                category: .auth,
-                evidence: evidence,
-                attackTechniques: ["T1555.001", "T1555", "T1003"],
-                remediation: [
-                    "Protect user sessions; require device unlock for keychain access where policy allows",
-                    "Prefer hardware-backed credentials / SSO over long-lived keychain secrets when possible",
-                    "Monitor anomalous security(1) dump / find-generic-password process trees via EDR",
-                    "OPSEC: assess never dumps secrets - path presence only; do not run dump-keychain in RT assess",
-                ],
-                falsePositiveNotes:
-                    "login.keychain-db and System.keychain exist on nearly every Mac. Finding is "
-                    + "path-to-impact ranking for authorized RT, not proof of compromise.",
-                dryRunSafe: true,
-                opsecScore: 14,
-                esfExpected: ["OPEN"]
-            ),
-        ]
+        return (.low, "Keychain directory surface present (path inventory only)")
     }
 }

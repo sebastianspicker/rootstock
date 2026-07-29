@@ -51,23 +51,10 @@ public struct BTMLoginItemsCheck: Check {
         }
 
         return [
-            Finding(
-                id: Self.id,
-                title: title,
-                severity: .info,
-                confidence: hasBTM ? .medium : .low,
-                category: .persist,
-                evidence: evidence,
-                attackTechniques: ["T1547.015", "T1543.001"],
-                remediation: [
+            Finding(id: Self.id, title: title, severity: .info, category: .persist, resolution: .init(evidence: evidence, attackTechniques: ["T1547.015", "T1543.001"], remediation: [
                     "Review Login Items & Extensions and Background Items in System Settings",
                     "Unexpected BTM entries may indicate persistence; presence alone is not malicious",
-                ],
-                falsePositiveNotes: "BTM store existence is normal on modern macOS after apps register background tasks",
-                dryRunSafe: true,
-                opsecScore: 12,
-                esfExpected: ["OPEN"]
-            ),
+                ], falsePositiveNotes: "BTM store existence is normal on modern macOS after apps register background tasks"), runtime: .init(confidence: hasBTM ? .medium : .low, dryRunSafe: true, opsecScore: 12, esfExpected: ["OPEN"])),
         ]
     }
 }

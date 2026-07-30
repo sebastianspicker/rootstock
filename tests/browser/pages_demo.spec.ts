@@ -1,8 +1,6 @@
 import {execFileSync} from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
-import os from "node:os";
-import path from "node:path";
 
 import {expect, test} from "@playwright/test";
 
@@ -10,10 +8,8 @@ let server: http.Server;
 let origin = "";
 
 test.beforeAll(async () => {
-  const output = path.join(os.tmpdir(), `rootstock-pages-demo-${process.pid}.html`);
-  execFileSync(process.execPath, ["scripts/build-pages-demo.mjs", output]);
-  const html = fs.readFileSync(output, "utf8");
-  fs.rmSync(output);
+  execFileSync(process.execPath, ["scripts/build-pages-demo.mjs"]);
+  const html = fs.readFileSync("graph/generated/pages-demo/index.html", "utf8");
 
   server = http.createServer((_request, response) => {
     response.writeHead(200, {"Content-Type": "text/html; charset=utf-8"});
@@ -56,9 +52,11 @@ test("published demo supports the real static path workflow", async ({page}) => 
   await expect(page.getByRole("heading", {name: "Shared Credential"})).toBeVisible();
 
   if (test.info().project.name === "desktop") {
-    const screenshot = path.resolve("graph/generated/pages-demo/preview-desktop.png");
-    fs.mkdirSync(path.dirname(screenshot), {recursive: true});
-    await page.screenshot({path: screenshot, animations: "disabled", caret: "hide"});
+    await page.screenshot({
+      path: "graph/generated/pages-demo/preview-desktop.png",
+      animations: "disabled",
+      caret: "hide",
+    });
   }
 });
 

@@ -12,6 +12,7 @@
     "bundle:css": "node scripts/bundle-viewer-css.mjs",
     "bundle:js": "esbuild graph/viewer-src/main.ts --bundle --format=iife --platform=browser --target=es2022 --minify --outfile=graph/viewer.bundle.js",
     "bundle": "npm run bundle:css && npm run bundle:js",
+    "demo:build": "node scripts/build-pages-demo.mjs",
     "screenshots:release": "node scripts/capture-release-screenshots.mjs",
     "test:browser": "playwright test --config playwright.config.ts",
     "test:viewer:bundle": "node tests/viewer/viewer_bundle_contract.ts",

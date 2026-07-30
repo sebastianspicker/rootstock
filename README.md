@@ -188,6 +188,10 @@ production template, stylesheet, bundle, evidence dossier, path builder, and
 graph filters without reading a real scan. They do not prove live Neo4j or API
 behavior.
 
+Try the [synthetic static viewer demo](https://sebastianspicker.github.io/rootstock/).
+It uses the same maintained viewer and public fixture, does not connect to a
+Rootstock server, and marks command-capable actions as simulated.
+
 Select a screenshot to open the full-size capture.
 
 | Overview | Evidence dossier |

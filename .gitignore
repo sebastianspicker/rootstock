@@ -12,6 +12,10 @@ DerivedData/
 .vscode/
 *.code-workspace
 .codegraph/
+.agents/
+.claude/
+.codex/
+.continue/
 .serena/
 .impeccable/
 .env
@@ -63,6 +67,7 @@ ralph-prompts/
 /REVIEW.md
 /SECURITY_REVIEW.md
 .kilo/
+/.repowise/
 /docs/superpowers/
 /docs/archive/
 /docs/deprecated/
@@ -117,6 +122,7 @@ trace.zip
 /review.md
 /security_review.md
 /status.md
+/WIP.md
 /*-agent.md
 /*-plan.md
 /*-status.md

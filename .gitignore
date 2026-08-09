@@ -60,6 +60,7 @@ junit*.xml
 *.egg-info/
 .superpowers/
 .worktrees/
+/.cursor/
 .codacy/
 ralph-prompts/
 /AUDIT.md
@@ -74,6 +75,7 @@ ralph-prompts/
 /docs/design-history/
 /docs/private/
 /docs/generated/
+/docs/agent/
 /docs/screenshots/generated/
 /docs/screenshots/raw/
 /docs/screenshots/staging/

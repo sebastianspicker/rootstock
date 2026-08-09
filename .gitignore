@@ -197,3 +197,6 @@ diff.html
 
 # Local generated theme dumps
 /wave*-themes.json
+/.mcp.json
+/work-in-progress/
+/wip/

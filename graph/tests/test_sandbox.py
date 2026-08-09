@@ -26,6 +26,29 @@ TEST_SCAN_ID = "test-sandbox-00000000-0000-0000-0000-000000000001"
 checks = TestCase()
 
 
+def _assert_default_sandbox_profile(profile):
+    for actual, expected, label in (
+        (profile.file_read_rules, [], "file read rules"),
+        (profile.file_write_rules, [], "file write rules"),
+        (profile.mach_lookup_rules, [], "mach lookup rules"),
+        (profile.network_rules, [], "network rules"),
+        (profile.iokit_rules, [], "IOKit rules"),
+        (profile.exception_count, 0, "exception count"),
+        (profile.has_unconstrained_network, False, "unconstrained network"),
+        (profile.has_unconstrained_file_read, False, "unconstrained file read"),
+    ):
+        checks.assertEqual(actual, expected, label)
+
+
+def _assert_sandbox_application(app):
+    checks.assertIsNotNone(app.sandbox_profile)
+    if app.sandbox_profile is not None:
+        checks.assertEqual(
+            (app.sandbox_profile.bundle_id, app.sandbox_profile.has_unconstrained_network),
+            ("com.example.test", True),
+        )
+
+
 class TestSandboxModels:
     def test_sandbox_profile_data_validates(self):
         from models import SandboxProfileData
@@ -58,14 +81,7 @@ class TestSandboxModels:
                 "profile_source": "none",
             }
         )
-        checks.assertEqual(profile.file_read_rules, [])
-        checks.assertEqual(profile.file_write_rules, [])
-        checks.assertEqual(profile.mach_lookup_rules, [])
-        checks.assertEqual(profile.network_rules, [])
-        checks.assertEqual(profile.iokit_rules, [])
-        checks.assertEqual(profile.exception_count, 0)
-        checks.assertIs(profile.has_unconstrained_network, False)
-        checks.assertIs(profile.has_unconstrained_file_read, False)
+        _assert_default_sandbox_profile(profile)
 
     def test_sandbox_profile_missing_required_raises(self):
         from models import SandboxProfileData
@@ -98,9 +114,7 @@ class TestSandboxModels:
                 },
             }
         )
-        checks.assertIsNotNone(app.sandbox_profile)
-        checks.assertEqual(app.sandbox_profile.bundle_id, "com.example.test")
-        checks.assertIs(app.sandbox_profile.has_unconstrained_network, True)
+        _assert_sandbox_application(app)
 
     def test_application_without_sandbox_profile(self):
         from models import ApplicationData

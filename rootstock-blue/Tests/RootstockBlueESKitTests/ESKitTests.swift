@@ -4,6 +4,30 @@ import XCTest
 @testable import RootstockBlueCase
 
 final class ESKitTests: XCTestCase {
+    func testFactoryDefaultAndFalseReturnMockClient() {
+        XCTAssertTrue(LiveESClientFactory.make() is MockESClient)
+        XCTAssertTrue(LiveESClientFactory.make(preferLive: false) is MockESClient)
+    }
+
+    func testFactoryPreferLiveReturnsUnavailableNonMockClient() {
+        let client = LiveESClientFactory.make(preferLive: true)
+
+        XCTAssertFalse(client is MockESClient)
+        XCTAssertEqual(client.counters, LossCounters())
+        XCTAssertTrue(client.pollEvents().isEmpty)
+        client.stop()
+        XCTAssertThrowsError(try client.start(profile: .builtin(.quiet))) { error in
+            guard let rootstockError = error as? RootstockBlueError,
+                  case let .notImplemented(message) = rootstockError else {
+                return XCTFail("Expected RootstockBlueError.notImplemented, got \(error)")
+            }
+            XCTAssertEqual(
+                message,
+                "Live Endpoint Security is unavailable: a signed and entitled ES client is required"
+            )
+        }
+    }
+
     func testMockClientAndMute() throws {
         let client = MockESClient()
         let profile = ESSubscriptionProfile.builtin(.quiet)

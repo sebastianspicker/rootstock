@@ -20,10 +20,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cve_enrichment import (
     EnrichedCveEntry,
+    NVD_API_URL,
+    REQUEST_TIMEOUT,
     _all_registry_cve_ids,
     _cache_age_seconds,
+    _fetch_nvd_single,
     _is_stale,
     _read_cache,
+    _select_nvd_metric_vector,
     _write_cache,
     enrich_registry,
     fetch_epss,
@@ -37,6 +41,46 @@ from cve_reference import CveEntry
 
 
 checks = TestCase()
+
+
+def _assert_epss_entry(result):
+    checks.assertIn("CVE-2024-44133", result)
+    checks.assertEqual(result["CVE-2024-44133"]["epss"], 0.42)
+    checks.assertEqual(result["CVE-2024-44133"]["percentile"], 0.95)
+    checks.assertIn("_fetched_at", result)
+
+
+def _assert_no_enrichment_cache_warning(enriched, caplog):
+    for condition, label in (
+        (len(enriched) > 0, "enriched entries"),
+        ("No enrichment caches found" in caplog.text, "missing-cache warning"),
+        ("CVSS-only" in caplog.text, "CVSS-only warning"),
+    ):
+        checks.assertTrue(condition, label)
+
+
+def _assert_epss_enrichment(entry):
+    checks.assertIsNotNone(entry)
+    checks.assertEqual(entry.epss_score, 0.42)
+    checks.assertEqual(entry.epss_percentile, 0.95)
+
+
+def _assert_status_without_cache(status):
+    for condition, label in (
+        (status["epss"]["cached"] is False, "EPSS cache"),
+        (status["kev"]["cached"] is False, "KEV cache"),
+        (status["registry_cve_count"] > 0, "registry count"),
+    ):
+        checks.assertTrue(condition, label)
+
+
+def _assert_status_with_epss_cache(status):
+    for condition, label in (
+        (status["epss"]["cached"] is True, "EPSS cache"),
+        (status["epss"]["count"] == 1, "EPSS count"),
+        (status["epss"]["stale"] is False, "EPSS staleness"),
+    ):
+        checks.assertTrue(condition, label)
 
 
 def _mock_json_response(payload):
@@ -152,10 +196,7 @@ class TestFetchEpss:
     def test_fetch_from_api(self, tmp_cache_dir, sample_epss_response):
         result = _fetch_with_response(fetch_epss, sample_epss_response)
 
-        checks.assertIn("CVE-2024-44133", result)
-        checks.assertEqual(result["CVE-2024-44133"]["epss"], 0.42)
-        checks.assertEqual(result["CVE-2024-44133"]["percentile"], 0.95)
-        checks.assertIn("_fetched_at", result)
+        _assert_epss_entry(result)
 
     def test_uses_cache_when_fresh(self, tmp_cache_dir):
         fresh_cache = {
@@ -283,6 +324,116 @@ class TestFailLoudRefresh:
         )
 
 
+# ── NVD CVSS vector selection ───────────────────────────────────────────
+
+
+class TestFetchNvdSingle:
+    def test_uses_expected_request_arguments(self):
+        response = _mock_json_response(
+            {
+                "vulnerabilities": [
+                    {
+                        "cve": {
+                            "metrics": {
+                                "cvssMetricV31": [
+                                    {"cvssData": {"vectorString": "CVSS:3.1/AV:N"}}
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+        with patch("cve_enrichment.requests") as mock_requests:
+            mock_requests.get.return_value = response
+            result = _fetch_nvd_single("CVE-2026-0001")
+
+        checks.assertEqual(result, "CVSS:3.1/AV:N")
+        mock_requests.get.assert_called_once_with(
+            NVD_API_URL,
+            params={"cveId": "CVE-2026-0001"},
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status.assert_called_once_with()
+
+    def test_prefers_cvss_v31(self):
+        metrics = {
+            "cvssMetricV30": [{"cvssData": {"vectorString": "CVSS:3.0/AV:L"}}],
+            "cvssMetricV31": [{"cvssData": {"vectorString": "CVSS:3.1/AV:N"}}],
+        }
+
+        checks.assertEqual(_select_nvd_metric_vector(metrics), "CVSS:3.1/AV:N")
+
+    def test_falls_back_to_cvss_v30(self):
+        metrics = {
+            "cvssMetricV31": [],
+            "cvssMetricV30": [{"cvssData": {"vectorString": "CVSS:3.0/AV:L"}}],
+        }
+
+        checks.assertEqual(_select_nvd_metric_vector(metrics), "CVSS:3.0/AV:L")
+
+    @pytest.mark.parametrize(
+        "metrics",
+        [
+            {},
+            {"cvssMetricV31": []},
+            {"cvssMetricV31": [{}]},
+            {"cvssMetricV31": [{"cvssData": {}}]},
+            {"cvssMetricV31": [{"cvssData": {"vectorString": ""}}]},
+        ],
+    )
+    def test_returns_none_for_empty_or_malformed_metrics(self, metrics):
+        checks.assertIsNone(_select_nvd_metric_vector(metrics))
+
+    def test_uses_only_the_first_metric_entry(self):
+        metrics = {
+            "cvssMetricV31": [
+                {"cvssData": {}},
+                {"cvssData": {"vectorString": "CVSS:3.1/AV:N"}},
+            ]
+        }
+
+        checks.assertIsNone(_select_nvd_metric_vector(metrics))
+
+    def test_returns_none_when_response_has_no_vector(self):
+        response = _mock_json_response(
+            {
+                "vulnerabilities": [
+                    {"cve": {"metrics": {"cvssMetricV31": [{"cvssData": {}}]}}}
+                ]
+            }
+        )
+        with patch("cve_enrichment.requests") as mock_requests:
+            mock_requests.get.return_value = response
+            result = _fetch_nvd_single("CVE-2026-0001")
+
+        checks.assertIsNone(result)
+
+    def test_raises_when_requests_is_unavailable(self, monkeypatch):
+        monkeypatch.setattr("cve_enrichment.requests", None)
+
+        with pytest.raises(RuntimeError, match="requests package not installed"):
+            _fetch_nvd_single("CVE-2026-0001")
+
+    def test_propagates_http_status_errors(self):
+        response = _mock_json_response({})
+        response.raise_for_status.side_effect = RuntimeError("NVD unavailable")
+        with patch("cve_enrichment.requests") as mock_requests:
+            mock_requests.get.return_value = response
+            with pytest.raises(RuntimeError, match="NVD unavailable"):
+                _fetch_nvd_single("CVE-2026-0001")
+
+        response.json.assert_not_called()
+
+    def test_propagates_json_errors(self):
+        response = _mock_json_response({})
+        response.json.side_effect = ValueError("invalid JSON")
+        with patch("cve_enrichment.requests") as mock_requests:
+            mock_requests.get.return_value = response
+            with pytest.raises(ValueError, match="invalid JSON"):
+                _fetch_nvd_single("CVE-2026-0001")
+
+
 # ── Enrichment ───────────────────────────────────────────────────────────
 
 
@@ -299,9 +450,7 @@ class TestEnrichRegistry:
         with caplog.at_level(logging.WARNING, logger="cve_enrichment"):
             enriched = enrich_registry()
 
-        checks.assertGreater(len(enriched), 0)
-        checks.assertIn("No enrichment caches found", caplog.text)
-        checks.assertIn("CVSS-only", caplog.text)
+        _assert_no_enrichment_cache_warning(enriched, caplog)
 
     def test_enrichment_with_epss_cache(self, tmp_cache_dir):
         epss_cache = {
@@ -312,9 +461,7 @@ class TestEnrichRegistry:
 
         enriched = enrich_registry()
         entry = enriched.get("CVE-2024-44133")
-        checks.assertIsNotNone(entry)
-        checks.assertEqual(entry.epss_score, 0.42)
-        checks.assertEqual(entry.epss_percentile, 0.95)
+        _assert_epss_enrichment(entry)
 
     def test_enrichment_with_kev_cache(self, tmp_cache_dir):
         kev_cache = {
@@ -352,9 +499,7 @@ class TestEnrichRegistry:
 class TestGetEnrichmentStatus:
     def test_status_no_cache(self, tmp_cache_dir):
         status = get_enrichment_status()
-        checks.assertIs(status["epss"]["cached"], False)
-        checks.assertIs(status["kev"]["cached"], False)
-        checks.assertGreater(status["registry_cve_count"], 0)
+        _assert_status_without_cache(status)
 
     def test_status_with_cache(self, tmp_cache_dir):
         epss_cache = {
@@ -364,9 +509,7 @@ class TestGetEnrichmentStatus:
         _write_cache(tmp_cache_dir / "epss.json", epss_cache)
 
         status = get_enrichment_status()
-        checks.assertIs(status["epss"]["cached"], True)
-        checks.assertEqual(status["epss"]["count"], 1)
-        checks.assertIs(status["epss"]["stale"], False)
+        _assert_status_with_epss_cache(status)
 
 
 # ── Registry CVE ID collection ───────────────────────────────────────────

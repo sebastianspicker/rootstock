@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from unittest import TestCase
 
-from query_runner import cmd_run, graph_completeness
+from query_runner import _parse_params, cmd_run, graph_completeness
 
 
 checks = TestCase()
+
+
+def _assert_query_result(exit_code, output, expected, forbidden=None):
+    checks.assertEqual(exit_code, 0)
+    checks.assertIn(expected, output)
+    if forbidden is not None:
+        checks.assertNotIn(forbidden, output)
 
 
 class FakeResult:
@@ -66,6 +73,33 @@ def critical_query():
         "cve": "",
         "mitre_attack": "",
     }
+
+
+def test_parse_params_coerces_numbers_and_preserves_strings():
+    params = _parse_params(
+        ["count=12", "ratio=1.5", "name=rootstock", "token=first=second"]
+    )
+
+    checks.assertEqual(
+        params,
+        {"count": 12, "ratio": 1.5, "name": "rootstock", "token": "first=second"},
+    )
+
+
+def test_parse_params_warns_for_malformed_argument(capsys):
+    params = _parse_params(["missing-equals"])
+
+    checks.assertEqual(params, {})
+    checks.assertEqual(
+        capsys.readouterr().err,
+        "Warning: ignoring malformed --param 'missing-equals' (expected key=value)\n",
+    )
+
+
+def test_parse_params_supports_empty_keys_values_and_last_duplicate_wins():
+    params = _parse_params(["=", "value=", "duplicate=first", "duplicate=last"])
+
+    checks.assertEqual(params, {"": "", "value": "", "duplicate": "last"})
 
 
 def test_graph_completeness_requires_clean_import_metadata():
@@ -181,9 +215,12 @@ def test_empty_critical_query_is_not_positive_when_import_is_partial(
     )
 
     output = capsys.readouterr().out
-    checks.assertEqual(exit_code, 0)
-    checks.assertIn("No rows returned; graph completeness not verified", output)
-    checks.assertNotIn("positive security result", output)
+    _assert_query_result(
+        exit_code,
+        output,
+        "No rows returned; graph completeness not verified",
+        "positive security result",
+    )
 
 
 def test_empty_critical_query_can_be_positive_when_import_is_complete(
@@ -206,5 +243,4 @@ def test_empty_critical_query_can_be_positive_when_import_is_complete(
     )
 
     output = capsys.readouterr().out
-    checks.assertEqual(exit_code, 0)
-    checks.assertIn("positive security result", output)
+    _assert_query_result(exit_code, output, "positive security result")

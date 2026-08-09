@@ -54,6 +54,67 @@ def _unique_cves_by_id() -> dict[str, CveEntry]:
     return unique
 
 
+def _invalid_cve_ids() -> list[str]:
+    return [
+        cve.cve_id
+        for cve in _registry_cves()
+        if not _CVE_ID_RE.match(cve.cve_id)
+    ]
+
+
+def _invalid_technique_ids() -> list[str]:
+    return [
+        technique.technique_id
+        for context in _REGISTRY.values()
+        for technique in context.techniques
+        if not _TECHNIQUE_ID_RE.match(technique.technique_id)
+    ]
+
+
+def _out_of_range_cvss_scores() -> list[str]:
+    return [
+        f"{cve.cve_id}: {cve.cvss_score}"
+        for cve in _registry_cves()
+        if not 0.0 <= cve.cvss_score <= 10.0
+    ]
+
+
+def _invalid_required_fields(cve: CveEntry) -> list[str]:
+    required = {
+        "title": cve.title,
+        "affected_versions": cve.affected_versions,
+        "description": cve.description,
+        "reference_url": cve.reference_url,
+    }
+    invalid = [
+        f"{cve.cve_id}.{field}" for field, value in required.items() if not value.strip()
+    ]
+    if cve.patched_version is not None and not cve.patched_version.strip():
+        invalid.append(f"{cve.cve_id}.patched_version")
+    if not cve.cwe_ids:
+        invalid.append(f"{cve.cve_id}.cwe_ids")
+    if not cve.reference_url.startswith(("https://", "http://")):
+        invalid.append(f"{cve.cve_id}.reference_url")
+    return invalid
+
+
+def _unresolved_cwe_references() -> list[str]:
+    return [
+        f"{cve.cve_id}: {cwe_id}"
+        for cve in _unique_cves_by_id().values()
+        for cwe_id in cve.cwe_ids
+        if not _CWE_ID_RE.match(cwe_id) or get_cwe(cwe_id) is None
+    ]
+
+
+def _invalid_cve_enum_values(attribute: str, default: str, valid: set[str]) -> list[str]:
+    return [
+        f"{cve.cve_id}: {value}"
+        for cve in _registry_cves()
+        if (value := getattr(cve, attribute, default)) not in valid
+    ]
+
+
 checks = TestCase()
 
 
@@ -69,27 +130,15 @@ class TestRegistryIntegrity:
         checks.assertFalse(missing, f"Categories without techniques: {missing}")
 
     def test_cve_ids_match_format(self):
-        bad = []
-        for ctx in _REGISTRY.values():
-            for cve in ctx.cves:
-                if not _CVE_ID_RE.match(cve.cve_id):
-                    bad.append(cve.cve_id)
-        checks.assertFalse(bad, f"Invalid CVE ID format: {bad}")
+        invalid = _invalid_cve_ids()
+        checks.assertFalse(invalid, f"Invalid CVE ID format: {invalid}")
 
     def test_technique_ids_match_format(self):
-        bad = []
-        for ctx in _REGISTRY.values():
-            for tech in ctx.techniques:
-                if not _TECHNIQUE_ID_RE.match(tech.technique_id):
-                    bad.append(tech.technique_id)
-        checks.assertFalse(bad, f"Invalid technique ID format: {bad}")
+        invalid = _invalid_technique_ids()
+        checks.assertFalse(invalid, f"Invalid technique ID format: {invalid}")
 
     def test_cvss_scores_in_range(self):
-        out_of_range = []
-        for ctx in _REGISTRY.values():
-            for cve in ctx.cves:
-                if not (0.0 <= cve.cvss_score <= 10.0):
-                    out_of_range.append(f"{cve.cve_id}: {cve.cvss_score}")
+        out_of_range = _out_of_range_cvss_scores()
         checks.assertFalse(out_of_range, f"CVSS scores out of range: {out_of_range}")
 
     def test_remediation_priorities_valid(self):
@@ -130,32 +179,15 @@ class TestRegistryIntegrity:
         )
 
     def test_cve_required_fields_populated(self):
-        missing = []
-        for cve in _unique_cves_by_id().values():
-            required = {
-                "title": cve.title,
-                "affected_versions": cve.affected_versions,
-                "description": cve.description,
-                "reference_url": cve.reference_url,
-            }
-            for field, value in required.items():
-                if not value.strip():
-                    missing.append(f"{cve.cve_id}.{field}")
-            if cve.patched_version is not None and not cve.patched_version.strip():
-                missing.append(f"{cve.cve_id}.patched_version")
-            if not cve.cwe_ids:
-                missing.append(f"{cve.cve_id}.cwe_ids")
-            if not cve.reference_url.startswith(("https://", "http://")):
-                missing.append(f"{cve.cve_id}.reference_url")
+        missing = [
+            field
+            for cve in _unique_cves_by_id().values()
+            for field in _invalid_required_fields(cve)
+        ]
         checks.assertFalse(missing, f"Missing or invalid CVE fields: {missing}")
 
     def test_referenced_cwe_ids_resolve(self):
-        unresolved = []
-        for cve in _unique_cves_by_id().values():
-            for cwe_id in cve.cwe_ids:
-                cwe = get_cwe(cwe_id)
-                if not _CWE_ID_RE.match(cwe_id) or cwe is None:
-                    unresolved.append(f"{cve.cve_id}: {cwe_id}")
+        unresolved = _unresolved_cwe_references()
         checks.assertFalse(unresolved, f"Unresolved CWE references: {unresolved}")
 
     def test_cwe_registry_entries_are_populated(self):
@@ -308,22 +340,16 @@ class TestFormatVulnerabilitySummary:
 class TestExploitationStatus:
     def test_all_statuses_are_valid(self):
         """Every CVE in the registry has a valid exploitation_status."""
-        bad = []
-        for ctx in _REGISTRY.values():
-            for cve in ctx.cves:
-                status = getattr(cve, "exploitation_status", "theoretical")
-                if status not in _VALID_EXPLOITATION_STATUSES:
-                    bad.append(f"{cve.cve_id}: {status}")
+        bad = _invalid_cve_enum_values(
+            "exploitation_status", "theoretical", _VALID_EXPLOITATION_STATUSES
+        )
         checks.assertFalse(bad, f"Invalid exploitation statuses: {bad}")
 
     def test_all_complexities_are_valid(self):
         """Every CVE in the registry has a valid attack_complexity."""
-        bad = []
-        for ctx in _REGISTRY.values():
-            for cve in ctx.cves:
-                complexity = getattr(cve, "attack_complexity", "medium")
-                if complexity not in _VALID_ATTACK_COMPLEXITIES:
-                    bad.append(f"{cve.cve_id}: {complexity}")
+        bad = _invalid_cve_enum_values(
+            "attack_complexity", "medium", _VALID_ATTACK_COMPLEXITIES
+        )
         checks.assertFalse(bad, f"Invalid attack complexities: {bad}")
 
     def test_exploitation_icon_values(self):

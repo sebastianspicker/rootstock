@@ -23,6 +23,10 @@ TEST_MARKER = "rootstock-test-esf"
 checks = TestCase()
 
 
+def _assert_monitoring_status(status, gap, gap_count):
+    checks.assertEqual((status["gap"], status["gap_count"]), (gap, gap_count))
+
+
 class TestEsfConstants:
     def test_critical_events_defined(self):
         """Should have a non-empty list of critical ESF events."""
@@ -179,8 +183,7 @@ class TestEsfIntegration(MarkerScopedNeo4jTest):
             infer(session)
 
             status = self._monitoring_status(session, "test-esf-complete")
-            checks.assertIs(status["gap"], False)
-            checks.assertEqual(status["gap_count"], 0)
+            _assert_monitoring_status(status, False, 0)
 
     def test_missing_auth_event_sets_monitoring_gap(self):
         with self.driver.session() as session:
@@ -190,8 +193,7 @@ class TestEsfIntegration(MarkerScopedNeo4jTest):
             infer(session)
 
             status = self._monitoring_status(session, "test-esf-missing-auth")
-            checks.assertIs(status["gap"], True)
-            checks.assertEqual(status["gap_count"], 1)
+            _assert_monitoring_status(status, True, 1)
 
     def test_notify_only_coverage_leaves_auth_gap(self):
         with self.driver.session() as session:

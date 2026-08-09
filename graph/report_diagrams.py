@@ -120,6 +120,18 @@ def _append_attack_path_styles(
             lines.append(f"  style {node_id} fill:#ff9933,color:#fff")
 
 
+def _attack_path_text_fallback(row: dict) -> str:
+    """Render a path as text when it cannot be represented as Mermaid."""
+    names = row.get("node_names") or []
+    rel_types = row.get("rel_types") or []
+    steps: list[str] = []
+    for index, name in enumerate(names):
+        steps.append(f"`{_safe_label(name)}`")
+        if index < len(rel_types):
+            steps.append(f"→ _{_safe_label(rel_types[index])}_ →")
+    return " ".join(steps)
+
+
 def mermaid_attack_paths_block(path_rows: list[dict], max_paths: int = 3) -> str:
     """
     Generate Mermaid diagrams for the top N attack paths.
@@ -133,18 +145,7 @@ def mermaid_attack_paths_block(path_rows: list[dict], max_paths: int = 3) -> str
         hops = row.get("path_length", "?")
         parts.append(f"**Path {i + 1}** ({hops} hop{'s' if hops != 1 else ''})")
         diagram = mermaid_attack_path(row)
-        if diagram:
-            parts.append(diagram)
-        else:
-            # Text fallback for paths that can't be diagrammed
-            names = row.get("node_names") or []
-            rel_types = row.get("rel_types") or []
-            steps: list[str] = []
-            for j, name in enumerate(names):
-                steps.append(f"`{_safe_label(name)}`")
-                if j < len(rel_types):
-                    steps.append(f"→ _{_safe_label(rel_types[j])}_ →")
-            parts.append(" ".join(steps))
+        parts.append(diagram or _attack_path_text_fallback(row))
         parts.append("")
 
     return "\n".join(parts)

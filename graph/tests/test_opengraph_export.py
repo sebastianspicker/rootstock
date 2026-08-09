@@ -1,11 +1,11 @@
 """
-test_opengraph.py - Unit tests for the OpenGraph exporter.
+test_opengraph_export.py - Unit tests for the OpenGraph exporter.
 
 Tests format validation, node ID generation, and type mappings.
 No Neo4j connection required for these tests.
 
 Usage:
-    pytest graph/tests/test_opengraph.py -v
+    pytest graph/tests/test_opengraph_export.py -v
 """
 
 from __future__ import annotations
@@ -288,7 +288,8 @@ class TestTypeMaps:
             },
         )
         checks.assertIsNotNone(node)
-        assert node is not None
+        if node is None:
+            checks.fail("expected family finding node to be exported")
         checks.assertEqual(node["kind"], "rs_RedFinding")
         checks.assertEqual(node["properties"]["source"], "rootstock-red")
         checks.assertTrue(node["properties"]["family_export"])
@@ -308,7 +309,8 @@ class TestTypeMaps:
             rel_props={"family_export": True, "source": "rootstock-blue"},
         )
         checks.assertIsNotNone(edge)
-        assert edge is not None
+        if edge is None:
+            checks.fail("expected host-to-finding edge to be exported")
         checks.assertEqual(edge["kind"], "rs_BlueHasFinding")
         checks.assertIn("Host", edge["source"])
         checks.assertIn("Finding", edge["target"])

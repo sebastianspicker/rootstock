@@ -8,98 +8,46 @@ import XCTest
 final class Wave16MultiPlanePairTests: XCTestCase {
     var relativeRoot: URL { URL(fileURLWithPath: "Fixtures/artifacts/macos_sample") }
     var absoluteRoot: URL { relativeRoot.standardizedFileURL.resolvingSymlinksInPath() }
-    private let wave16IDs = [
-        "AIRPLAYRX",
-        "HANDOFFCB",
-        "IMSGPATH",
-        "FTCAM",
-        "FNDSYNC",
-        "FPDOM",
-        "NOTICTR",
-        "SIRISUG",
-        "SPIMP",
-        "CTPATH",
-        "CALDAV",
-        "REMCLOUD",
-        "MAPSLOC",
-        "WTHRWDG",
-        "MUSLIB",
-        "BKPATH",
-        "PODPATH",
-        "TVPATH",
-        "HKPATH",
-        "HLTHPATH",
-        "WLTPASS",
-        "FMPATH",
-        "SCICLOUD",
-        "MDMPROF",
-        "SUCAT"
-    ]
-    private let wave16HardenControls = [
-        "airplay_receiver_surface",
-        "handoff_clipboard_depth",
-        "imessage_path_plane",
-        "facetime_camera_surface",
-        "finder_sync_extension",
-        "fileprovider_domain",
-        "notification_center_depth",
-        "siri_suggestions_plane",
-        "spotlight_importer_depth",
-        "contacts_path_plane",
-        "calendar_server_path",
-        "reminders_cloud_path",
-        "maps_location_path",
-        "weather_widget_path",
-        "music_library_path",
-        "books_path_plane",
-        "podcasts_path_plane",
-        "tv_app_path_plane",
-        "homekit_path_plane",
-        "health_path_plane",
-        "wallet_pass_path",
-        "findmy_path_plane",
-        "shortcuts_icloud_sync",
-        "devicemanagement_profile",
-        "softwareupdate_catalog"
-    ]
-
     func testPluginRuntimeIncludesWave16Parsers() {
+        let registrations = Wave16ParserRegistry.registrations
         let ids = Set(PluginRuntime().parserIDs())
-        for id in wave16IDs { XCTAssertTrue(ids.contains(id), "missing \(id)") }
+        XCTAssertEqual(registrations.count, 25)
+        XCTAssertEqual(Array(PluginRuntime().parserIDs().suffix(registrations.count)), Wave16ParserRegistry.expectedIDs)
+        XCTAssertEqual(
+            PluginRuntime.defaultForensics().map(\.manifest.id),
+            PluginRuntime.defaultTier1().map(\.manifest.id)
+        )
+        for registration in registrations {
+            let parser = registration.parser()
+            XCTAssertEqual(parser.manifest.id, registration.manifest.id)
+            XCTAssertEqual(parser.manifest.tier, registration.manifest.tier)
+            XCTAssertEqual(parser.manifest.description, registration.manifest.description)
+        }
         XCTAssertTrue(ids.contains("SHELLPLUGINMGR"))
         XCTAssertTrue(ids.contains("PHOTOSLIBRARY"))
     }
 
+    func testWave16RegistryResolvesEveryIDAndWrappersUseItsContract() throws {
+        try XCTSkipIf(!FileManager.default.fileExists(atPath: relativeRoot.path))
+        let registrations = Wave16ParserRegistry.registrations
+        XCTAssertEqual(Set(Wave16ParserRegistry.expectedIDs).count, registrations.count)
+
+        for registration in registrations {
+            let resolved = Wave16ParserRegistry.registration(for: registration.manifest.id)
+            XCTAssertEqual(resolved.manifest.id, registration.manifest.id)
+            XCTAssertEqual(resolved.spec, registration.spec)
+
+            let wrapperEvents = try registration.parser().parse(source: .directory(relativeRoot))
+            let registryEvents = Wave16ParserSupport.parse(source: .directory(relativeRoot), spec: resolved.spec)
+            XCTAssertEqual(wrapperEvents.map(\.fields), registryEvents.map(\.fields), registration.manifest.id)
+            XCTAssertEqual(wrapperEvents.map(\.entityRefs), registryEvents.map(\.entityRefs), registration.manifest.id)
+            XCTAssertEqual(wrapperEvents.map(\.rawRef), registryEvents.map(\.rawRef), registration.manifest.id)
+        }
+    }
+
     func testWave16ParsersEmitEventsFromFixtures() throws {
         try XCTSkipIf(!FileManager.default.fileExists(atPath: relativeRoot.path))
-        let parsers: [any ArtifactParser] = [
-            AirplayReceiverSurfaceParser(),
-            HandoffClipboardDepthParser(),
-            ImessagePathPlaneParser(),
-            FacetimeCameraSurfaceParser(),
-            FinderSyncExtensionParser(),
-            FileproviderDomainParser(),
-            NotificationCenterDepthParser(),
-            SiriSuggestionsPlaneParser(),
-            SpotlightImporterDepthParser(),
-            ContactsPathPlaneParser(),
-            CalendarServerPathParser(),
-            RemindersCloudPathParser(),
-            MapsLocationPathParser(),
-            WeatherWidgetPathParser(),
-            MusicLibraryPathParser(),
-            BooksPathPlaneParser(),
-            PodcastsPathPlaneParser(),
-            TvAppPathPlaneParser(),
-            HomekitPathPlaneParser(),
-            HealthPathPlaneParser(),
-            WalletPassPathParser(),
-            FindmyPathPlaneParser(),
-            ShortcutsIcloudSyncParser(),
-            DevicemanagementProfileParser(),
-            SoftwareupdateCatalogParser()
-        ]
-        for parser in parsers {
+        for parser in Wave16ParserRegistry.parsers {
             let events = try parser.parse(source: .directory(relativeRoot))
             XCTAssertFalse(events.isEmpty, "\(parser.manifest.id)")
             XCTAssertTrue(events.allSatisfy { $0.sourcePlugin == parser.manifest.id })
@@ -114,34 +62,7 @@ final class Wave16MultiPlanePairTests: XCTestCase {
 
     func testRelativeAbsoluteParityWave16() throws {
         try XCTSkipIf(!FileManager.default.fileExists(atPath: relativeRoot.path))
-        let parsers: [any ArtifactParser] = [
-            AirplayReceiverSurfaceParser(),
-            HandoffClipboardDepthParser(),
-            ImessagePathPlaneParser(),
-            FacetimeCameraSurfaceParser(),
-            FinderSyncExtensionParser(),
-            FileproviderDomainParser(),
-            NotificationCenterDepthParser(),
-            SiriSuggestionsPlaneParser(),
-            SpotlightImporterDepthParser(),
-            ContactsPathPlaneParser(),
-            CalendarServerPathParser(),
-            RemindersCloudPathParser(),
-            MapsLocationPathParser(),
-            WeatherWidgetPathParser(),
-            MusicLibraryPathParser(),
-            BooksPathPlaneParser(),
-            PodcastsPathPlaneParser(),
-            TvAppPathPlaneParser(),
-            HomekitPathPlaneParser(),
-            HealthPathPlaneParser(),
-            WalletPassPathParser(),
-            FindmyPathPlaneParser(),
-            ShortcutsIcloudSyncParser(),
-            DevicemanagementProfileParser(),
-            SoftwareupdateCatalogParser()
-        ]
-        for parser in parsers {
+        for parser in Wave16ParserRegistry.parsers {
             let rel = try parser.parse(source: .directory(relativeRoot))
             let abs = try parser.parse(source: .directory(absoluteRoot))
             XCTAssertEqual(rel.count, abs.count, parser.manifest.id)
@@ -150,35 +71,20 @@ final class Wave16MultiPlanePairTests: XCTestCase {
     }
 
     func testHardenAssessSyntheticEmitsTwentyFiveWave16Controls() {
-        let synthetic = HardeningTestFixtures.planeEvents(wave: "wave16", specifications: [
-            .init(plugin: "AIRPLAYRX", eventType: "airplay.receiver", fieldPrefix: "airplayrx", fileName: "airplay_receiver_surface.json", name: "AirPlay receiver dual-use", riskTag: "airplay_surface"),
-            .init(plugin: "HANDOFFCB", eventType: "handoff.clipboard", fieldPrefix: "hdoffcb", fileName: "handoff_clipboard_depth.json", name: "Handoff clipboard depth", riskTag: "handoff_surface"),
-            .init(plugin: "IMSGPATH", eventType: "imessage.path", fieldPrefix: "imsgpath", fileName: "imessage_path_plane.json", name: "iMessage path plane", riskTag: "imessage_surface"),
-            .init(plugin: "FTCAM", eventType: "facetime.camera", fieldPrefix: "ftcam", fileName: "facetime_camera_surface.json", name: "FaceTime camera dual-use", riskTag: "facetime_surface"),
-            .init(plugin: "FNDSYNC", eventType: "finder.sync_ext", fieldPrefix: "fndsync", fileName: "finder_sync_extension.json", name: "Finder Sync dual-use", riskTag: "finder_sync_surface"),
-            .init(plugin: "FPDOM", eventType: "fileprovider.domain", fieldPrefix: "fpdom", fileName: "fileprovider_domain.json", name: "File Provider domain", riskTag: "fileprovider_surface"),
-            .init(plugin: "NOTICTR", eventType: "notification.center", fieldPrefix: "notictr", fileName: "notification_center_depth.json", name: "Notification Center depth", riskTag: "notification_surface"),
-            .init(plugin: "SIRISUG", eventType: "siri.suggestions", fieldPrefix: "sirisug", fileName: "siri_suggestions_plane.json", name: "Siri Suggestions residual", riskTag: "siri_surface"),
-            .init(plugin: "SPIMP", eventType: "spotlight.importer", fieldPrefix: "spimp", fileName: "spotlight_importer_depth.json", name: "Spotlight importer depth", riskTag: "spotlight_importer_surface"),
-            .init(plugin: "CTPATH", eventType: "contacts.path", fieldPrefix: "ctpath", fileName: "contacts_path_plane.json", name: "Contacts path plane", riskTag: "contacts_surface"),
-            .init(plugin: "CALDAV", eventType: "calendar.caldav", fieldPrefix: "caldav", fileName: "calendar_server_path.json", name: "Calendar CalDAV residual", riskTag: "caldav_surface"),
-            .init(plugin: "REMCLOUD", eventType: "reminders.cloud", fieldPrefix: "remcloud", fileName: "reminders_cloud_path.json", name: "Reminders cloud path", riskTag: "reminders_cloud_surface"),
-            .init(plugin: "MAPSLOC", eventType: "maps.location", fieldPrefix: "mapsloc", fileName: "maps_location_path.json", name: "Maps location residual", riskTag: "maps_location_surface"),
-            .init(plugin: "WTHRWDG", eventType: "weather.widget", fieldPrefix: "wthrwdg", fileName: "weather_widget_path.json", name: "Weather widget residual", riskTag: "weather_surface"),
-            .init(plugin: "MUSLIB", eventType: "music.library", fieldPrefix: "muslib", fileName: "music_library_path.json", name: "Music library path", riskTag: "music_surface"),
-            .init(plugin: "BKPATH", eventType: "books.path", fieldPrefix: "bkpath", fileName: "books_path_plane.json", name: "Books path plane", riskTag: "books_surface"),
-            .init(plugin: "PODPATH", eventType: "podcasts.path", fieldPrefix: "podpath", fileName: "podcasts_path_plane.json", name: "Podcasts path plane", riskTag: "podcasts_surface"),
-            .init(plugin: "TVPATH", eventType: "tv.path", fieldPrefix: "tvpath", fileName: "tv_app_path_plane.json", name: "TV.app path plane", riskTag: "tv_surface"),
-            .init(plugin: "HKPATH", eventType: "homekit.path", fieldPrefix: "hkpath", fileName: "homekit_path_plane.json", name: "HomeKit path plane", riskTag: "homekit_surface"),
-            .init(plugin: "HLTHPATH", eventType: "health.path", fieldPrefix: "hlthpath", fileName: "health_path_plane.json", name: "Health path plane", riskTag: "health_surface"),
-            .init(plugin: "WLTPASS", eventType: "wallet.pass", fieldPrefix: "wltpass", fileName: "wallet_pass_path.json", name: "Wallet pass path", riskTag: "wallet_surface"),
-            .init(plugin: "FMPATH", eventType: "findmy.path", fieldPrefix: "fmpath", fileName: "findmy_path_plane.json", name: "Find My path plane", riskTag: "findmy_surface"),
-            .init(plugin: "SCICLOUD", eventType: "shortcuts.icloud", fieldPrefix: "scicloud", fileName: "shortcuts_icloud_sync.json", name: "Shortcuts iCloud sync", riskTag: "shortcuts_icloud_surface"),
-            .init(plugin: "MDMPROF", eventType: "mdm.profile_depth", fieldPrefix: "mdmprof", fileName: "devicemanagement_profile.json", name: "Device management profile", riskTag: "device_mgmt_surface"),
-            .init(plugin: "SUCAT", eventType: "softwareupdate.catalog", fieldPrefix: "sucat", fileName: "softwareupdate_catalog.json", name: "Software Update catalog", riskTag: "softwareupdate_surface"),
-        ])
+        let registrations = Wave16ParserRegistry.registrations
+        let synthetic = HardeningTestFixtures.planeEvents(wave: "wave16", specifications: registrations.map {
+            .init(
+                plugin: $0.manifest.id,
+                eventType: $0.spec.eventType,
+                fieldPrefix: $0.spec.fieldPrefix,
+                fileName: "\($0.spec.fileStem).json",
+                name: $0.hardeningName,
+                riskTag: $0.spec.defaultRiskTag
+            )
+        })
         let findings = HardeningAssessment.assess(events: synthetic)
         let controls = Set(findings.map(\.control))
+        let wave16HardenControls = Set(registrations.map(\.hardeningControl))
         for control in wave16HardenControls {
             XCTAssertTrue(controls.contains(control), "missing \(control)")
         }
@@ -191,35 +97,9 @@ final class Wave16MultiPlanePairTests: XCTestCase {
         let rulesDir = URL(fileURLWithPath: "Content/detections/samples")
         let fixturesDir = rulesDir.appendingPathComponent("fixtures")
         try XCTSkipIf(!FileManager.default.fileExists(atPath: rulesDir.path))
-        let wave16Rules = [
-            "airplay_receiver_surface.yaml",
-            "handoff_clipboard_depth.yaml",
-            "imessage_path_plane.yaml",
-            "facetime_camera_surface.yaml",
-            "finder_sync_extension.yaml",
-            "fileprovider_domain.yaml",
-            "notification_center_depth.yaml",
-            "siri_suggestions_plane.yaml",
-            "spotlight_importer_depth.yaml",
-            "contacts_path_plane.yaml",
-            "calendar_server_path.yaml",
-            "reminders_cloud_path.yaml",
-            "maps_location_path.yaml",
-            "weather_widget_path.yaml",
-            "music_library_path.yaml",
-            "books_path_plane.yaml",
-            "podcasts_path_plane.yaml",
-            "tv_app_path_plane.yaml",
-            "homekit_path_plane.yaml",
-            "health_path_plane.yaml",
-            "wallet_pass_path.yaml",
-            "findmy_path_plane.yaml",
-            "shortcuts_icloud_sync.yaml",
-            "devicemanagement_profile.yaml",
-            "softwareupdate_catalog.yaml"
-        ]
         var hitIDs: [String] = []
-        for name in wave16Rules {
+        for registration in Wave16ParserRegistry.registrations {
+            let name = "\(registration.spec.fileStem).yaml"
             let rule = try RuleLoader.load(from: rulesDir.appendingPathComponent(name))
             let events = try FixtureRunner.loadEvents(from: fixturesDir.appendingPathComponent(rule.fixture))
             let findings = FixtureRunner.evaluate(rule: rule, events: events)
@@ -228,7 +108,89 @@ final class Wave16MultiPlanePairTests: XCTestCase {
             hitIDs.append(rule.id)
         }
         print("WAVE16_DETECTION_RULE_IDS=" + hitIDs.joined(separator: ","))
-        print("WAVE16_HALF_PAIRS=" + String(wave16IDs.count * 2))
+        print("WAVE16_HALF_PAIRS=" + String(Wave16ParserRegistry.registrations.count * 2))
+    }
+
+    func testWave16SupportUsesOnlyTheStableJSONEnvelope() throws {
+        let root = try makeWave16SupportRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let preferences = root.appendingPathComponent("Library/Preferences", isDirectory: true)
+        try FileManager.default.createDirectory(at: preferences, withIntermediateDirectories: true)
+        let artifact = preferences.appendingPathComponent("airplay_receiver_surface.json")
+        let record: [String: Any] = [
+            "path": "/Users/alice/Library/AirPlay/receiver",
+            "tool_path": "/ignored/tool/path",
+            "name": "Receiver",
+            "kind": "ignored-kind",
+            "label": "ignored-label",
+            "notes": "stable note",
+            "risk_tags": "first,password_dump,second",
+            "password": "secret",
+            "token": "secret-token",
+            "url_host": "must-not-propagate.example",
+            "share_url": "smb://must-not-propagate",
+            "depth": "9",
+            "runs_script": true,
+            "tool_present": true,
+        ]
+        try JSONSerialization.data(withJSONObject: ["items": [record, [:]]]).write(to: artifact)
+
+        let events = Wave16ParserSupport.parse(
+            source: .directory(root),
+            spec: try XCTUnwrap(Wave16ParserRegistry.registrations.first?.spec)
+        )
+        XCTAssertEqual(events.count, 1, "canonical discovery and recursive discovery must deduplicate the same path")
+        let event = try XCTUnwrap(events.first)
+        XCTAssertEqual(event.source, .parser)
+        XCTAssertEqual(event.sourcePlugin, "AIRPLAYRX")
+        XCTAssertEqual(event.eventType, "airplay.receiver")
+        XCTAssertEqual(event.entityRefs, [EntityID(kind: .host, value: "airplayrx|Receiver")])
+        XCTAssertEqual(event.rawRef, ArtifactRoot.pathKey(artifact))
+        XCTAssertEqual(event.confidence, 0.88)
+        XCTAssertEqual(event.fields, [
+            "airplayrx.path": "/Users/alice/Library/AirPlay/receiver",
+            "airplayrx.name": "Receiver",
+            "airplayrx.notes": "stable note",
+            "airplayrx.risk_tags": "first,second,airplay_surface",
+            "airplayrx.secrets_exported": "false",
+            FieldTaxonomy.eventType: "airplay.receiver",
+            FieldTaxonomy.userName: "alice",
+        ])
+        let allValues = event.fields.values.joined(separator: " ").lowercased()
+        XCTAssertFalse(allValues.contains("secret"))
+        XCTAssertFalse(event.fields.keys.contains { $0.contains("url_host") || $0.contains("share_url") || $0.contains("depth") || $0.contains("runs_script") || $0.contains("tool_present") })
+    }
+
+    func testWave16SupportReadsJSONLAndRejectsMissingMarkers() throws {
+        let root = try makeWave16SupportRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let logs = root.appendingPathComponent("Library/Logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let artifact = logs.appendingPathComponent("airplay_receiver_surface.jsonl")
+        try [
+            "{\"tool_path\":\"/Library/AirPlay/tool\",\"kind\":\"Tool\",\"risk_tags\":\"observed\"}",
+            "{\"label\":\"Name-only\"}",
+            "{\"token\":\"secret-only\"}",
+            "{}",
+        ].joined(separator: "\n").write(to: artifact, atomically: true, encoding: .utf8)
+
+        let events = Wave16ParserSupport.parse(
+            source: .directory(root),
+            spec: try XCTUnwrap(Wave16ParserRegistry.registrations.first?.spec)
+        )
+        XCTAssertEqual(events.count, 2, "canonical and recursive JSONL discovery must deduplicate the same path")
+        XCTAssertEqual(events[0].fields["airplayrx.path"], "/Library/AirPlay/tool")
+        XCTAssertEqual(events[0].fields["airplayrx.name"], "Tool")
+        XCTAssertEqual(events[0].fields["airplayrx.risk_tags"], "observed,airplay_surface")
+        XCTAssertEqual(events[1].fields["airplayrx.path"], "")
+        XCTAssertEqual(events[1].fields["airplayrx.name"], "Name-only")
+    }
+
+    private func makeWave16SupportRoot() throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wave16-support-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
     }
 
     func testMissingMarkersReturnEmptyWave16() throws {

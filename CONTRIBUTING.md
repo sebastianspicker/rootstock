@@ -25,10 +25,6 @@ the interactive mockup against `scripts/release-screenshot-fixture.mjs`, the
 images must be reviewed for sensitive metadata, and they may live only in
 `docs/screenshots/`.
 
-Benchmark results default to ignored `docs/private/` storage, and release
-binaries default to the ignored root `release/` directory. Do not move either
-into the public documentation tree.
-
 ## Development Setup
 
 ### Prerequisites
@@ -72,6 +68,15 @@ NEO4J_PASSWORD=CHANGE_ME uv run --project graph --locked \
 ```
 
 ## Coding Style
+
+Keep tracked, maintained source, test, and script files at or below 600
+physical lines. Generated bundles, fixture or data files, vendored and build
+content, and archives are excluded. Run the same guard used by CI from the
+repository root:
+
+```bash
+python3 scripts/check-source-size.py --max-lines 600
+```
 
 ### Test organization
 

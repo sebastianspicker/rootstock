@@ -191,3 +191,31 @@ diff.html
 
 # Local generated theme dumps
 /wave*-themes.json
+.agents/
+.claude/
+.codex/
+.cursor/
+.repowise/
+/AGENTS.md
+/CLAUDE.md
+/GEMINI.md
+/AUDIT_LEDGER.md
+/remediation-ledger.md
+/progress.md
+!.env.*.example
+!.env.sample
+!.env.template
+*.pfx
+*.jks
+*.keystore
+*.kdbx
+*.ppk
+secrets.local.*
+credentials.local.*
+.netrc
+.npmrc.local
+target/
+*.local.db
+*.local.sqlite
+*.sqlite3-wal
+*.sqlite3-shm

@@ -331,6 +331,59 @@ extension AttackVectorTests {
         }
     }
 
+    func testAuthDevPrivilegeClusterRuleBranchesAndOrder() async throws {
+        let check = AuthDevPrivilegeClusterCheck()
+        let context = EvaluationContext.assess()
+        let expectedIDs = [
+            "\(AuthDevPrivilegeClusterCheck.id).authdb_packagekit_surface",
+            "\(AuthDevPrivilegeClusterCheck.id).toolchain_on_high_value_host",
+            "\(AuthDevPrivilegeClusterCheck.id).dual_use_with_inject",
+        ]
+
+        let absent = try await check.evaluate(state: CollectedState(), context: context)
+        XCTAssertEqual(absent.map(\.id), [])
+
+        var authdbOnly = CollectedState()
+        authdbOnly.authRights = AuthRightsState(authDbPresent: true)
+        let authdbFindings = try await check.evaluate(state: authdbOnly, context: context)
+        XCTAssertEqual(
+            authdbFindings.map(\.id),
+            [expectedIDs[0]]
+        )
+
+        var toolchainOnly = CollectedState()
+        toolchainOnly.developerToolchain = DeveloperToolchainState(xcodePresent: true)
+        toolchainOnly.identity = IdentityState(adBound: true)
+        let toolchainFindings = try await check.evaluate(state: toolchainOnly, context: context)
+        XCTAssertEqual(
+            toolchainFindings.map(\.id),
+            [expectedIDs[1]]
+        )
+        XCTAssertEqual(
+            toolchainFindings.first?.evidence.last?.detail,
+            "adBound=true platformSSO=unknown credPaths=0"
+        )
+
+        var dualUseOnly = CollectedState()
+        dualUseOnly.developerToolchain = DeveloperToolchainState(xcodePresent: true)
+        dualUseOnly.injectabilityHits = [
+            InjectabilityHit(path: "/tmp/debug.app", getTaskAllow: true),
+        ]
+        let dualUseFindings = try await check.evaluate(state: dualUseOnly, context: context)
+        XCTAssertEqual(
+            dualUseFindings.map(\.id),
+            [expectedIDs[2]]
+        )
+
+        var allRulesPresent = authdbOnly
+        allRulesPresent.developerToolchain = toolchainOnly.developerToolchain
+        allRulesPresent.identity = toolchainOnly.identity
+        allRulesPresent.injectabilityHits = dualUseOnly.injectabilityHits
+        let ordered = try await check.evaluate(state: allRulesPresent, context: context)
+        XCTAssertEqual(ordered.map(\.id), expectedIDs)
+        XCTAssertTrue(ordered.allSatisfy(\.dryRunSafe))
+    }
+
     func testWave6ClustersEmitRankedFindings() async throws {
         let state = Self.syntheticWeakState()
         let ctx = EvaluationContext.assess()

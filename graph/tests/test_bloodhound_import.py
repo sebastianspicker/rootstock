@@ -31,6 +31,20 @@ from bloodhound_import import (
 checks = TestCase()
 
 
+def _assert_archive_contents(result, users, groups, missing):
+    for actual, expected, label in (
+        (len(result["users"]), users, "users"),
+        (len(result["groups"]), groups, "groups"),
+        (result["diagnostics"]["files_missing"], missing, "missing files"),
+    ):
+        checks.assertEqual(actual, expected, label)
+
+
+def _assert_same_identity_query(cypher):
+    for fragment in ("toLower", "SAME_IDENTITY"):
+        checks.assertIn(fragment, cypher)
+
+
 # ── Test data ────────────────────────────────────────────────────────────────
 
 SAMPLE_USERS = {
@@ -150,9 +164,7 @@ class TestParseSharpHoundZip:
             zip_path = _create_test_zip(tmpdir, users=True, groups=False)
             result = parse_sharphound_zip(zip_path)
 
-        checks.assertEqual(len(result["users"]), 3)
-        checks.assertEqual(len(result["groups"]), 0)
-        checks.assertEqual(result["diagnostics"]["files_missing"], ["groups.json"])
+        _assert_archive_contents(result, 3, 0, ["groups.json"])
 
     def test_parse_groups_only_zip(self):
         """Parse a ZIP with only groups.json."""
@@ -160,9 +172,7 @@ class TestParseSharpHoundZip:
             zip_path = _create_test_zip(tmpdir, users=False, groups=True)
             result = parse_sharphound_zip(zip_path)
 
-        checks.assertEqual(len(result["users"]), 0)
-        checks.assertEqual(len(result["groups"]), 2)
-        checks.assertEqual(result["diagnostics"]["files_missing"], ["users.json"])
+        _assert_archive_contents(result, 0, 2, ["users.json"])
 
     def test_parse_empty_zip_raises(self):
         """ZIP without users.json or groups.json should raise ValueError."""
@@ -278,8 +288,7 @@ class TestImportSameIdentityEdges:
         import_same_identity_edges(mock_session)
         call_args = mock_session.run.call_args
         cypher = call_args[0][0]
-        checks.assertIn("toLower", cypher)
-        checks.assertIn("SAME_IDENTITY", cypher)
+        _assert_same_identity_query(cypher)
 
 
 class TestImportADMemberOfEdges:

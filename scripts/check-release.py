@@ -346,15 +346,19 @@ def _forbidden_tracked_paths() -> list[str]:
         path
         for path in git_output("ls-files").splitlines()
         if path
-        if path.startswith(FORBIDDEN_TRACKED_PREFIXES)
-        or (
-            "/" not in path
-            and (
-                path.casefold() in FORBIDDEN_ROOT_BASENAMES
-                or FORBIDDEN_ROOT_ARTIFACT.fullmatch(path)
-            )
-        )
+        if _is_forbidden_tracked_path(path)
     ]
+
+
+def _is_forbidden_tracked_path(path: str) -> bool:
+    if path.startswith(FORBIDDEN_TRACKED_PREFIXES):
+        return True
+    if "/" in path:
+        return False
+    return (
+        path.casefold() in FORBIDDEN_ROOT_BASENAMES
+        or FORBIDDEN_ROOT_ARTIFACT.fullmatch(path) is not None
+    )
 
 
 def _local_root_artifacts() -> list[str]:

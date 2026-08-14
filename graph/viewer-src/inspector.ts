@@ -106,14 +106,6 @@ export function nodeRisk(node: ViewerNode): string {
     : "informational";
 }
 
-export function nodeIcon(kind: string): string {
-  if (/keychain|credential/i.test(kind)) return "●";
-  if (/permission|file|configuration/i.test(kind)) return "◆";
-  if (/recommendation/i.test(kind)) return "✓";
-  if (/launch|persistence/i.test(kind)) return "◇";
-  return ">_";
-}
-
 export function inspectorTabs(...panels: HTMLElement[]): HTMLDivElement {
   const defs = [
     {id: "evidence", label: "Evidence"},
@@ -143,12 +135,7 @@ export function selectInspectorPanel(tabs: HTMLElement, panels: HTMLElement[], a
 }
 
 export function relationshipPanel(controller: Controller, nodeId: NodeId): HTMLElement {
-  const panel = element("section", {
-    class: "prop-section inspector-panel",
-    role: "tabpanel",
-    "data-inspector-panel": "relationships",
-  });
-  panel.hidden = true;
+  const panel = inspectorPanel("relationships");
   panel.appendChild(element("h4", {text: "Relationship summary"}));
   const incoming = controller.state.graph.incoming.get(nodeId) ?? [];
   const outgoing = controller.state.graph.outgoing.get(nodeId) ?? [];
@@ -192,15 +179,20 @@ function connectedRecommendations(controller: Controller, nodeId: NodeId): Viewe
 }
 
 export function remediationPanel(controller: Controller, nodeId: NodeId): HTMLElement {
-  const panel = element("section", {
-    class: "prop-section inspector-panel",
-    role: "tabpanel",
-    "data-inspector-panel": "remediation",
-  });
-  panel.hidden = true;
+  const panel = inspectorPanel("remediation");
   const connected = connectedRecommendations(controller, nodeId);
   appendEmptyRecommendationState(panel, connected.length);
   appendRecommendations(panel, connected);
+  return panel;
+}
+
+function inspectorPanel(name: string): HTMLElement {
+  const panel = element("section", {
+    class: "prop-section inspector-panel",
+    role: "tabpanel",
+    "data-inspector-panel": name,
+  });
+  panel.hidden = true;
   return panel;
 }
 

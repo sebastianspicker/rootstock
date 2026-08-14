@@ -8,7 +8,14 @@ import json
 from pathlib import Path
 
 from conftest import clone_clean_application
-from diff_formatters import format_text, summarize
+from diff_formatters import (
+    _application_lines,
+    _persistence_lines,
+    _physical_posture_lines,
+    format_text,
+    summarize,
+)
+from diff_models import AppDiff, PersistenceDiff, PhysicalPostureDiff, PostureDiff
 from diff_scans import diff_scans
 from models import ScanResult
 
@@ -112,3 +119,116 @@ def test_format_text_app_changes():
 
     checks.assertIn("[+]", output)
     checks.assertIn("com.example.newapp", output)
+
+
+def test_application_lines_render_added_and_removed_entries_exactly():
+    """Application sections retain marker order and trailing blank line."""
+    diff = PostureDiff(
+        apps=AppDiff(
+            added=["com.example.add (Added App)"],
+            removed=["com.example.remove (Removed App)"],
+        )
+    )
+
+    checks.assertEqual(
+        _application_lines(diff),
+        [
+            "=== Application Changes ===",
+            "  [+] com.example.add (Added App)",
+            "  [-] com.example.remove (Removed App)",
+            "",
+        ],
+    )
+
+
+def test_application_lines_render_removed_only_entry_exactly():
+    """Application sections remain present when only removals are reported."""
+    diff = PostureDiff(apps=AppDiff(removed=["com.example.remove (Removed App)"]))
+
+    checks.assertEqual(
+        _application_lines(diff),
+        [
+            "=== Application Changes ===",
+            "  [-] com.example.remove (Removed App)",
+            "",
+        ],
+    )
+
+
+def test_persistence_lines_render_added_and_removed_entries_exactly():
+    """Persistence sections retain marker order and trailing blank line."""
+    diff = PostureDiff(
+        persistence=PersistenceDiff(
+            added=["com.example.add"],
+            removed=["com.example.remove"],
+        )
+    )
+
+    checks.assertEqual(
+        _persistence_lines(diff),
+        [
+            "=== Persistence Changes ===",
+            "  [+] com.example.add",
+            "  [-] com.example.remove",
+            "",
+        ],
+    )
+
+
+def test_persistence_lines_render_added_only_entry_exactly():
+    """Persistence sections remain present when only additions are reported."""
+    diff = PostureDiff(persistence=PersistenceDiff(added=["com.example.add"]))
+
+    checks.assertEqual(
+        _persistence_lines(diff),
+        [
+            "=== Persistence Changes ===",
+            "  [+] com.example.add",
+            "",
+        ],
+    )
+
+
+def test_persistence_lines_render_removed_only_entry_exactly():
+    """Persistence sections remain present when only removals are reported."""
+    diff = PostureDiff(persistence=PersistenceDiff(removed=["com.example.remove"]))
+
+    checks.assertEqual(
+        _persistence_lines(diff),
+        [
+            "=== Persistence Changes ===",
+            "  [-] com.example.remove",
+            "",
+        ],
+    )
+
+
+def test_physical_posture_lines_normalize_keys_and_render_changes_exactly():
+    """Physical posture sections retain normalized labels and trailing blank line."""
+    diff = PostureDiff(
+        physical_posture=PhysicalPostureDiff(
+            changes={
+                "screen_lock_delay": {"before": 5, "after": 0},
+                "external_boot_allowed": {"before": True, "after": False},
+            }
+        )
+    )
+
+    checks.assertEqual(
+        _physical_posture_lines(diff),
+        [
+            "=== Physical Security Posture Changes ===",
+            "  [!] Screen Lock Delay: 5 → 0",
+            "  [!] External Boot Allowed: True → False",
+            "",
+        ],
+    )
+
+
+def test_added_removed_sections_omit_empty_output():
+    """Empty application, persistence, and physical posture sections are omitted."""
+    diff = PostureDiff()
+
+    checks.assertEqual(_application_lines(diff), [])
+    checks.assertEqual(_persistence_lines(diff), [])
+    checks.assertEqual(_physical_posture_lines(diff), [])

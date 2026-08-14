@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from unittest import TestCase
+from unittest.mock import MagicMock
 
 import importlib
 import sys
@@ -14,6 +15,52 @@ def test_import_status_is_complete_only_without_errors_or_skips():
     checks.assertEqual(importer.classify_import_status(0, 0), "complete")
     checks.assertEqual(importer.classify_import_status(1, 0), "partial")
     checks.assertEqual(importer.classify_import_status(0, 1), "partial")
+
+
+def test_query_stats_counts_only_present_labels_and_relationships():
+    importer = importlib.import_module("import_scan")
+    session = MagicMock()
+    session.run.side_effect = [
+        [{"label": "Application"}],
+        [{"label": "Application", "n": 3}],
+        [{"rel_type": "HAS_TCC_GRANT"}],
+        [{"rel_type": "HAS_TCC_GRANT", "n": 5}],
+    ]
+
+    node_counts, rel_counts = importer.query_stats(session)
+
+    checks.assertEqual(node_counts["Application"], 3)
+    checks.assertEqual(rel_counts["HAS_TCC_GRANT"], 5)
+    checks.assertEqual(node_counts["Computer"], 0)
+    checks.assertEqual(rel_counts["CAN_INJECT_INTO"], 0)
+
+    node_schema_call, node_count_call, rel_schema_call, rel_count_call = (
+        session.run.call_args_list
+    )
+    checks.assertIn("CALL db.labels()", node_schema_call.args[0])
+    checks.assertEqual(
+        node_schema_call.kwargs["node_labels"], list(importer._NODE_LABELS)
+    )
+    checks.assertIn("MATCH (n:Application)", node_count_call.args[0])
+    checks.assertNotIn("Computer", node_count_call.args[0])
+    checks.assertIn("CALL db.relationshipTypes()", rel_schema_call.args[0])
+    checks.assertEqual(
+        rel_schema_call.kwargs["relationship_types"], list(importer._REL_TYPES)
+    )
+    checks.assertIn("[r:HAS_TCC_GRANT]", rel_count_call.args[0])
+    checks.assertNotIn("CAN_INJECT_INTO", rel_count_call.args[0])
+
+
+def test_query_stats_skips_count_queries_when_schema_is_empty():
+    importer = importlib.import_module("import_scan")
+    session = MagicMock()
+    session.run.side_effect = [[], []]
+
+    node_counts, rel_counts = importer.query_stats(session)
+
+    checks.assertTrue(all(count == 0 for count in node_counts.values()))
+    checks.assertTrue(all(count == 0 for count in rel_counts.values()))
+    checks.assertEqual(session.run.call_count, 2)
 
 
 def test_partial_import_warns_but_keeps_success_exit(monkeypatch, tmp_path, capsys):

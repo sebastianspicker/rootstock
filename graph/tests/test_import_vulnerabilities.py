@@ -44,6 +44,30 @@ TEST_APP_KEYS = [
 checks = TestCase()
 
 
+def _assert_nonempty_pattern(category, pattern):
+    checks.assertTrue(
+        isinstance(pattern, str) and bool(pattern.strip()),
+        f"Empty pattern for {category}",
+    )
+
+
+def _assert_injectable_fda_pattern(pattern):
+    checks.assertTrue(
+        all(
+            fragment in pattern
+            for fragment in ("kTCCServiceSystemPolicyAllFiles", "injection_methods")
+        ),
+        "Injectable FDA pattern is incomplete",
+    )
+
+
+def _assert_edge_failure(exit_code, captured):
+    checks.assertEqual(
+        (exit_code, "WARNING: 1 vulnerability edge(s) failed" in captured.err),
+        (1, True),
+    )
+
+
 class _FakeDriver:
     def session(self):
         return _FakeSession()
@@ -81,13 +105,11 @@ class TestCategoryMatch:
     def test_match_patterns_are_valid_cypher_fragments(self):
         """Each match pattern should be a non-empty string."""
         for cat, pattern in _CATEGORY_MATCH.items():
-            checks.assertTrue(isinstance(pattern, str))
-            checks.assertGreater(len(pattern.strip()), 0, f"Empty pattern for {cat}")
+            _assert_nonempty_pattern(cat, pattern)
 
     def test_injectable_fda_pattern_checks_fda_and_injection(self):
         pattern = _CATEGORY_MATCH["injectable_fda"]
-        checks.assertIn("kTCCServiceSystemPolicyAllFiles", pattern)
-        checks.assertIn("injection_methods", pattern)
+        _assert_injectable_fda_pattern(pattern)
 
     def test_electron_pattern_uses_child_inherits(self):
         pattern = _CATEGORY_MATCH["electron_inheritance"]
@@ -97,7 +119,7 @@ class TestCategoryMatch:
 # ── Import function signatures ───────────────────────────────────────────
 
 
-class TestImportFunctions:
+class TestImportOrchestration:
     def test_import_all_returns_dict(self):
         """import_all should return a dict with the expected keys."""
         mock_session = MagicMock()
@@ -244,8 +266,7 @@ class TestImportFunctions:
         exit_code = main()
 
         captured = capsys.readouterr()
-        checks.assertEqual(exit_code, 1)
-        checks.assertIn("WARNING: 1 vulnerability edge(s) failed", captured.err)
+        _assert_edge_failure(exit_code, captured)
 
 
 # ── Integration tests (require Neo4j) ────────────────────────────────────

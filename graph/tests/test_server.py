@@ -33,6 +33,13 @@ NON_LOOPBACK_BIND_HOST = ".".join(("0", "0", "0", "0"))
 checks = TestCase()
 
 
+def _assert_error_response(response, status_code, detail):
+    checks.assertEqual(
+        (response.status_code, response.json()["detail"]),
+        (status_code, detail),
+    )
+
+
 class AuthenticatedClient:
     def __init__(self, client):
         self.raw = client
@@ -234,8 +241,7 @@ class TestQueryEndpoints:
         ):
             response = client.post("/api/queries/79/run", json={"params": {}})
 
-        checks.assertEqual(response.status_code, 400)
-        checks.assertEqual(response.json()["detail"], "Query execution failed")
+        _assert_error_response(response, 400, "Query execution failed")
 
     def test_query_execution_preserves_explicit_http_errors(self, client):
         """Explicit API errors should not be relabeled as query failures."""
@@ -245,8 +251,7 @@ class TestQueryEndpoints:
         ):
             response = client.post("/api/queries/79/run", json={"params": {}})
 
-        checks.assertEqual(response.status_code, 503)
-        checks.assertEqual(response.json()["detail"], "Neo4j unavailable")
+        _assert_error_response(response, 503, "Neo4j unavailable")
 
     def test_saved_query_rows_are_limited(self, client):
         rows = [{"n": index} for index in range(1005)]
@@ -270,11 +275,7 @@ class TestQueryEndpoints:
         ):
             response = client.post("/api/queries/fixture/run", json={"params": {}})
 
-        checks.assertEqual(response.status_code, 500)
-        checks.assertEqual(
-            response.json()["detail"],
-            "Configured query is not read-only",
-        )
+        _assert_error_response(response, 500, "Configured query is not read-only")
 
     def test_configured_query_must_not_call_procedures(self, client):
         with patch(
@@ -289,11 +290,7 @@ class TestQueryEndpoints:
         ):
             response = client.post("/api/queries/fixture/run", json={"params": {}})
 
-        checks.assertEqual(response.status_code, 500)
-        checks.assertEqual(
-            response.json()["detail"],
-            "Configured query is not read-only",
-        )
+        _assert_error_response(response, 500, "Configured query is not read-only")
 
     def test_cypher_execution_failure_returns_error_detail(self, client):
         from server import get_read_session

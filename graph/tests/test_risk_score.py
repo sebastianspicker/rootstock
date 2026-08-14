@@ -28,18 +28,33 @@ from infer_risk_score import (
 checks = TestCase()
 
 
+def _assert_nonempty_clause(category, clause):
+    checks.assertTrue(
+        isinstance(clause, str) and bool(clause.strip()),
+        f"Empty check for {category}",
+    )
+
+
+def _assert_injectable_fda_clause(clause):
+    checks.assertTrue(
+        all(
+            fragment in clause
+            for fragment in ("kTCCServiceSystemPolicyAllFiles", "injection_methods")
+        ),
+        "Injectable FDA clause is incomplete",
+    )
+
+
 class TestCategoryChecks:
     def test_category_checks_are_nonempty(self):
         """All category checks should be non-empty Cypher fragments."""
         checks.assertGreater(len(RISK_CATEGORY_PREDICATES), 0)
         for cat, clause in RISK_CATEGORY_PREDICATES.items():
-            checks.assertTrue(isinstance(clause, str))
-            checks.assertGreater(len(clause.strip()), 0, f"Empty check for {cat}")
+            _assert_nonempty_clause(cat, clause)
 
     def test_injectable_fda_checks_fda_grant(self):
         clause = RISK_CATEGORY_PREDICATES["injectable_fda"]
-        checks.assertIn("kTCCServiceSystemPolicyAllFiles", clause)
-        checks.assertIn("injection_methods", clause)
+        _assert_injectable_fda_clause(clause)
 
     def test_file_acl_escalation_uses_user_path_not_impossible_app_edge(self):
         clause = RISK_CATEGORY_PREDICATES["file_acl_escalation"]

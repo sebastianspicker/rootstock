@@ -48,9 +48,11 @@ for (let sample = 0; sample < 2_000; sample += 1) {
   hitDurations.push(performance.now() - started);
 }
 
+state.filters.searchTerm = "synthetic node 9";
+computeVisibility(state);
 const filterDurations: number[] = [];
-for (let sample = 0; sample < 20; sample += 1) {
-  state.filters.searchTerm = sample % 2 ? "synthetic node 9" : "";
+for (let sample = 0; sample < 100; sample += 1) {
+  state.filters.searchTerm = sample % 2 ? "synthetic node 9" : "synthetic node 8";
   const started = performance.now();
   computeVisibility(state);
   filterDurations.push(performance.now() - started);

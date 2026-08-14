@@ -10,6 +10,7 @@ from report_diagrams import (
     format_kill_chain_stage_timeline,
     format_fleet_campaign_dashboard,
     mermaid_attack_path,
+    mermaid_attack_paths_block,
     mermaid_family_findings_block,
     mermaid_tcc_pie,
     sanitize_mermaid_id,
@@ -82,6 +83,75 @@ class TestMermaidAttackPath:
         }
         result = mermaid_attack_path(path_result)
         checks.assertTrue(isinstance(result, str))
+
+
+class TestMermaidAttackPathsBlock:
+    def test_empty_rows_returns_exact_message(self):
+        checks.assertEqual(mermaid_attack_paths_block([]), "_No attack paths found._")
+
+    def test_limits_rows_preserves_order_headings_and_final_blank(self):
+        rows = [
+            {"node_names": ["first"], "rel_types": [], "path_length": 1},
+            {"node_names": ["second"], "rel_types": [], "path_length": 2},
+            {"node_names": ["excluded"], "rel_types": [], "path_length": 3},
+        ]
+
+        result = mermaid_attack_paths_block(rows, max_paths=2)
+
+        checks.assertEqual(
+            result,
+            "**Path 1** (1 hop)\n`first`\n\n"
+            "**Path 2** (2 hops)\n`second`\n",
+        )
+
+    def test_fallback_preserves_mismatched_path_steps(self):
+        result = mermaid_attack_paths_block(
+            [
+                {
+                    "node_names": ["A"],
+                    "rel_types": ["REL", "IGNORED"],
+                    "path_length": 0,
+                }
+            ]
+        )
+
+        checks.assertEqual(result, "**Path 1** (0 hops)\n`A` → _REL_ →\n")
+
+    def test_fallback_escapes_and_truncates_labels(self):
+        result = mermaid_attack_paths_block(
+            [
+                {
+                    "node_names": ['"' + "x" * 30],
+                    "rel_types": ["<" + "r" * 30],
+                    "path_length": 1,
+                }
+            ]
+        )
+
+        checks.assertEqual(
+            result,
+            "**Path 1** (1 hop)\n"
+            "`&#x27;xxxxxxxxxxxxxxxxxxxxxxxxxxxx…` → "
+            "_&lt;rrrrrrrrrrrrrrrrrrrrrrrrrrrr…_ →\n",
+        )
+
+    def test_diagrams_follow_input_order(self):
+        result = mermaid_attack_paths_block(
+            [
+                {
+                    "node_names": ["first-source", "first-target"],
+                    "rel_types": ["FIRST"],
+                    "path_length": 1,
+                },
+                {
+                    "node_names": ["second-source", "second-target"],
+                    "rel_types": ["SECOND"],
+                    "path_length": 1,
+                },
+            ]
+        )
+
+        checks.assertLess(result.index("first-source"), result.index("second-source"))
 
 
 class TestMermaidTccPie:

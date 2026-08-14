@@ -35,6 +35,11 @@ TEST_TECHNIQUE_IDS = ["T9999.900"]
 checks = TestCase()
 
 
+def _assert_threat_group_import_keys(counts):
+    for key in ("threat_groups", "uses_technique"):
+        checks.assertIn(key, counts)
+
+
 class TestThreatGroupDataclass:
     def test_create_basic(self):
         g = ThreatGroup("G0001", "TestGroup")
@@ -211,8 +216,7 @@ class TestImportThreatGroups:
         with patch("import_vulnerabilities.enrich_registry") as mock_enrich:
             mock_enrich.return_value = {}
             counts = import_all(session)
-        checks.assertIn("threat_groups", counts)
-        checks.assertIn("uses_technique", counts)
+        _assert_threat_group_import_keys(counts)
 
 
 # ── Integration tests (require Neo4j) ────────────────────────────────────

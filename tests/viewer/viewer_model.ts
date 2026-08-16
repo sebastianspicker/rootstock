@@ -37,6 +37,18 @@ state.filters.activeNodeKinds.delete("rs_User");
 assert.deepEqual([...computeVisibility(state).nodeIds], ["a"]);
 state.filters.activeNodeKinds.add("rs_User");
 assert.strictEqual(computeVisibility(state), unfilteredVisibility);
+state.selection.focusedId = "a";
+assert.deepEqual([...computeVisibility(state).nodeIds], ["a", "b"]);
+state.selection.path = {
+  active: true,
+  sourceId: "a",
+  targetId: "b",
+  result: {nodeIds: new Set(["b"]), linkKeys: new Set(), orderedNodeIds: ["b"]},
+};
+assert.deepEqual([...computeVisibility(state).nodeIds], ["b"]);
+assert.deepEqual([...computeVisibility(state).linkIndexes], []);
+state.selection.path = {active: false, sourceId: null, targetId: null, result: null};
+state.selection.focusedId = null;
 
 const filteredState = createViewerState({
   graph: {

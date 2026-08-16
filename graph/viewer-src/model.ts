@@ -343,15 +343,21 @@ export function computeVisibility(state: ViewerState): VisibilityResult {
   if (selection.focusedId) {
     return focusedVisibility(graph, selection.focusedId);
   }
-  if (hasAllKinds(filters.activeNodeKinds, graph.kindMeta)
-      && hasAllKinds(filters.activeEdgeKinds, graph.edgeMeta)
-      && !filters.searchTerm
-      && !filters.attackPathsOnly
-      && !filters.vulnerabilitiesOnly) {
+  if (filtersAreUnrestricted(filters, graph)) {
     return unfilteredVisibility(graph);
   }
   const nodeIds = filteredNodeIds(state);
   return {nodeIds, linkIndexes: filteredLinkIndexes(graph, filters, nodeIds)};
+}
+
+function filtersAreUnrestricted(filters: ViewerState["filters"], graph: GraphModel): boolean {
+  return [
+    hasAllKinds(filters.activeNodeKinds, graph.kindMeta),
+    hasAllKinds(filters.activeEdgeKinds, graph.edgeMeta),
+    !filters.searchTerm,
+    !filters.attackPathsOnly,
+    !filters.vulnerabilitiesOnly,
+  ].every(Boolean);
 }
 
 function hasAllKinds(activeKinds: ReadonlySet<string>, knownKinds: ReadonlyMap<string, unknown>): boolean {

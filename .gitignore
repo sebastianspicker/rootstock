@@ -56,7 +56,10 @@ junit*.xml
 *.egg-info/
 .superpowers/
 .worktrees/
-.codacy/
+/.codacy/*
+!/.codacy/codacy.config.json
+!/.codacy/codacy.yaml
+!/.codacy/codacy.yml
 ralph-prompts/
 /AUDIT.md
 /ANALYSIS.md

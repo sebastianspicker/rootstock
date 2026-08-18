@@ -11,10 +11,9 @@ output, graph exports, reports, screenshots, package inventories, tokens,
 hostnames, usernames, or infrastructure details in issues or pull requests.
 Treat Red findings and Blue case packages as confidential in the same way.
 
-The repository has multiple license scopes. Do not infer or assign a license
-to `packages/RootstockMacFacts/`; its licensing is unresolved. See the root
-[README license section](README.md#license) and component license files before
-proposing distribution changes.
+The repository has multiple license scopes. `packages/RootstockMacFacts/` is
+Apache-2.0; see the root [README license section](README.md#license) and each
+component license file before proposing distribution changes.
 
 Benchmark results default to ignored `docs/private/` storage, and release
 binaries default to the ignored root `release/` directory. Do not move either

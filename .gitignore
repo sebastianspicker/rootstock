@@ -10,6 +10,7 @@ xcuserdata/
 DerivedData/
 .idea/
 .vscode/
+/.mcp.json
 *.code-workspace
 .codegraph/
 .serena/

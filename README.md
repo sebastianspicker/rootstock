@@ -319,10 +319,8 @@ This repository contains multiple license scopes:
 - `modules/cve-scan/` uses MIT under its own
   [license](modules/cve-scan/LICENSE);
 - `rootstock-red/` and `rootstock-blue/` use Apache-2.0 under their own license
-  files.
-
-The shared `packages/RootstockMacFacts/` license scope is not yet explicit.
-That ambiguity must be resolved before a public source release containing the
-shared package.
+  files;
+- `packages/RootstockMacFacts/` uses Apache-2.0 under its own
+  [license](packages/RootstockMacFacts/LICENSE).
 
 Citation metadata for the core candidate is in [CITATION.cff](CITATION.cff).

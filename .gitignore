@@ -73,9 +73,6 @@ ralph-prompts/
 /docs/design-history/
 /docs/private/
 /docs/generated/
-/docs/screenshots/generated/
-/docs/screenshots/raw/
-/docs/screenshots/staging/
 /deprecated/
 /archive/
 /private/
@@ -91,14 +88,10 @@ trivy-default.yaml
 /modules/cve-scan/.cache/
 /modules/cve-scan/.cve-scan-cache/
 /test-results/
-/playwright-report/
 /blob-report/
-/.playwright/
 *.har
 trace.zip
 
-# Generated test fixtures
-/tests/fixtures/apps/*.app/
 *.log
 *.tmp
 *.bak
@@ -223,3 +216,16 @@ target/
 *.local.sqlite
 *.sqlite3-wal
 *.sqlite3-shm
+
+# Generated test and coverage output (local only)
+/coverage/
+/htmlcov/
+/.coverage
+/.coverage.*
+/.pytest_cache/
+/test-results/
+/playwright-report/
+/blob-report/
+/coverage.xml
+/junit.xml
+/junit-*.xml

@@ -90,13 +90,6 @@ uv sync --project graph --locked --all-extras
 uv sync --project modules/cve-scan --locked --all-extras
 ```
 
-### Viewer development environment
-
-```bash
-npm ci --no-audit --no-fund --ignore-scripts
-npx --no-install playwright install chromium
-```
-
 ## Configuration
 
 The core graph uses these environment variables:
@@ -180,31 +173,6 @@ NEO4J_PASSWORD=CHANGE_ME uv run --project graph --locked \
 The [synthetic examples](examples/README.md) can be used without collecting a
 real host. Reports and viewer files belong under ignored output directories.
 
-## Interface screenshots
-
-These images are Playwright captures of the maintained Graphite Laboratory
-viewer using the public seven-node synthetic fixture. They exercise the
-production template, stylesheet, bundle, evidence dossier, path builder, and
-graph filters without reading a real scan. They do not prove live Neo4j or API
-behavior.
-
-Try the [synthetic static viewer demo](https://sebastianspicker.github.io/rootstock/).
-It uses the same maintained viewer and public fixture, does not connect to a
-Rootstock server, and marks command-capable actions as simulated.
-
-Select a screenshot to open the full-size capture.
-
-| Overview | Evidence dossier |
-|---|---|
-| [![Synthetic Paths workspace overview](docs/screenshots/viewer-overview.png)](docs/screenshots/viewer-overview.png) | [![Synthetic Full Disk Access evidence dossier](docs/screenshots/viewer-node-inspector.png)](docs/screenshots/viewer-node-inspector.png) |
-
-| Modeled path | Risk filter |
-|---|---|
-| [![Synthetic two-hop modeled path](docs/screenshots/viewer-attack-path.png)](docs/screenshots/viewer-attack-path.png) | [![Synthetic attack-path and vulnerability filters](docs/screenshots/viewer-risk-filter.png)](docs/screenshots/viewer-risk-filter.png) |
-
-Capture instructions and privacy rules are in
-[docs/screenshots/README.md](docs/screenshots/README.md).
-
 ## Development and validation
 
 Run the component checks affected by a change. The complete local candidate
@@ -236,33 +204,15 @@ uv run --project graph --locked \
 # cve-scan
 (cd modules/cve-scan && uv run --locked ruff check . && uv run --locked pytest)
 
-# Viewer
+# Viewer build
 npm run typecheck
 npm run bundle
-npm run test:viewer:unit
-npm run test:viewer:bundle
-npm run test:viewer:performance
-npm run test:browser
-
-# Script contracts
-bash tests/scripts/test_benchmark.sh
 
 # Release structure
 python3 scripts/check-release.py
 ```
 
-The Neo4j-required lane is separate:
-
-```bash
-(cd graph && ROOTSTOCK_REQUIRE_NEO4J=1 NEO4J_PASSWORD=CHANGE_ME \
-  uv run --locked pytest tests -v --tb=short)
-NEO4J_PASSWORD=CHANGE_ME uv run --project graph --locked \
-  bash tests/integration/test_full_pipeline.sh
-```
-
-Do not generalize fast tests into live graph verification if this lane did not
-run. See [Quality gates](docs/QUALITY.md) and
-[Release procedure](docs/RELEASING.md).
+See [Quality gates](docs/QUALITY.md) and [Release procedure](docs/RELEASING.md).
 
 ## Repository structure
 
@@ -274,11 +224,6 @@ packages/RootstockMacFacts Shared read-only macOS vocabulary
 rootstock-red/              Assessment and gated lab Swift packages
 rootstock-blue/             DFIR and incident-response Swift packages
 examples/                  Synthetic contract fixtures
-tests/browser/             Playwright end-to-end tests
-tests/integration/         Cross-component integration tests
-tests/scripts/             Repository script contract tests
-tests/viewer/              Viewer unit, bundle, and performance contracts
-tests/fixtures/            Generators for cross-package test fixtures
 docs/                      Maintained public documentation
 scripts/                   Validation, operational, release, and screenshot tools
 ```
